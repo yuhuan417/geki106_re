@@ -811,9 +811,14 @@ class Pages:
     def page2_finish(self) -> None:
         # 0x452F80：0x44FDD0(MIDI) → 0x45A510(计时器) → 0x44D200(0xB4)+present ×2
         #          → 0x44CEE0 → 0x45B070 → 0x100/0x200→页0、0x10000→页3、else→页0xFF
+        # 0x452F83 0x44FDD0(0x4AB514) = 停 DirectMusic（复刻版无音频，仅记日志）
+        # 0x452FA7 0x44D200(0xB4) → 0x458CB0(present) → 0x44D200(0xB4) → 0x458CB0(present)
+        self.log("page2.finish：停 MIDI（0x44FDD0）+ 两次整屏黑 + present")
         self.timer.kill()
         self.canvas.fill(0xB4)
+        self.present()
         self.canvas.fill(0xB4)
+        self.present()
         self.p2_stream = None
         r = self.flags.lowest()
         if r in (0x100, 0x200):
