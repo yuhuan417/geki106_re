@@ -1030,14 +1030,13 @@ class Pages:
         [ent+0x24] += 8，到 0 后停（0x42775C 重设步进/推进状态，本复刻到淡入完成即止）。
         """
         if e.t == 0:
-            e.a3 = 0                      # 0xFFFFFF00 & 0xFF
-            e.aux = -256
-        self.fade_to(e.aux, 0)
-        e.aux = min(0, e.aux + 8)
+            e.aux = -256                  # [ent+0x24] = 0xFFFFFF00
+        self.fade_to(e.aux, 0)            # 0x44DC10(mgr, [ent+0x24], 0)
         e.t += 1
-        if e.aux == 0:
+        if e.aux >= 0:                    # 已经到 0 → 本帧把 0 应用上去后结束
             e.alive = False
-            self.log("page3 淡入完成（亮度 -256 → 0）")
+            return
+        e.aux = min(0, e.aux + 8)         # [ent+0x28] = 8
 
     # 0x4255D0（0x5F000005 = 菜单总控）：状态机 [ent+0x1C] 0..4，跳表 0x42583C
     def _menu_root(self, e: UiEntity) -> None:
@@ -1113,6 +1112,23 @@ class Pages:
                 ecx = int(sky[i][0])
                 if ecx > t:
                     break
+
+        # 明暗脉冲表（0x43FE77）：每个到期项生成 0x61000005（0x427385）
+        #   a=[esp] 的 i16：=0 → 行为 0x427710 的 `test eax,eax; je` 走"只恢复快照"分支；
+        #   ≠0 → 该帧起 亮度 [ent+0x24] 从 0xFFFFFF00(-256) 每帧 +8（32 帧）→ 0x44DC10(mgr, 值, 0)
+        for (tt, fa, fb, fc) in p2.get("flash", []):
+            if t == int(tt):
+                va = int(fa)
+                if va >= 0x8000:
+                    va -= 0x10000
+                if va != 0:
+                    e2 = self.spawn(self.ui52c, 0x61000005)
+                    e2.beh = "fade_in"
+                    e2.aux = -256
+                    e2.t = 1
+                    self.log(f"page2 t={t} 脉冲 a={va} c={int(fc) & 0xFF}")
+                else:
+                    self.log(f"page2 t={t} 节奏点（a=0，只恢复快照）c={int(fc) & 0xFF}")
 
         # 0x456240(seq, speed, frames)：t=0x899 → (-40,12)、t=0xB93 → (-28,17)
         # （速度是**负**的：0x4560C0 里 `if ([seq+0xC] <= 0) return` ⇒ 滚动量变负时不吞带，

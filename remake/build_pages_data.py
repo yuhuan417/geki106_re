@@ -65,6 +65,20 @@ PAGE2_COPY = [
 PAGE2_WINDOWS = [
     (-0x15E, -0x15B), (0x408, 0x4B3), (0x810, 0xA13), (0xAC0, 0xC6D), (0xD1A, 0x10CB),
 ]
+# 明暗脉冲表：0x43FE77 循环消费，8 字节项 {i16 t, i16 a, i16 b, u8 c}
+#   每个到期项 → 0x430400(&out, a, b, 0x61000005, c) → 0x427385 ctor：
+#   [ent+0x1C]=(a+0xF)<<5（寿命/分支低位）、[ent+0x20]=a（=0 时跳过脉冲）、
+#   [ent+0x24]=0xFFFFFF00（亮度，从 -256 每帧 +8 到 0）、[ent+0x28]=8、0x459AB0(0x56B95C, c)
+PAGE2_FLASH = [
+    (-420, 0xFF01, 0, 4), (-120, 0, 0xFF01, 0xFC), (0, 0xFF01, 0, 2),
+    (170, 0xFF, 0, 0xF0), (202, 0xFF, 0, 0xF0), (234, 0xFF, 0, 0xF0),
+    (256, 0xFF, 0xFF01, 0xFC), (516, 0xFF01, 0, 4), (860, 0, 0xFF01, 0xFC),
+    (1030, 0, 0, 1), (1376, 0xFF01, 0, 0x10), (1530, 0, 0xFF01, 0xF0),
+    (1548, 0xFF01, 0, 0x10), (1704, 0, 0xFF01, 0xF0), (1720, 0xFF01, 0, 0x10),
+    (1876, 0, 0xFF01, 0xF0), (1894, 0, 0, 1), (2062, 0xFF, 0, 0xFC),
+    (2836, 0xFF, 0, 0xFC), (4008, 0, 0xFF, 8), (4042, 0, 0, 8), (4268, 0, 0xFF, 8),
+]
+
 # 调色板切换：(t, RT_STRING id)：t=0 → id3 bm_pals；t=0x204 → id1 bm_pal
 PAGE2_PALETTE = [(0x000, 3), (0x204, 1)]
 
@@ -207,6 +221,7 @@ def main():
             "copy": [[t, layer, flag] for (t, layer, flag) in PAGE2_COPY],
             "windows": [[s0, s1] for (s0, s1) in PAGE2_WINDOWS],
             "palette_switch": [[t, sid] for (t, sid) in PAGE2_PALETTE],
+            "flash": [[t, a, b, c] for (t, a, b, c) in PAGE2_FLASH],
             "stream": "assets/p2_stream.bin",
         },
         "page3": {
