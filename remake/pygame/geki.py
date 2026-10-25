@@ -820,22 +820,28 @@ class Pages:
         self.band_scroll = int(scroll)
 
     def band_draw(self) -> None:
-        """0x4562A0(seq)：从 y=0 起逐条铺色带，高 = 条目高 - 累计滚动，超出 480 截断。"""
+        """0x4562A0(seq)：逐条铺色带。
+
+        原件逐字（0x4562AB..0x45630D）：
+            ecx = [seq+8]（起始索引）; edx = [seq+0xC]（滚动量）
+            h = (i16)table[idx*4+2] - 滚动量      ← **只有起始那一条减去滚动量**
+            if (h + y > 0x1E0) h = 0x1E0 - y
+            rect = (0, y, 0x280, y+h)  → 填充 table[idx].color
+            y += h; idx++
+        """
         y = 0
         i = self.band_start
-        while y < H:
-            if i >= self.band_count:
-                break
+        scroll = self.band_scroll
+        while y < H and i < self.band_count:
             color, h = self.band_table[i]
-            hh = h - self.band_scroll
+            hh = h - scroll
+            scroll = 0                      # 只对起始条生效
             if y + hh > H:
                 hh = H - y
             if hh > 0:
                 self.canvas.fill_rect((0, y, W, y + hh), color)
             y += hh
             i += 1
-            if hh <= 0:
-                break
 
     def band_advance(self) -> None:
         """0x456270(seq) + 0x4560C0(seq, delta)：按 speed 推进滚动量，超过当前带高则吃掉该带。"""
@@ -1394,40 +1400,36 @@ class Pages:
 
     # 0x45FE10（= 0x402072）：把"当前场景"重新应用一遍
     def apply_scene(self, sc: dict) -> None:
-        """0x45FE10 逐条：卸全部层 → 逐层装载(层号=下标)+色键0 → 推色带 → 生成背景节点入 4CC。
+        """0x45FE10 逐条（§16.43：数据 = resource.rom 记录 #0x4E）。
 
-        场景描述（84 字节记录 + 层ID数组 + 色带表 + 0x20 字节实体记录）在原件里是
-        **运行期数据**（`0x4AB5CC` / `0x4AC4EC` 两个实例，由 `[0x56CCD8]` 选），
-        见 ANALYSIS §16.34；复刻侧改从 pages_data["scene0"] 读同样的字段。
+        记录布局：+0 长度 / +4 层数 N / +8 色带数 M / +0xC 实体数 K / +0x10,+0x14 两参数 /
+        +0x18 层ID[N] / 色带[M] / 实体[K]（每项 0x20 字节）。
         """
-        # 0x45FE56：先把 14 个层全部销毁（type != 0x41000012 时）
+        # 0x45FE56：先把 14 个层全部销毁（arg2 != 0x41000012 时）
         self.layers.free_all()
-        # 0x45FE5D：层号 = 下标，从层0 起连续装载，并设色键0
+        # 0x45FE5D：层号 = 下标，从层0 起连续装载，并设色键0（id==0 跳过装载）
         for i, rid in enumerate(sc.get("layers", [])):
             rid = int(rid)
             if rid:
-                self.layers.load(i, rid)
-                self.layers.color_key(i, 0)          # 0x44CE60(层i, 0)
-        # 0x45FE90：0x4561D0(0x4CD484, 表, 表项数, a, b)
-        bt = sc.get("band") or []
+                self.layers.load(i, rid)                  # 0x44C640(层i, id)
+                self.layers.color_key(i, 0)               # 0x44CE60(层i, 0)
+        # 0x45FE84..0x45FE95：0x4561D0(0x4CD484, 表, 项数, +0x10, +0x14)
+        bt = [[int(c) & 0xFF, int(h)] for c, h in (sc.get("bands") or [])]
+        start_idx, scroll = (int(v) for v in sc.get("band_args", [0, 0]))
         if bt:
-            a, b = (int(v) for v in sc.get("band_args", (2, 1)))
-            self.band_push([[int(e["color"]) & 0xFF, int(e["h"]) & 0xFFFF] for e in bt],
-                           len(bt), a, b, 0)
-        # 0x45FEAC：背景实体记录 {+0 层号, +4 源矩形*, +0x14 目标点*, +0x1c 启用} → 4CC
+            self.band_push(bt, len(bt), start_idx, scroll)
+        # 0x45FEAC：实体记录 {+0 层, +4 源矩形(4), +0x14 目标点(2), +0x1C 启用字节}
         self.ui46c.clear()
-        for rec in sc.get("ents", []):
-            if not int(rec.get("on", 1)):
+        for r in sc.get("ents", []):
+            lay, l, t, rr, bb, x, y, on = (int(v) for v in r)
+            if not (on & 0xFF):                            # 0x45FEAC al=[rec+0x1C]
                 continue
-            lay = int(rec["layer"])
-            if lay == 0x0D:                          # 0x45FEB6：层13 的记录跳过
+            if lay == 0x0D:                                # 0x45FEB6：层13 跳过
                 continue
             e = UiEntity(type_word=0x4100000D)
             e.beh = "scene_bg"
-            e.a3 = -1                                # 0x4293FF
-            e.disp = DisplayNode(lay,
-                                 [int(v) for v in rec["src"]],
-                                 [int(v) for v in rec["dst"]])
+            e.a3 = -1                                      # 0x4293FF
+            e.disp = DisplayNode(lay, [l, t, rr, bb], [x, y])   # 0x42941D / 0x42943A
             self.ui46c.append(e)
         self.scene_tiles(sc.get("tiles"))
         self.log(f"scene 应用：层 {len(sc.get('layers', []))} / 色带 {len(bt)} / 背景节点 {len(self.ui46c)}")
