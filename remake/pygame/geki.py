@@ -1105,6 +1105,9 @@ class Pages:
             while i < len(sky):
                 if ecx == t:
                     self.sky_color = int(sky[i][1]) & 0xFF
+                    # 0x43F977..0x43F996：0x4561D0(seq, &{0xD0,0x1F4}{color,0x1F4}, 2, 1, 0)
+                    #   count=2、startIdx=**1**、scroll=0 ⇒ 只画第二条 = 500 高的全屏色带
+                    self.band_push([[0xD0, 0x1F4], [self.sky_color, 0x1F4]], 2, 1, 0)
                     self.log(f"page2 t={t} sky <- 0x{int(sky[i][1]):02X}")
                 i += 1
                 if i >= len(sky):
