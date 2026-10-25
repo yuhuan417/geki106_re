@@ -380,7 +380,12 @@ class TextRenderer:
         self.palette = palette
         self._cache: dict[tuple[str, int], np.ndarray] = {}
         if font_path is None:
-            for cand in ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+            # 0x44D330 请求的是系统字体「ＭＳ 明朝」：把 msmincho.ttc/.ttf 放到
+            # remake/fonts/ 下就会优先使用（Windows 上也可直接给 C:/Windows/Fonts/msmincho.ttc），
+            # 否则退回本机可用的明朝体替代（字形会随之不同——原作在这里本来就是机器相关的）。
+            for cand in (str(REMAKE / "fonts/msmincho.ttc"),
+                         str(REMAKE / "fonts/msmincho.ttf"),
+                         "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
                          str(REMAKE / "godot/assets/fonts/NotoSansCJK-Regular.ttc")):
                 if Path(cand).exists():
                     font_path = cand
