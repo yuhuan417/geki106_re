@@ -88,15 +88,21 @@ def main(argv: list[str] | None = None) -> int:
 
     frame = 0
     running = True
+    pend_dx = pend_dy = 0          # 自上一"帧"以来累积的鼠标位移
+    pend_key = 0                   # 自上一帧以来最后一次映射到的键码
+    pend_shot = pend_lock = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
     while running and pages.page != 0 and not pages.quit:
         # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
-        mouse_delta = (0, 0)
         keycode = 0
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
             elif ev.type == pygame.KEYDOWN:
                 keycode = KEYCODES.get(ev.key, 0)
+                if ev.key == pygame.K_c:
+                    pend_shot = True
+                elif ev.key in (pygame.K_x, pygame.K_v):
+                    pend_lock = True
                 if ev.key == pygame.K_1:
                     pages.finish(); pages.page = 1; pages.enter()
                 elif ev.key == pygame.K_2:
@@ -106,22 +112,34 @@ def main(argv: list[str] | None = None) -> int:
                 elif ev.key == pygame.K_q:
                     running = False
             elif ev.type == pygame.MOUSEMOTION:
-                mouse_delta = ev.rel
+                # 位移要跨"非到期"循环累积，否则会随 build 一起丢掉
+                pend_dx += ev.rel[0]
+                pend_dy += ev.rel[1]
+
+        if keycode:
+            pend_key = keycode
 
         keys = pygame.key.get_pressed()
         state = {
-            "shot": keys[pygame.K_c],
-            "lock": keys[pygame.K_x] or keys[pygame.K_v],
+            # 慢帧（Python 渲染 0.3~0.7s/帧）时按住状态可能在两帧之间被跳过，
+            # 所以把"本间隔内出现过 KEYDOWN"也算作按下，只作用于下一个到期帧。
+            "shot": keys[pygame.K_c] or pend_shot,
+            "lock": keys[pygame.K_x] or keys[pygame.K_v] or pend_lock,
             "left": keys[pygame.K_LEFT], "right": keys[pygame.K_RIGHT],
             "up": keys[pygame.K_UP], "down": keys[pygame.K_DOWN],
         }
-        # 0x44EB60 + 0x44E660：每帧建记录（页1/2/3 都在 step 开头做）
-        inp.build(state, pygame.mouse.get_pressed(), mouse_delta, keycode)
 
         # ---- 帧门 0x45A5A0：到期才走一帧
         if args.fixed or timer.due():
             if args.fixed:
                 timer.consumed += 1
+            # 0x44EB60 + 0x44E660：**每帧**建一次记录（原件在 step 开头做）。
+            # 注意：不能放在帧门之外 —— Input.build 会推进按键的"上帧状态"，
+            # 非到期帧也调用会把按下沿（e0/e1）吃掉，导致"按 C 没反应"。
+            inp.build(state, pygame.mouse.get_pressed(), (pend_dx, pend_dy), pend_key)
+            pend_dx = pend_dy = 0
+            pend_key = 0
+            pend_shot = pend_lock = False
             pages.advance()
             frame += 1
             # ---- 显示（0x44C350 索引→RGB + present）
