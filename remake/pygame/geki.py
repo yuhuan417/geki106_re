@@ -1147,38 +1147,20 @@ class Pages:
                 self.layers.load(int(ent["layer"]), int(ent["ggd"]))
                 self.log(f"page2 t={t} layer{int(ent['layer'])} <- ggd 0x{int(ent['ggd']):X}")
 
-        # 天空色带（0x43F960..0x43F9A7）：**按原码的游标语义**逐条比对
-        #   ecx = 表[0].t; esi = &表[1]; 循环: if (ecx == timer) 推色带(表[esi].color);
-        #   ecx = 表[esi+1].t; esi += 1; while (ecx <= timer)
-        #   注意：第一次配对是 (表[0].t, 表[1].color)，其余为 (表[i].t, 表[i].color)
-        # 天空色带：**严格照抄 0x43F962 的游标语义**（字节 `8d 74 24 28` = lea esi,[esp+0x28]，
-        # 而表首项在 [esp+0x24] ⇒ 第一次配对是 表[0].t 配 表[1].color，此后对齐，
-        # 因此 表[1].t(=0) 永不触发）。t=-420 → 0xD9（白），0xAB → 0xB4（黑）……
-        sky = p2.get("sky", [])
-        if sky and t >= int(sky[0][0]):
-            i = 1
-            ecx = int(sky[0][0])
-            while i < len(sky):
-                if ecx == t:
-                    self.sky_color = int(sky[i][1]) & 0xFF
-                    # 0x43F977..0x43F996：0x4561D0(seq, &{0xD0,0x1F4}{color,0x1F4}, 2, 1, 0)
-                    #   count=2、startIdx=**1**、scroll=0 ⇒ 只画第二条 = 500 高的全屏色带
-                    self.band_push([[0xD0, 0x1F4], [self.sky_color, 0x1F4]], 2, 1, 0)
-                    self.log(f"page2 t={t} sky <- 0x{int(sky[i][1]):02X}")
-                i += 1
-                if i >= len(sky):
-                    break
-                ecx = int(sky[i][0])
-                if ecx > t:
-                    break
+        # 天空色：0x43F962 起，表基址是 **[esp+0x28]**（0x43F8AE `mov word [esp+0x28],di` 是第 0 项的时间），
+        # 循环 `mov ecx,edi(-420) / lea esi,[esp+0x28]` → 第 0 项就是 (t=-420, color=0xB4)，
+        # 命中后用 `[esi+2]` 取该项颜色、`[esi+4]` 取下一项时间、esi+=4 ⇒ **正常对齐配对**。
+        # 所以：t=-420 → 0xB4（黑），t=0 → 0xD9（白），t=0xAB → 0xB4 ……
+        for (tt, c) in p2.get("sky", []):
+            if t == int(tt):
+                self.sky_color = int(c) & 0xFF
+                # 0x43F974..0x43F996：0x4561D0(seq, &{0xD0,0x1F4}{color,0x1F4}, 2, 1, 0)
+                self.band_push([[0xD0, 0x1F4], [self.sky_color, 0x1F4]], 2, 1, 0)
+                self.log(f"page2 t={t} sky <- 0x{self.sky_color:02X}")
 
         # 明暗脉冲表（0x43FE77）：到期项 → 0x430400(&out, a, b, 0x61000005, c)
-        #   0x61000005 的初始化分支是 **0x42730B**（不是 0x427385；跳表基址 0x4273C0，
-        #   索引 = type + 0x9EFFFFFF）：
-        #       [ent+0x1C] = a（起始亮度）  [ent+0x20] = b（目标亮度）
-        #       [ent+0x24] = c（每帧步进，按 signed byte 取：0xFC=-4、0xF0=-16）
-        #   行为 **0x427600**：先 `0x45AFF0(0x56CC84, 0x10)`（test-and-clear）命中 → 0x44DC10(0,0) 并死亡；
-        #       否则 cur += step，按 step 符号向 target 夹紧，0x44DC10(mgr, cur, 0)，alive = (cur != target)
+        #   0x61000005 的 init 是 **0x42730B**、行为 **0x427600**：
+        #   [ent+0x1C]=a（起始亮度）、[ent+0x20]=b（目标亮度）、[ent+0x24]=c（步进，signed byte）
         for (tt, fa, fb, fc) in p2.get("flash", []):
             if t == int(tt):
                 va, vb = int(fa), int(fb)
@@ -1188,10 +1170,10 @@ class Pages:
                 if vc >= 0x80: vc -= 0x100
                 e2 = self.spawn(self.ui52c, 0x61000005)
                 e2.beh = "flash"
-                e2.aux = va          # [0x1C] 当前亮度
-                e2.a3 = vb           # [0x20] 目标亮度
-                e2.a4 = vc           # [0x24] 步进
-                self.log(f"page2 t={t} 亮度渐变 {va} → {vb} 每帧 {vc:+d}")
+                e2.aux = va          # [0x1C]
+                e2.a3 = vb           # [0x20]
+                e2.a4 = vc           # [0x24]
+                self.log(f"page2 t={t} 亮度 {va} → {vb} 每帧 {vc:+d}")
 
         # 0x456240(seq, speed, frames)：t=0x899 → (-40,12)、t=0xB93 → (-28,17)
         # （速度是**负**的：0x4560C0 里 `if ([seq+0xC] <= 0) return` ⇒ 滚动量变负时不吞带，
