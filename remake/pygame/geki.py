@@ -509,6 +509,10 @@ class Input:
         self.base = (0, 0)
         self._prev = (False, False)
 
+    def set_mode(self, mode: int) -> None:
+        """0x44EDA0(0x4AB454, mode)：输入模式（0 = 游戏内光标模式）。"""
+        self.mode = int(mode)
+
     def set_pos(self, x: int, y: int) -> None:
         """0x44E470：直接写虚拟指针 [mgr+0x14]/[mgr+0x18]（不钳位）。"""
         self.x, self.y = int(x), int(y)
@@ -931,26 +935,64 @@ class Pages:
 
     # ---- 页3（0x4520A0 / 0x452220 / 0x4522A0）------------------------------
     def page3_enter(self) -> None:
-        """0x4520A0（页3 进场，全部调用按地址顺序）。"""
-        # 0x4520A7..0x4520E1：0x44CDF0(mgr, 2, 亮度, 对比, -256)
-        #   亮度/对比来自 0x4AB5B8 的位段（0x45AFC0 取字段值，*4-0xC8）
+        """0x4520A0（页3 进场）：逐条对齐，含 3 条错误旗标与末尾的旗标测试。
+
+        原函数的返回值为 `0x45AFF0(0x4AB5C0, 0)`（旗标是否为空 = 进场是否成功），
+        失败路径都是 `0x45AF30(flags, bit)` 置位后**继续执行**，由 step 的
+        `0x45AFF0(flags, 0)` 退出、finish 的 `0x45B070` 取最低位映射页号。
+        """
+        # 0x4520A7..0x4520E1：0x44CDF0(mgr, 2, 对比, 亮度, -256)
+        #   两个参数来自 0x45AFC0 取的配置位段（*4-0xC8），D 参 -256 = 淡入起点
         if "palettes" in self.data and "2" in self.data["palettes"]:
             self.pal = np.array(self.data["palettes"]["2"], dtype=np.uint8)
             self.pal_now = self.pal
-        # 0x4520EA/0x4520FC：0x44C640(13,10) → bmetc\bm_mn.ggd；0x44CE60(13,0) 色键
-        self.layers.bind(13, 10)
+        ok = True
+        # 0x4520EA：0x44C640(13, 10) 层13 ← bmetc\bm_mn.ggd
+        ok = self.layers.bind(13, 10)
+        # 0x4520FC：0x44CE60(13, 0) 色键 0（返回 void，不参与成败判定）
         self.layers.color_key(13, 0)
-        # 0x45211A：0x44E620(0x4AB454, 0,0,0,0) → 虚拟指针归零 [mgr+0x14]/[mgr+0x18]
+        if not ok:
+            self.flags.set(2)                       # 0x45210E：0x45AF30(2)
+        # 0x45211A：0x44E620(0x4AB454, 0,0,0,0)   虚拟指针归零
         self.inp.set_pos(0, 0)
-        # 0x452138：0x450140(0x4AB4B0, 1, 0x24) 读配置；失败 → flags |= 8
-        # 0x452156：0x458D60 场景重置（清 4CC/4FC/52C）
-        self.screen_fill = -1
-        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
-        # 0x452165：生成 0x5F000005 入 0x4AD4FC（菜单总控）
+        # 0x45212C：0x44EDA0(0x4AB454, 0)         输入模式 0
+        self.inp.set_mode(0)
+        # 0x452138：0x450140(0x4AB4B0, 1, 0x24)   声音/影片条目（DSound，0x4A4860=" DSBuffer!"）
+        if not self.sound_bind(1, 0x24):
+            self.flags.set(8)                       # 0x45214A：0x45AF30(8)
+        # 0x452156：0x458D60(page, 0,0,0,0) 场景重置
+        #   = 清 8 个队列 + 重置色带引擎(0x4CD484) + 0x4CD4A0/0x4CD590 + 回放(0x4CD5D8)
+        #     + 记录流(0x56B95C) + [0x56CC84]=0
+        self.scene_reset()
+        # 0x452165：0x430400(desc{0,0,0x5F000005,0}) → 0x44B140 入 0x4AD4FC
         self.spawn(self.ui4fc, 0x5F000005)
-        # 0x452199：0x45A490(0x4AB570, 0) → SetPeriod(0) = 60Hz
-        self.timer.set_period(0)
-        self.log("page3.enter（层13←bm_mn，调色板 bm_pald，生成 0x5F000005，SetPeriod 0）")
+        # 0x452199：0x45A490(0x4AB570, 0)         SetPeriod(0) = 60Hz
+        if not self.timer.set_period(0):
+            self.flags.set(0x40)                    # 0x4521AB：0x45AF30(0x40)
+        # 0x4521B7：0x45AFF0(0x4AB5C0, 0)         返回"旗标为空"
+        self.enter_ok = self.flags.is_empty()
+        self.log(f"page3.enter（层13←bm_mn / bm_pald / 0x5F000005 / SetPeriod0）ok={self.enter_ok}")
+
+    # 0x450140(0x4AB4B0, kind, id)：声音/影片条目（DSound + " DSBuffer!"/"Could not open wave file!"）
+    def sound_bind(self, kind: int, ident: int) -> bool:
+        """原件走 DirectSound 缓冲；pygame 版页1-3 不复刻音频，仅记录并返回成功。"""
+        self.log(f"0x450140 sound_bind(kind={kind}, id=0x{ident:X}) → 跳过（无音频子系统）")
+        return True
+
+    # 0x458D60(page, 0,0,0,0)：场景重置
+    def scene_reset(self) -> None:
+        """清 8 个队列 + 色带引擎(0x4CD484) + 0x4CD4A0/0x4CD590 + 回放(0x4CD5D8)
+        + 记录流(0x56B95C) + [0x56CC84]=0。"""
+        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
+        # 0x4560C0：色带引擎复位 → 回到初始一条 {color=0xB4, h=0x200}
+        self.band_table = [[0xB4, 0x200]]
+        self.band_count = 1
+        self.band_start = 0
+        self.band_scroll = 0
+        self.band_speed = 0
+        self.band_frames = 0
+        self.stream_cursor = 0          # 0x56B95C 记录流复位
+        self.replay_pos = 0             # 0x4CD5D8 回放复位
 
     def page3_step(self) -> bool:
         """0x452220：0x458B80 → 0x458CB0 → 0x44EB60 → SetCursorPos → 0x458FD0
