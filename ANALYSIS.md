@@ -265,6 +265,28 @@ LOGFONT@0x4A40F8 的静态内容（只有 height/width 在运行期被写，其�
 | lfPitchAndFamily | 1 = FIXED_PITCH \| FF_DONTCARE |
 | lfFaceName | SJIS `82 6C 82 72 20 96 BE 92 A9` = **ＭＳ 明朝** |
 
+**在开发机（Windows 宿主）上实测 GDI 的字体映射结果**（工具 `remake/tools/probe_gdi_text.ps1`，
+用上表 LOGFONT 原样调 `CreateFontIndirectA` + `GetTextFaceA`/`GetTextMetricsA`）：
+
+```
+lfHeight=16 lfWidth=8  -> face=[MS Gothic] tmHeight=16 asc=14 desc=2 intLead=0 aveW=8  maxW=32 charset=128
+lfHeight=32 lfWidth=16 -> face=[MS Gothic] tmHeight=33 asc=28 desc=5 intLead=1 aveW=16 maxW=63 charset=128
+```
+
+两点结论：
+1. 本机**没装 ＭＳ明朝**，GDI 按 `SHIFTJIS_CHARSET + FIXED_PITCH` 把它映射成 **ＭＳ ゴシック（MS Gothic）**。
+   原作在这台机器上看到的版权页字体就是 Gothic（无衬线），不是明朝体。复刻的字体查找顺序
+   （`TextRenderer`）据此定为：`msmincho` → `msgothic` → Noto 兜底。
+2. `tmHeight = lfHeight`（16→16），且 `intLead = 0`、`asc+desc = tmHeight` ⇒ **em = lfHeight** 得证
+   （lfHeight=32 时 GDI 取整成 tmHeight=33/asc=28/desc=5/intLead=1，与"字形高 28~29px"的实测吻合）。
+
+**渲染等价性（页1 版权页，逐像素验证）**：以宿主 GDI 用上述 LOGFONT 画出的 640×480 为基准
+（`remake/pygame/shots/p1/gdi_ground_truth.png`），复刻侧 pygame + `msgothic.ttc`：
+`size = lfHeight = 16`、单元高 16（顶部对齐、不额外留行距）、格宽 `lfWidth = 8`、
+1bit 阈值、`fg=0xD9 / bg=0xD3` ⇒ **IoU = 1.0000，差异像素 0**。
+（旧实现把字号按 `get_height()`（含行距）折成 0.7×、并用 Noto Serif 替身 ⇒ 字偏小且是明朝体，
+这就是"字体明显不对"的根因。）
+
 **lfHeight 语义（复刻必须照此换算，`ANALYSIS` 旧写法"高=参数&0xFF"漏了这层）**：
 GDI 的 lfHeight 为**正数**时表示"字符单元高 = tmAscent + tmDescent"；ＭＳ明朝的
 unitsPerEm 2048、tmAscent 1802、tmDescent 246 ⇒ **ascent+descent == em**，所以

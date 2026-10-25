@@ -383,8 +383,16 @@ class TextRenderer:
             # 0x44D330 请求的是系统字体「ＭＳ 明朝」：把 msmincho.ttc/.ttf 放到
             # remake/fonts/ 下就会优先使用（Windows 上也可直接给 C:/Windows/Fonts/msmincho.ttc），
             # 否则退回本机可用的明朝体替代（字形会随之不同——原作在这里本来就是机器相关的）。
+            # 顺序 = 复刻 GDI 的字体映射结果：先找 ＭＳ明朝（原作直接请求的名字），
+            # 找不到时 GDI 会用同 charset(128)+FIXED_PITCH 的日文字体顶替 ——
+            # 在开发用的这台 Windows 上实测顶替成 **MS Gothic**（见 remake/tools/probe_gdi_font.ps1），
+            # 所以这里第二顺位就是 msgothic.ttc；两者都没有才用 Noto 兜底。
             for cand in (str(REMAKE / "fonts/msmincho.ttc"),
                          str(REMAKE / "fonts/msmincho.ttf"),
+                         "/mnt/c/Windows/Fonts/msmincho.ttc",
+                         "/mnt/c/Windows/Fonts/msgothic.ttc",
+                         "C:/Windows/Fonts/msmincho.ttc",
+                         "C:/Windows/Fonts/msgothic.ttc",
                          "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
                          str(REMAKE / "godot/assets/fonts/NotoSansCJK-Regular.ttc")):
                 if Path(cand).exists():
