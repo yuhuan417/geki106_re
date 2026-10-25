@@ -68,6 +68,21 @@ KEY_ESC, KEY_PAUSE, KEY_SPACE, KEY_PRINTSCR, KEY_TAB = 1, 2, 3, 4, 5
 CMD_MAP = [0, 11, 11, 1, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 2,
            3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 1]
 
+# ---- 页3 菜单行 0x5F000006（ctor 0x424579）------------------------------------
+# ctor 在栈帧里连排三张 8 项表（帧偏移依次 F+0x00 / F+0x20 / F+0x40）：
+#   [esp+edi*4+0x10] @d=-0x200 → F+edi*4      = 源矩形 left
+#   [esp+edi*4+0x44] @d=-0x214 → F+0x20+edi*4 = 目标 x
+#   [esp+edi*4+0x54] @d=-0x204 → F+0x40+edi*4 = 源矩形 width（0x424643 `add edx,ecx` ⇒ right=left+w）
+# 目标表第 0 项由 0x424655 `mov dword [esp+0x44],0x100`（d=-0x214）补写。
+# 源矩形 = (left, 0x88+0x28*(row&3), left+w, 0xA7+0x28*(row&3))（高 0x1F=31）；
+# 目标 = (dstx, 0x118+0x30*(row&3))，由 0x45A690(x,y) 经 eax:edx 返回、公共尾声 0x4250D4 写入节点。
+MENU_ROW_LEFT = (0x000, 0x000, 0x000, 0x000, 0x0A0, 0x060, 0x060, 0x060)
+MENU_ROW_DSTX = (0x100, 0x120, 0x120, 0x120, 0x0B0, 0x0B0, 0x0B0, 0x0B0)
+MENU_ROW_WIDTH = (0x07F, 0x03F, 0x03F, 0x03F, 0x0DF, 0x11F, 0x0DF, 0x11F)
+# 0x4257D8 状态 4 的 8 项旗标表（索引 = [ent+0x28] = 选中项 ebp）
+MENU_EXIT_FLAGS = (0x2000000, 0x40000, 0x80000, 0x100000,
+                   0x20000, 0x20000, 0x20000, 0x20000)
+
 
 # ---------------------------------------------------------------------------- 数据
 def load_data() -> dict:
@@ -461,6 +476,10 @@ class Input:
         self.base = (0, 0)
         self._prev = (False, False)
 
+    def set_pos(self, x: int, y: int) -> None:
+        """0x44E470：直接写虚拟指针 [mgr+0x14]/[mgr+0x18]（不钳位）。"""
+        self.x, self.y = int(x), int(y)
+
     def build(self, keys, mouse_buttons, mouse_delta=(0, 0), keycode: int = 0) -> Record:
         b0 = bool(mouse_buttons[0]) or keys.get("shot", False)
         b1 = bool(mouse_buttons[2]) or keys.get("lock", False)
@@ -484,8 +503,10 @@ class Input:
                 mdx = int(round(mdx / n * self.RADIUS))
                 mdy = int(round(mdy / n * self.RADIUS))
             dx += mdx; dy += mdy
-        self.x = max(0, min(448, self.x + dx))
-        self.y = max(0, min(400, self.y + dy))
+        # 0x44EB60：记录里的 X/Y = [mgr+0x14]/[mgr+0x18] + 本帧位移，累加**不钳位**
+        # （钳位发生在玩家实体 0x448C70 自己那里：x≤446、y≤400）
+        self.x += dx
+        self.y += dy
         r.x, r.y, r.dx, r.dy = self.x, self.y, dx, dy
         r.key = keycode
         self.rec = r
@@ -532,6 +553,28 @@ class Timer:
 
 
 # ---------------------------------------------------------------------------- 旗标
+class KeyMgr:
+    """0x4AB5B0 键位管理器：+4 = 位图（0x44E660 轮询写入，bit0=攻击按住、bit1=锁定按住）。
+
+    0x45AFF0(obj, mask) 测试位、0x45B0A0(obj, mask, val) 置/清位（状态4 会强写 bit0/bit1）。
+    """
+
+    def __init__(self) -> None:
+        self.bits = 0
+
+    def update(self, rec) -> None:
+        self.bits = (1 if rec.b0 else 0) | (2 if rec.b1 else 0)
+
+    def test(self, mask: int) -> bool:
+        return (self.bits & mask) != 0
+
+    def write(self, mask: int, val: int) -> None:
+        if val:
+            self.bits |= mask
+        else:
+            self.bits &= ~mask
+
+
 class Flags:
     """0x4AB5C0 位图（0x45AF10 清 / 0x45AF30 置位 / 0x45AFF0 测试）。"""
 
@@ -603,6 +646,7 @@ class Pages:
         self.data = data
         self.pal = palette
         self.p2_stream: P2Stream | None = None
+        self.keys = KeyMgr()                       # 0x4AB5B0
         self.sky_color = -1
         # 色带引擎（0x4CD484 / 0x4561D0 push、0x4562A0 draw、0x456270+0x4560C0 advance）
         self.band_table: list[list[int]] = [[0xB4, 0x200]]   # 0x456180 初始：一条 {color=0xB4,h=0x200}
@@ -852,32 +896,48 @@ class Pages:
 
     # ---- 页3（0x4520A0 / 0x452220 / 0x4522A0）------------------------------
     def page3_enter(self) -> None:
-        # 0x4520A0：0x44CDF0(mgr,2,…) 载 bmcm\bm_pald.bmp（暗色调色板）
+        """0x4520A0（页3 进场，全部调用按地址顺序）。"""
+        # 0x4520A7..0x4520E1：0x44CDF0(mgr, 2, 亮度, 对比, -256)
+        #   亮度/对比来自 0x4AB5B8 的位段（0x45AFC0 取字段值，*4-0xC8）
         if "palettes" in self.data and "2" in self.data["palettes"]:
             self.pal = np.array(self.data["palettes"]["2"], dtype=np.uint8)
             self.pal_now = self.pal
-        self.layers.bind(13, 10)                   # 0x44C640(13,10) → bmetc\bm_mn.ggd
-        self.layers.color_key(13, 0)               # 0x44CE60(13,0)
-        self.inp.x, self.inp.y = 0, 0
+        # 0x4520EA/0x4520FC：0x44C640(13,10) → bmetc\bm_mn.ggd；0x44CE60(13,0) 色键
+        self.layers.bind(13, 10)
+        self.layers.color_key(13, 0)
+        # 0x45211A：0x44E620(0x4AB454, 0,0,0,0) → 虚拟指针归零 [mgr+0x14]/[mgr+0x18]
+        self.inp.set_pos(0, 0)
+        # 0x452138：0x450140(0x4AB4B0, 1, 0x24) 读配置；失败 → flags |= 8
+        # 0x452156：0x458D60 场景重置（清 4CC/4FC/52C）
         self.screen_fill = -1
-        # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
-        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
         self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
-        self.spawn(self.ui4fc, 0x5F000005)         # 菜单总控（行为 0x4255D0 状态机）
+        # 0x452165：生成 0x5F000005 入 0x4AD4FC（菜单总控）
+        self.spawn(self.ui4fc, 0x5F000005)
+        # 0x452199：0x45A490(0x4AB570, 0) → SetPeriod(0) = 60Hz
         self.timer.set_period(0)
-        self.log("page3.enter（层13←bm_mn，调色板 bm_pald，脚本链 0x24 预载）")
+        self.log("page3.enter（层13←bm_mn，调色板 bm_pald，生成 0x5F000005，SetPeriod 0）")
 
     def page3_step(self) -> bool:
-        # 0x452220：0x458B80 → 0x458CB0 → 0x44EB60 → SetCursorPos → 0x458FD0 → 0x4562A0 → 0x458F80
-        self.inp.x, self.inp.y = 320, 240
-        if self.inp.rec.e0 or self.inp.rec.e1:
-            self.flags.set(FLAG_CLICK)
+        """0x452220：0x458B80 → 0x458CB0 → 0x44EB60 → SetCursorPos → 0x458FD0
+        → 0x4562A0 → 0x458F80，返回 0x45AFF0(0x4AB5C0, 0)（旗标为空 → 继续）。"""
+        # 0x452223：0x458B80（泵 + 帧门）——本复刻的帧门在 run.py 的 60Hz 循环里
+        # 0x45222A：0x458CB0（光标 + present 0x44D740）——由 draw() 末尾的 present 承担
+        # 0x45222F：0x44EB60(0x4AB454, &rec, 0, 0) 已在 run.py 每帧 build 出 self.inp.rec
+        # 0x452242：[0x5E721C](0x140, 0xF0) = SetCursorPos(320,240)（把**硬件**光标拉回中心，
+        #           虚拟指针 [mgr+0x14/0x18] 不受影响，故此处不写 inp.x/y）
+        self.keys.update(self.inp.rec)                 # 0x4AB5B0 位图 = 攻击/锁定按住
+        # 0x452252：0x458FD0(rec[6]) 键码 → 旗标（码1 = ESC → 0x200）
         self.key_command(self.inp.rec.key)
-        self.tick_ui(self.ui52c)          # 0x445A30：菜单总控/淡入/OPMOVIE 驱动
-        self.tick_ui(self.ui4fc)          # 0x44B0D0：8 个菜单行实体
-        self.ui52c = [e for e in self.ui52c if e.alive]
+        # 0x45225F：0x4562A0(0x4CD484) 色带推进
+        # 0x452269：0x458F80 = 0x43A350(4CC) → 0x430840(渲4CC) → 0x44B0D0(4FC)
+        #           → 0x445A30(52C) → 0x430840(渲4FC) → 0x456270(色带)
+        self.tick_ui(self.ui4fc)          # 4FC 行为（菜单总控 + 8 行）
+        self.tick_ui(self.ui52c)          # 52C 行为（亮度渐变 0x61000005）
+        self.ui46c = [e for e in self.ui46c if e.alive]
         self.ui4fc = [e for e in self.ui4fc if e.alive]
+        self.ui52c = [e for e in self.ui52c if e.alive]
         self.draw()
+        # 0x452270：0x45AFF0(0x4AB5C0, 0) → 旗标是否全空
         return self.flags.is_empty()
 
     def page3_finish(self) -> None:
@@ -962,10 +1022,23 @@ class Pages:
                                      [0x7D, 0x118 + edi])
             elif idx == 3:                        # 0x424513 / 0x4255D0（菜单总控）
                 e.beh = "menu_root"
-                # 0x424513 的显示节点：层13,(0,0,0x17F,0x7F)@(0x80,0x50) = bm_mn 上半（撃破伝logo）；
-                # bm_mn 的下半 4 组菜单行由状态0 生成的 8 个 0x5F000006 以 9-slice 方式各自铺出。
-                # 这里先用**整幅** bm_mn（0,0,384,296）@(128,80) 一次性显示，逐行实体待补。
-                e.disp = DisplayNode(0x0D, [0, 0, 383, 295], [0x80, 0x50])
+                # 0x424518..0x42456C：src=(0,0,0x17F,0x7F)，dst 由 0x45A690(0x80,0x50) 返回
+                # → 节点 (0,0,383,127)@(128,80)，层13=bm_mn（撃破伝 大字区）
+                e.disp = DisplayNode(0x0D, [0, 0, 0x17F, 0x7F], [0x80, 0x50])
+                e.a3 = 0                          # [ent+0x1C] 状态
+                e.a4 = 0                          # [ent+0x20] 当前选中（ebp 落点）
+                e.aux = 0                         # [ent+0x24] 停留计数
+                e.p["sel"] = 0                    # [ent+0x28] 确认时的选中项
+            elif idx == 4:                        # 0x424579 / 0x4258F0（菜单行）
+                row = int(a3) & 7
+                k = row & 3
+                left = MENU_ROW_LEFT[row]
+                w = MENU_ROW_WIDTH[row]
+                e.beh = "menu_row"
+                e.p["row"] = row
+                e.disp = DisplayNode(0x0D,
+                                     [left, 0x88 + 0x28 * k, left + w, 0xA7 + 0x28 * k],
+                                     [MENU_ROW_DSTX[row], 0x118 + 0x30 * k])
             else:
                 e.beh = f"unimpl_5F_{idx}"
                 self.log(f"ui 0x5F idx {idx} 未实现（§16.7）")
@@ -987,6 +1060,8 @@ class Pages:
                 self._opmovie(e)
             elif e.beh == "menu_root":
                 self._menu_root(e)
+            elif e.beh == "menu_row":
+                self._menu_row(e)
             elif e.beh == "fade_in":
                 self._fade_in(e)
             elif e.beh == "flash":
@@ -1107,26 +1182,107 @@ class Pages:
 
     # 0x4255D0（0x5F000005 = 菜单总控）：状态机 [ent+0x1C] 0..4，跳表 0x42583C
     def _menu_root(self, e: UiEntity) -> None:
-        """状态 0（0x4255FF）：生成 8 个 0x5F000006（菜单行）+ 1 个 0x61000005，然后推进状态。
+        """0x4255D0 全状态机。
 
-        本实现先做到"状态 0 的生成"为止：8 行菜单 + 面板实体的行为尚未解码（§16.12）。
+        入口公共段（0x4255D3..0x4255F8）：
+            ebp = ([ent+0x20] & 4) + (**sar** [0x4AB5A0],7)      ← 选中项候选（Y 的 128px 带 + 列位）
+            esi = [ent+0x1C]（状态），>4 → 0x4256A6
+        跳表 0x42583C = {0x4255FF, 0x4256C0, 0x4256CE, 0x4256C0, 0x4257AE}
+        公共尾声 0x4256A6 / 0x425828：状态变了 → [0x20]=ebp、[0x24]=0；没变 → [0x24]++。
         """
-        if e.t == 0:
-            for i in range(8):
-                self.spawn(self.ui4fc, 0x5F000006, a3=i)     # rec[0] = 行号 0..7
-            # 0x425658：push 8 / push type / push 0 / push 0xFFFFFF01 / push &out
-            #   ⇒ desc = {a2=-255, a3=0, type, a5=8} → 0x42730B: [0x1C]=-255、[0x20]=0、[0x24]=8
+        sel = (e.a4 & 4) + (int(self.inp.rec.y) >> 7)     # sar eax,7（有符号）
+        st0 = e.a3
+        if st0 > 4:
+            st0 = 0
+        if st0 == 0:
+            # 0x4255FF：0x449E10(ent,0,10) → 清 4CC 队列 + 层13←RT_STRING 10 + 色键0
+            self.ui46c.clear()
+            self.layers.bind(13, 10)
+            self.layers.color_key(13, 0)
+            for i in range(8):                            # 0x425633..0x425656 循环 8 次
+                m = self.spawn(self.ui4fc, 0x5F000006, a3=i)
+                m.p["root"] = e
+            # 0x425658：desc = {-255, 0, 0x61000005, 8} → 入 0x4AD52C（淡入）
             f = self.spawn(self.ui52c, 0x61000005)
             f.beh = "flash"; f.aux = -255; f.a3 = 0; f.a4 = 8
-            self.log("page3 菜单：8×0x5F000006 + 0x61000005 已生成")
-            e.t = 1                    # 状态 0 之后由 0x5F000006 自行驱动（行为待补）
-        # 总控实体的显示节点常驻（显示表与实体生命周期在引擎里是分开的）
-        # 菜单行 0x5F000006（ctor 0x424579）已解出几何：
-        #   [node]=0xD(层13=bm_mn)；edi = desc[0] + desc[4]；左 = A[edi]、宽 = B[edi]
-        #   src = (左, 0x88 + (row&3)*40, 左+宽, 0xA7 + (row&3)*40)
-        #   dst = (左, 0x118 + (row&3)*0x30)
-        # 但 desc[4] 的来源（生成表 0x425601）与行为 0x42583C 尚未读完，
-        # 按 row 直接套表会切错 bm_mn 区域（实测文字重叠错乱）⇒ 暂不绘制，等读完再实现。
+            e.a3 = 1
+            self.log("page3 state0：8×0x5F000006 + 0x61000005(-255→0,+8)")
+        elif st0 == 1 or st0 == 3:
+            # 0x4256C0：等 [ent+0x24] >= 0x20（32 帧）再进下一状态
+            if e.aux >= 0x20:
+                e.a3 = st0 + 1
+        elif st0 == 2:
+            # 0x4256CE：交互
+            if self.inp.rec.e0:                           # [0x4AB596] = 攻击键按下沿
+                if sel != 0:
+                    # 0x42572B：确认 → 状态3、[0x24]=0、[0x28]=ebp、0x449DA0 淡出、0x450440 停音
+                    e.a3 = 3
+                    e.aux = 0
+                    e.p["sel"] = sel
+                    self._menu_fade_out()
+                else:
+                    # 0x4256DB：攻击键按下但候选为 0 → 用锁定键状态构造 2/3 并挪虚拟指针
+                    k2 = 1 if self.keys.test(2) else 0
+                    sel = 2 + k2
+                    self.inp.set_pos(0, sel * 128 - 0x1C0)
+            else:
+                if self.inp.rec.e1 and sel >= 4:          # 0x425751：锁定键按下且列为 1 → 归 0
+                    sel = 0
+                    self.inp.set_pos(0, 0)
+                if e.aux > 0x258:                         # 0x42576F：600 帧无变化 → 自动退出
+                    e.a3 = 3
+                    e.p["sel"] = 0
+                    self._menu_fade_out()
+            # 0x42578D：选中项变化 → 停音 + 计数清零
+            if e.a4 != sel:
+                e.aux = 0
+        elif st0 == 4:
+            # 0x4257AE：退出。列位（bit2）命中时把选中项的低 2 位写回键位 1/2，
+            # 然后 flags = 表[ [ent+0x28] ]（0x4257D8 的 8 项表），行为返回 0（实体自尽）
+            s = int(e.p.get("sel", 0))
+            if s & 4:
+                self.keys.write(1, (s >> 1) & 1)
+                self.keys.write(2, s & 1)
+            val = MENU_EXIT_FLAGS[s & 7]
+            self.flags.bits = val                        # 0x45AF10：直接赋值（不是 OR）
+            e.alive = False
+            if e.disp:
+                e.disp.active = False
+            self.log(f"page3 state4：选中 {s} → flags 0x{val:X}")
+            return
+        # 公共尾声
+        if st0 != e.a3:
+            e.a4 = sel
+            e.aux = 0
+        else:
+            e.a4 = sel
+            e.aux += 1
+
+    # 0x4258F0（0x5F000006 的行为）：只改节点可见位 [node+0x1C]
+    def _menu_row(self, e: UiEntity) -> None:
+        """0x4258F0：可见 = 列位相同 且 (行 != 选中 或 选中项闪烁)。
+
+        `test dl,4`（dl = row ^ sel）⇒ 列位不同一律隐藏；
+        `cmp esi,eax / jne 0x42590E` ⇒ 行 != 选中 → 可见；
+        行 == 选中 → `test byte [ent+0x24],0x20`（32 帧亮 / 32 帧灭）。
+        """
+        row = int(e.p.get("row", 0))
+        root = e.p.get("root")
+        sel = int(root.a4) if root is not None else 0
+        d = e.disp
+        if d is not None:
+            if ((row ^ sel) & 4) != 0:
+                d.active = False
+            elif row != sel:
+                d.active = True
+            else:
+                d.active = (e.aux & 0x20) != 0
+        e.aux += 1
+
+    # 0x449DA0：生成 0x61000005(0 → -255, 步进 -8) = 32 帧淡出
+    def _menu_fade_out(self) -> None:
+        f = self.spawn(self.ui52c, 0x61000005)
+        f.beh = "flash"; f.aux = 0; f.a3 = -255; f.a4 = -8
 
     # 0x425560（0x5F000003）
     def _wipe_h(self, e: UiEntity) -> None:
