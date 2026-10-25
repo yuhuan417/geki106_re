@@ -905,7 +905,9 @@ class Pages:
                 e.disp = DisplayNode(0x0D, [0, 0, 0x211, 4], [0x37, 0x114])
             elif idx == 1:                        # 0x424491 / 0x425560
                 edi = 0x14 if a3 else 0
-                e.t = edi
+                # ctor 0x424491：`[ent+0x1C]=0`（寿命计数器）、`[ent+0x20]=edi`（只用于算 rect）
+                e.t = 0
+                e.aux = edi
                 e.beh = "wipe_h"
                 # push 顺序（0x4244D2..0x4244D8）：a5=0xDC+edi→bottom, a4=0x5A→right,
                 # a3=0xC8+edi→top, a2=0x46→left  ⇒ 源窗口 = 行 200+edi .. 220+edi（RAM 文本行）
@@ -1211,8 +1213,9 @@ class Pages:
             c.fill(self.screen_fill)
         for e in self.ui52c:
             for tx in e.texts:
+                # 0x44D330(mgr, y, x, str, h, fg, bg)：bg = SetBkColor ⇒ 先铺一格底色
                 self.text.draw(c, tx["str"], int(tx["x"]), int(tx["y"]),
-                               int(tx["h"]), int(tx["fg"]))
+                               int(tx["h"]), int(tx["fg"]), int(tx.get("bg", -1)) & 0xFF)
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
         self.present()          # 0x458CB0 → 0x44D740（调色板操作 + Blt）
