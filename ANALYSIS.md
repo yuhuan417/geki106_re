@@ -240,10 +240,39 @@ rp_last.dat（GRPD106A 回放）、result.txt（明文成绩）、font.txt（set
 深色投影（0xAB）+ 蓝灰填充（0x80/0x81），随滚动移动。**系统字体实时 TextOut，字形随机器字体而异**【实测】。
 
 ### 6.3 文字渲染（0x44D330）
+
+**签名（据 0x43DF52 等调用点的 push 序列 + 0x44D3xx 的读参偏移实证）**：
+`0x44D330(层号, x, y, 字符串, 高度, 前景色号, 背景色号)`，`ret 0x1c` = 7 个参数。
+
 ```
-CreateFontIndirectA: LOGFONT@0x4A40F8（高度=参数&0xFF, 宽=一半）, 字体名 ＭＳ明朝@0x4A4114
-SetTextColor(层 LUT [+0x487+色号*4] 的 RGB) + SetBkColor + TextOutA
+0x44D383/0x44D392  lfHeight = 高度 & 0xFF      （写 LOGFONT@0x4A40F8）
+0x44D397/0x44D399  lfWidth  = lfHeight >> 1    （写 0x4A40FC）
+0x44D39E           CreateFontIndirectA(&lf)     → GDI32!CreateFontIndirectA
+0x44D3BF           SelectObject(hdc, hfont)
+0x44D3F8           SetTextColor(hdc, LUT[前景])   LUT: +0x487=R, +0x488=G, +0x489=B
+0x44D42B           SetBkColor  (hdc, LUT[背景])
+0x44D452           TextOutA(hdc, x, y, str, strlen)  ← push 序 len/str/y/x/hdc 实证
+0x44D45E/0x44D465  SelectObject 复原 / DeleteObject
+0x44D478           surface->ReleaseDC
 ```
+LOGFONT@0x4A40F8 的静态内容（只有 height/width 在运行期被写，其余来自 .data 初值）：
+
+| 字段 | 值 |
+|---|---|
+| lfWeight | 0 = FW_DONTCARE（→ 常规体） |
+| lfCharSet | 128 = SHIFTJIS_CHARSET |
+| lfQuality | 0 = DEFAULT_QUALITY（1bit，无抗锯齿） |
+| lfPitchAndFamily | 1 = FIXED_PITCH \| FF_DONTCARE |
+| lfFaceName | SJIS `82 6C 82 72 20 96 BE 92 A9` = **ＭＳ 明朝** |
+
+**lfHeight 语义（复刻必须照此换算，`ANALYSIS` 旧写法"高=参数&0xFF"漏了这层）**：
+GDI 的 lfHeight 为**正数**时表示"字符单元高 = tmAscent + tmDescent"；ＭＳ明朝的
+unitsPerEm 2048、tmAscent 1802、tmDescent 246 ⇒ **ascent+descent == em**，所以
+**lfHeight 就是 em**（不是含行距的字体行高）。基线在 `0.8799 × lfHeight`（1802/2048）。
+旁证：§16.26 实测"图3 字形高 28~29px = 0x44D330(h=0x20)"，28.5/32 = 0.89 = em 意义上的
+全角字身比；若按"行高"理解（em≈0.7h）则只有 20px，与实测矛盾。
+lfWidth = lfHeight/2 = ＭＳ明朝的半角字宽（该字体的 OS/2 平均字宽本身就是 0.5 em）⇒
+**半角字前进 h/2、全角字前进 h**，不需要额外横向缩放。
 文字条目链：0x44CDF0(LoadStringA+入队 0x44CAA0) → 绘制列表（节点 0x45A0E0 分配，
 +0x00 源层号、+0x04..0x10 源矩形、+0x14/+0x18 目标、+0x1C 激活、+0x24 next）
 → 渲染器 0x45A170（裁剪 + BltFast 0x44D010）。
@@ -659,7 +688,7 @@ Reset(预设0,0,0,0) → 0x44EDA0(0) → **0x458D60 一次** → 生成 `0x6F000
 | 165 | `0xB5` **青 (0,255,255)** |
 | 170 | `0xD3` 蓝 |
 | 200 | 文字：**只画底部 5 词**（单帧，230 起重新出现） |
-| — | 文字高度：GDI `lfHeight=16` 是**字符单元高**（ascent+descent=16、宽=高/2），pygame 侧按 16 行压缩，不压缩会偏大 |
+| — | 文字高度：GDI `lfHeight` 正数 = **字符单元高 = tmAscent+tmDescent**，ＭＳ明朝该项恰好等于 em ⇒ em = lfHeight（详见 §6.3）。旧实现错按 `get_height()`（含行距）凑，把 em 压成 0.7×，字偏小 |
 | 230..289 | 文字：底部 5 词 + 顶部 3 行 |
 | 290 | `0xB4` **(1,1,1) 近黑**；同一帧结束 |
 

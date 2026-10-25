@@ -400,36 +400,50 @@ class TextRenderer:
             # 关闭抗锯齿渲染（GDI TextOut 是 1bit 掩码）
         return self._fonts[height]
 
-    def mask(self, s: str, height: int) -> np.ndarray:
-        """返回 (cell_h=height, width) 的 1bit 掩码，**不做纵向重采样**（避免模糊）。
+    # ＭＳ明朝（LOGFONT 0x4A4114 = SJIS "ＭＳ 明朝"）的垂直度量：unitsPerEm=2048、
+    # tmAscent=1802、tmDescent=246 ⇒ **ascent+descent == em**。
+    # 0x44D392 `mov [0x4A40F8], eax`（lfHeight = 参数&0xFF，正数）在 GDI 里表示
+    # "字符单元高 = tmAscent+tmDescent" ⇒ **lfHeight 就是 em**，不是含行距的 get_height()。
+    MSMINCHO_ASC, MSMINCHO_UPEM = 1802, 2048
 
-        GDI：lfHeight = 字符单元高（decimal），lfWidth = 高/2 ⇒ 每个字符占 高/2 宽的格子，
-        字形在格子内排布。这里：pygame 在 size=11 时 get_height()=16（正好等于 lfHeight），
-        逐字符渲染后把每格**按最近邻压到 高/2 宽**再拼接 ⇒ 与原作一样是 1bit、锐利、
-        且字距 = 高/2（页1 的英文行实测对齐屏幕坐标 32/147/262/377/492 的间隔）。
+    def mask(self, s: str, height: int) -> np.ndarray:
+        """返回 (cell_h = height, width) 的 1bit 掩码。
+
+        0x44D330 的字体参数（全部来自反汇编）：
+            0x44D392  lfHeight = 参数 & 0xFF   → 字符单元高（对 ＭＳ明朝 = em）
+            0x44D399  lfWidth  = lfHeight >> 1 → 每字格宽 = 高/2（GDI 会横向压到该宽度）
+            0x4A40F8  LOGFONT：CharSet=128(SHIFTJIS)、Quality=0、Weight=0(DONTCARE)、
+                     PitchAndFamily=1(FIXED_PITCH)、face = "ＭＳ 明朝"
+        所以：em = lfHeight、单元高 = lfHeight、基线在 0.8799*lfHeight（1802/2048）、
+        字距 = lfHeight/2，字形若比格宽则按最近邻横向压缩（原作就是这样把全角汉字压成半宽的）。
         """
         key = (s, height)
         m = self._cache.get(key)
         if m is None:
-            cw = max(2, int(height) // 2)                 # lfWidth = height/2
-            # GDI lfHeight 是单元高；Noto 下 size≈0.7*lfHeight 时 get_height()≈单元高
-            font = self._font(max(6, int(round(height * 0.70))))
+            h = max(6, int(height))
+            cw = max(2, h // 2)                       # lfWidth = lfHeight>>1
+            font = self._font(h)                      # em = lfHeight
+            asc = font.get_ascent()
+            base = int(round(h * self.MSMINCHO_ASC / self.MSMINCHO_UPEM))   # 基线下移量
+            top = asc - base                          # 裁到"单元顶 = 基线-0.8799*em"
             cells = []
             for ch in s:
                 surf = font.render(ch, False, (255, 255, 255))
                 arr = self._pygame.surfarray.array3d(surf)[:, :, 0].T   # (h, w)
-                if arr.shape[0] < height:                  # 补齐到单元高（顶部对齐）
-                    arr = np.vstack([arr, np.zeros((height - arr.shape[0], arr.shape[1]), arr.dtype)])
-                elif arr.shape[0] > height:
-                    arr = arr[:height, :]
+                if top >= 0:
+                    arr = arr[top:top + h, :]
+                else:                                  # 字形比单元还高：顶部补空行
+                    arr = np.vstack([np.zeros((-top, arr.shape[1]), arr.dtype),
+                                     arr[:h + top, :]])
+                if arr.shape[0] < h:
+                    arr = np.vstack([arr, np.zeros((h - arr.shape[0], arr.shape[1]), arr.dtype)])
                 w = arr.shape[1]
                 if w <= 0:
-                    arr = np.zeros((height, 1), np.uint8); w = 1
-                # 水平最近邻压/拉到 cw（GDI 的 lfWidth 挤压）
-                idx = (np.arange(cw) * w // cw).clip(0, w - 1)
+                    arr = np.zeros((h, 1), np.uint8); w = 1
+                idx = (np.arange(cw) * w // cw).clip(0, w - 1)   # GDI lfWidth 挤压
                 cells.append(arr[:, idx])
-            m = np.hstack(cells) if cells else np.zeros((height, 0), np.uint8)
-            m = np.ascontiguousarray(m > 127)          # bool 掩码（1bit）
+            m = np.hstack(cells) if cells else np.zeros((h, 0), np.uint8)
+            m = np.ascontiguousarray(m > 127)          # 1bit 掩码（GDI TextOut 无抗锯齿）
         return m
 
     def draw(self, canvas: Canvas, s: str, x: int, y: int, height: int,
