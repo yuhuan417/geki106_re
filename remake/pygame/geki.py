@@ -57,6 +57,7 @@ CHANGEDISPLAY = os.environ.get("GEKI_CHANGEDISPLAY", "0") != "0"
 FLAG_LAYER_FAIL = 0x2
 FLAG_ESC = 0x200
 FLAG_CLICK = 0x10000
+SYS_FLAG_LEAVE = 0x10          # 0x56CC84 的 0x10：离开本页（0x45AFF0 命中即让亮度渐变实体自尽并复位）
 FLAG_SELECT = 0x200000
 FLAG_EXIT = 0x40
 
@@ -549,6 +550,12 @@ class Flags:
     def is_empty(self) -> bool:
         return self.bits == 0
 
+    def consume(self, mask: int) -> bool:
+        """0x45AFF0(obj, mask)：test-and-clear，返回原值是否置位。"""
+        hit = bool(self.bits & mask)
+        self.bits &= ~mask
+        return hit
+
     def lowest(self) -> int:
         """0x45B070：最低置位，无置位返回 0。"""
         b = self.bits
@@ -615,6 +622,7 @@ class Pages:
         self.inp = inp
         self.timer = timer
         self.flags = flags
+        self.sysf = Flags()          # 0x56CC84：系统旗标（0x10 = 离开本页）
         self.layers = Layers(data)
         self.page = 0
         self.ui52c: list[UiEntity] = []
@@ -665,6 +673,7 @@ class Pages:
         return False
 
     def finish(self) -> None:
+        self.sysf.set(SYS_FLAG_LEAVE)                     # 离页：亮度渐变实体自尽并复位亮度
         if self.page == 1:
             self.page1_finish()
         elif self.page == 2:
@@ -914,8 +923,14 @@ class Pages:
                 e.beh = f"unimpl_6F_{idx}"
                 self.log(f"ui 0x6F idx {idx} 未实现（§16.7）")
         elif hi == 0x61000000:
-            # 0x61xxxxx = 淡入/OPMOVIE 驱动（ctor 0x427385 / 行为 0x427710）
-            e.beh = "fade_in"
+            # 跳表 0x4273C0，索引 = type + 0x9EFFFFFF：
+            #   1→0x427450  5→0x427600(亮度渐变,-255→0 步进)  6→0x430520  7→0x427690  8→0x427710(快照环)
+            if type_word == 0x61000005:
+                e.beh = "flash"                 # 0x42730B + 行为 0x427600
+                e.aux, e.a3, e.a4 = 0, 0, 0      # 由生成方按 desc 填 (-255/0/8 等)
+            else:
+                e.beh = "fade_in"
+                self.log(f"ui 0x61 type 0x{type_word:X} 未实现")
         elif hi == 0x5F000000:
             idx = type_word - 0x5F000002
             if idx == 0:                          # 0x424434 / 0x4254F0
@@ -960,6 +975,8 @@ class Pages:
                 self._menu_root(e)
             elif e.beh == "fade_in":
                 self._fade_in(e)
+            elif e.beh == "flash":
+                self._flash(e)
             elif e.beh == "wipe_v":
                 self._wipe_v(e)
             elif e.beh == "wipe_h":
@@ -1041,7 +1058,23 @@ class Pages:
             e.alive = False
             d.active = False
 
-    # 0x427710（0x61000005 = 淡入/OPMOVIE 驱动）
+    def _flash(self, e: UiEntity) -> None:
+        """0x427600（0x61000005 的亮度渐变）：cur=[0x1C]、target=[0x20]、step=[0x24]。"""
+        if self.sysf.consume(SYS_FLAG_LEAVE):         # 0x45AFF0(0x56CC84, 0x10)
+            self.fade_to(0, 0)                        # 0x44DC10(mgr, 0, 0)
+            e.alive = False
+            return
+        cur = e.aux + e.a4
+        if e.a4 > 0 and cur > e.a3:
+            cur = e.a3
+        elif e.a4 < 0 and cur < e.a3:
+            cur = e.a3
+        e.aux = cur
+        self.fade_to(cur, 0)                          # 0x44DC10(mgr, cur, 0)
+        if cur == e.a3:
+            e.alive = False
+
+    # 0x427710（0x61000008 = 状态快照环驱动，页2 不用）
     def _fade_in(self, e: UiEntity) -> None:
         """0x427385 的初值 + 0x427710 的推进：
 
@@ -1067,7 +1100,10 @@ class Pages:
         if e.t == 0:
             for i in range(8):
                 self.spawn(self.ui4fc, 0x5F000006, a3=i)     # rec[0] = 行号 0..7
-            self.spawn(self.ui52c, 0x61000005, a3=0xFFFFFF01)
+            # 0x425658：push 8 / push type / push 0 / push 0xFFFFFF01 / push &out
+            #   ⇒ desc = {a2=-255, a3=0, type, a5=8} → 0x42730B: [0x1C]=-255、[0x20]=0、[0x24]=8
+            f = self.spawn(self.ui52c, 0x61000005)
+            f.beh = "flash"; f.aux = -255; f.a3 = 0; f.a4 = 8
             self.log("page3 菜单：8×0x5F000006 + 0x61000005 已生成（行为待补）")
             e.t = 1                    # 状态 0 之后由 0x5F000006 自行驱动（行为待补）
         # 总控实体的显示节点常驻（显示表与实体生命周期在引擎里是分开的）
@@ -1136,22 +1172,26 @@ class Pages:
                 if ecx > t:
                     break
 
-        # 明暗脉冲表（0x43FE77）：每个到期项生成 0x61000005（0x427385）
-        #   a=[esp] 的 i16：=0 → 行为 0x427710 的 `test eax,eax; je` 走"只恢复快照"分支；
-        #   ≠0 → 该帧起 亮度 [ent+0x24] 从 0xFFFFFF00(-256) 每帧 +8（32 帧）→ 0x44DC10(mgr, 值, 0)
+        # 明暗脉冲表（0x43FE77）：到期项 → 0x430400(&out, a, b, 0x61000005, c)
+        #   0x61000005 的初始化分支是 **0x42730B**（不是 0x427385；跳表基址 0x4273C0，
+        #   索引 = type + 0x9EFFFFFF）：
+        #       [ent+0x1C] = a（起始亮度）  [ent+0x20] = b（目标亮度）
+        #       [ent+0x24] = c（每帧步进，按 signed byte 取：0xFC=-4、0xF0=-16）
+        #   行为 **0x427600**：先 `0x45AFF0(0x56CC84, 0x10)`（test-and-clear）命中 → 0x44DC10(0,0) 并死亡；
+        #       否则 cur += step，按 step 符号向 target 夹紧，0x44DC10(mgr, cur, 0)，alive = (cur != target)
         for (tt, fa, fb, fc) in p2.get("flash", []):
             if t == int(tt):
-                va = int(fa)
-                if va >= 0x8000:
-                    va -= 0x10000
-                if va != 0:
-                    e2 = self.spawn(self.ui52c, 0x61000005)
-                    e2.beh = "fade_in"
-                    e2.aux = -256
-                    e2.t = 1
-                    self.log(f"page2 t={t} 脉冲 a={va} c={int(fc) & 0xFF}")
-                else:
-                    self.log(f"page2 t={t} 节奏点（a=0，只恢复快照）c={int(fc) & 0xFF}")
+                va, vb = int(fa), int(fb)
+                if va >= 0x8000: va -= 0x10000
+                if vb >= 0x8000: vb -= 0x10000
+                vc = int(fc) & 0xFF
+                if vc >= 0x80: vc -= 0x100
+                e2 = self.spawn(self.ui52c, 0x61000005)
+                e2.beh = "flash"
+                e2.aux = va          # [0x1C] 当前亮度
+                e2.a3 = vb           # [0x20] 目标亮度
+                e2.a4 = vc           # [0x24] 步进
+                self.log(f"page2 t={t} 亮度渐变 {va} → {vb} 每帧 {vc:+d}")
 
         # 0x456240(seq, speed, frames)：t=0x899 → (-40,12)、t=0xB93 → (-28,17)
         # （速度是**负**的：0x4560C0 里 `if ([seq+0xC] <= 0) return` ⇒ 滚动量变负时不吞带，
