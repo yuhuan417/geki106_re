@@ -1422,6 +1422,38 @@ node.dst  = (col*32 + 0x60, 0x88)
 **下一步**：解脚本资源（页3 载入的 chain `0x24`）的文本编码与"逐行文字窗"的完整数据流，
 然后按 `0x445354..0x4453A9` 实现它；图3 就是它在页3 首屏的输出。
 
+### 16.27 图3 的显示路径找到了（0x43FEE4..0x440040 → 0x4405EA 循环）【2026-10-25 第十九轮】
+
+页2 时间轴 0x43F560 我此前只读到 0x43FFxx 就收手，**真正的通知页在 0x43FEE4 之后**：
+
+```
+0x43FEE4  mov edx, 0xffffffc6      记录0 的时间 = -58
+0x43FEE9  mov ecx, 0x30            dst.x = 48
+0x43FEEE  mov edi, 0x80            dst.y = 128
+0x43FEF3  mov eax, 0x220           src.right = 544   (= bm_otit 宽)
+0x43FEF8  mov esi, 0xfffffe5c      另一条记录的时间 = -420
+0x43FEFD  mov word [esp+0x132], dx 记录0.t
+0x43FF05  mov word [esp+0x136], cx 记录0.dst.x
+0x43FF0D  mov word [esp+0x138], di 记录0.dst.y
+0x43FFC9  mov byte [esp+0x134], 6  记录0.layer = 6
+0x43FFEB  mov byte [esp+0x146], 6  记录1.layer = 6
+0x43FFF3  mov word [esp+0x14A], 0xb0 记录1.dst.y = 176
+0x440005  mov word [esp+0x14E], 0x20 记录1.src.bottom = 32
+   … 共 5 条记录，步长 0x12(18)：{i16 t, u8 layer, dst(x,y), src(l,t,r,b)}
+0x4405EA  movsx edx, word [ecx-4]   t
+0x4405EE  cmp edx, eax ; jl 跳过
+0x440648  call 0x44D010             BltFast(screen <- layer, src, dst) —— **每帧执行**
+```
+
+结论（与玩家截图完全一致）：
+- 5 条记录 = bm_otit（544x160）的 5 条 32px 高条带；
+- 贴到 dst = (48, 128 + 48*i)（48 = 行距 = h*1.5）；
+- layer = 6（层6 里就是 bm_otit，页2 t=-420 载入）；
+- 记录时间 -58（第 0 条；另一条 -420），循环每帧按时间过滤 ⇒ 通知页持续显示。
+
+⇒ 之前“层6 无显示路径”的结论作废（勘误 A-36）：路径是 0x440648 的 BltFast，
+层号来自**记录表字节** `byte[rec-2]`（我此前只按立即数/变量扫节点层号，漏了这条）。
+
 ### 16.7 本节遗留（页1-3 未能 1:1 的部分）
 0. **页2 屏幕合成**（最大缺口）：0x43F560 尾部的第二张表（`{u16 t, u8 layer, u8 flag}`，
    t=-350/-349/-348/-347 与 172/204/236/258）是**层间整幅拷贝**：flag=1 → `0x44D190(层)` 把
