@@ -1288,6 +1288,14 @@ class Pages:
             # 0x4255FF → 0x449E10(ent, 0, 10)：
             #   ① 0x45C740 取"当前场景"描述 → ② 0x45FE10 应用（卸层/装层/色带/4CC 背景节点）
             #   ③ 0x44C640(13,10) + 0x44CE60(13,0) 最后才装层13
+            # ① 0x425601..0x425656：先循环 8 次生成 0x5F000006 入 0x4AD4FC（行号在 desc[0]）
+            for i in range(8):
+                m = self.spawn(self.ui4fc, 0x5F000006, a3=i)
+                m.p["root"] = e
+            # ② 0x425658：desc = {-255, 0, 0x61000005, 8} → 入 0x4AD52C（淡入）
+            f = self.spawn(self.ui52c, 0x61000005)
+            f.beh = "flash"; f.aux = -255; f.a3 = 0; f.a4 = 8
+            # ③ 0x42568F..0x42569C：0x449E10(ent, 0, 10) —— 场景应用 + 层13←bm_mn（**在行/淡入之后**）
             sc = self.data.get("scene0")
             if sc:
                 self.apply_scene(sc)
@@ -1296,12 +1304,7 @@ class Pages:
                 self.log("page3 state0：scene0 数据缺失（§16.34 待解），仅装层13")
             self.layers.bind(13, 10)
             self.layers.color_key(13, 0)
-            for i in range(8):                            # 0x425633..0x425656 循环 8 次
-                m = self.spawn(self.ui4fc, 0x5F000006, a3=i)
-                m.p["root"] = e
-            # 0x425658：desc = {-255, 0, 0x61000005, 8} → 入 0x4AD52C（淡入）
-            f = self.spawn(self.ui52c, 0x61000005)
-            f.beh = "flash"; f.aux = -255; f.a3 = 0; f.a4 = 8
+            # ④ 0x425697：状态 +1
             e.a3 = 1
             self.log("page3 state0：8×0x5F000006 + 0x61000005(-255→0,+8)")
         elif st0 == 1 or st0 == 3:
