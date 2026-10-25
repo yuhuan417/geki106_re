@@ -1229,6 +1229,12 @@ class Pages:
             self.pal_flags = 0
         elif not (self.pal_frame & 1) and not self.pal_flags:
             self.pal_now = self.pal
+        # 0x44D81B..0x44D83D：亮度恰为 -255 时整屏填 0xB4（黑）、恰为 +255 时整屏填 0xD9（白）
+        #   （`[mgr+0x84]==0` 的前提下；这是"闪白/闪黑"由 0x44D200 直接铺色，而不是只改调色板）
+        if getattr(self, "fade_a", 0) == -255:
+            self.canvas.fill(0xB4)
+        elif getattr(self, "fade_a", 0) == 255:
+            self.canvas.fill(0xD9)
 
     def fade_to(self, a: int, b: int = 0) -> None:
         """0x44DC10(mgr, a, b)：设亮度/对比度并置 bit0（下一偶数帧生效）。"""
