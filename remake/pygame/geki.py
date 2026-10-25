@@ -696,7 +696,9 @@ class Pages:
         self.layers.create(2, W, H)            # 0x44C560(2,640,480)
         self.layers.color_key(13, 0)           # 0x44CE60(13,0)
         self.inp.x, self.inp.y = 0, 0          # 0x44E620(预设0,0,0,0) + 0x44EDA0(0)
-        self.ui52c.clear(); self.ui4fc.clear()
+        # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
+        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
+        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.p1_done.clear()
         # a3 = bitindex(0x4AB5B0, 0x2000) 即 ini 的 OPMOVIE 开关（0x43E09A 分支用）
         self.spawn(self.ui52c, 0x6F000001, a3=1 if OPMOVIE else 0)
@@ -787,7 +789,9 @@ class Pages:
         self.band_count, self.band_start, self.band_scroll = 1, 0, 0
         self.band_speed = self.band_frames = 0
         self.sky_color = 0xB4
-        self.ui52c.clear(); self.ui4fc.clear()
+        # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
+        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
+        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.p2_loaded.clear(); self.p2_sky.clear()
         # 0x452D3E：0x459C90(0x56B95C, cfg) —— CHANGEDISPLAY==0 或 OPMOVIE!=0 时挂上资源 77 记录流
         self.p2_stream = None
@@ -856,7 +860,9 @@ class Pages:
         self.layers.color_key(13, 0)               # 0x44CE60(13,0)
         self.inp.x, self.inp.y = 0, 0
         self.screen_fill = -1
-        self.ui52c.clear(); self.ui4fc.clear()
+        # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
+        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
+        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.spawn(self.ui4fc, 0x5F000005)         # 菜单总控（行为 0x4255D0 状态机）
         self.timer.set_period(0)
         self.log("page3.enter（层13←bm_mn，调色板 bm_pald，脚本链 0x24 预载）")
@@ -1218,12 +1224,12 @@ class Pages:
                     self.canvas.blit(lay6.buf, (0, i * 32, 544, i * 32 + 32),
                                      (48, 128 + i * 48), key=0)
 
-        # 记录流窗口（0x43FA2D 循环）
+        # 记录流窗口（0x43FA2D）：**只在 [start, end) 内**才 0x459D60 取一帧并贴屏；
+        # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页2 开头闪出记录里的一小块
+        # 红色「撃」（玩家实测：图3 之前有一闪而过的小红字）。
         if self.p2_stream is not None:
-            w = p2.get("windows", [])
-            i = 0
-            while i < len(w):
-                if int(w[i][1]) >= t:
+            for (s0, s1) in p2.get("windows", []):
+                if int(s0) <= t < int(s1):
                     recs = self.p2_stream.advance()
                     if recs is None:
                         self.flags.set(1)                    # 0x43FA47：流播完 → flags |= 1
@@ -1233,9 +1239,7 @@ class Pages:
                             lay_tab = self.layers.tab.get(lay)
                             if lay_tab is not None:
                                 self.canvas.blit_scaled(lay_tab.buf, src, dst, key=0)
-                if i + 1 >= len(w) or int(w[i + 1][0]) > t:
                     break
-                i += 1
 
     def present(self) -> None:
         """0x44D740 的调色板部分：`frame=++[0xC90]`，仅偶数帧且 [0xC8C]!=0 时执行。
