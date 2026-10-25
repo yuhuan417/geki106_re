@@ -1429,7 +1429,25 @@ class Pages:
                                  [int(v) for v in rec["src"]],
                                  [int(v) for v in rec["dst"]])
             self.ui46c.append(e)
+        self.scene_tiles(sc.get("tiles"))
         self.log(f"scene 应用：层 {len(sc.get('layers', []))} / 色带 {len(bt)} / 背景节点 {len(self.ui46c)}")
+
+    def scene_tiles(self, tiles) -> None:
+        """0x41000004 的语义（§16.40）：从层1 取 32×32 瓦片，按 (x*4, y*4) 贴到屏上。
+
+        类目来自舞台的瓦片坐标表；页面侧只负责按 4px 网格落位。
+        tiles 条目：{"layer":1, "src":[l,t,r,b], "x":, "y":}
+        """
+        for t in tiles or []:
+            e = UiEntity(type_word=0x41000004)
+            e.beh = "scene_bg"
+            e.a3 = -1                                  # 0x4293FF 计数器
+            e.disp = DisplayNode(int(t.get("layer", 1)),
+                                 [int(v) for v in t["src"]],
+                                 [int(t["x"]) * 4, int(t["y"]) * 4])   # 0x428D8F/0x428DA5
+            self.ui46c.append(e)
+        if tiles:
+            self.log(f"scene 瓦片：{len(tiles)} 格（层1 32×32 @4px 网格）")
 
     # 0x449DA0：生成 0x61000005(0 → -255, 步进 -8) = 32 帧淡出
     def _menu_fade_out(self) -> None:
