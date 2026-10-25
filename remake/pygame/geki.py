@@ -133,6 +133,14 @@ class Canvas:
         """0x44D200：全屏 640x480 色填充。"""
         self.buf[:, :] = idx & 0xFF
 
+    def fill_rect(self, rect, idx: int) -> None:
+        """0x44D290(mgr, &rect, 0, color)：COLORFILL 到主表面（屏幕）的矩形。"""
+        l, t, r, b = (int(v) for v in rect)
+        l = max(0, min(l, self.w)); r = max(0, min(r, self.w))
+        t = max(0, min(t, self.h)); b = max(0, min(b, self.h))
+        if r > l and b > t:
+            self.buf[t:b, l:r] = idx & 0xFF
+
     def blit(self, src: np.ndarray, src_rect: tuple[int, int, int, int],
              dst: tuple[int, int], key: int | None = None) -> None:
         """0x45A170：裁剪后把层的子矩形贴到 (x,y)（BltFast 语义，无色键）。"""
@@ -576,6 +584,13 @@ class Pages:
         self.pal = palette
         self.p2_stream: P2Stream | None = None
         self.sky_color = -1
+        # 色带引擎（0x4CD484 / 0x4561D0 push、0x4562A0 draw、0x456270+0x4560C0 advance）
+        self.band_table: list[list[int]] = [[0xB4, 0x200]]   # 0x456180 初始：一条 {color=0xB4,h=0x200}
+        self.band_count = 1
+        self.band_start = 0
+        self.band_scroll = 0
+        self.band_speed = 0
+        self.band_frames = 0
         # 0x44D740 的调色板操作状态：bit0=亮度(a) bit1=… bit2=…；[mgr+0xC90] 帧计数
         self.pal_flags = 0
         self.fade_a = 0
@@ -690,6 +705,47 @@ class Pages:
         self.log(f"page1.finish flags=0x{self.flags.bits:X} -> page {self.page}")
 
     # ---- 页2（0x452A00 / 0x452EB0 / 0x452F80）------------------------------
+    # ---- 色带引擎 0x456180/0x4561D0/0x4562A0/0x456240/0x456270 -------------------
+    def band_push(self, table: list[list[int]], count: int, start: int, scroll: int) -> None:
+        """0x4561D0(seq, table, count, startIdx, scroll)：整表替换（表按 4 字节项 {u8 color,u8 pad,i16 h}）。"""
+        self.band_table = [[int(c) & 0xFF, int(h)] for (c, h) in table][:count]
+        self.band_count = len(self.band_table)
+        self.band_start = int(start)
+        self.band_scroll = int(scroll)
+
+    def band_draw(self) -> None:
+        """0x4562A0(seq)：从 y=0 起逐条铺色带，高 = 条目高 - 累计滚动，超出 480 截断。"""
+        y = 0
+        i = self.band_start
+        while y < H:
+            if i >= self.band_count:
+                break
+            color, h = self.band_table[i]
+            hh = h - self.band_scroll
+            if y + hh > H:
+                hh = H - y
+            if hh > 0:
+                self.canvas.fill_rect((0, y, W, y + hh), color)
+            y += hh
+            i += 1
+            if hh <= 0:
+                break
+
+    def band_advance(self) -> None:
+        """0x456270(seq) + 0x4560C0(seq, delta)：按 speed 推进滚动量，超过当前带高则吃掉该带。"""
+        if self.band_frames > 0:
+            self.band_frames -= 1
+            self.band_scroll += self.band_speed
+            while self.band_start < self.band_count and \
+                    self.band_scroll >= self.band_table[self.band_start][1]:
+                self.band_scroll -= self.band_table[self.band_start][1]
+                self.band_start += 1
+
+    def band_scroll_for(self, speed: int, frames: int) -> None:
+        """0x456240(seq, speed, frames)。"""
+        self.band_speed = int(speed)
+        self.band_frames = int(frames)
+
     def page2_enter(self) -> None:
         p2 = self.data["page2"]
         # 0x452A4E..0x452BCC：13 次 0x44C560（层尺寸见 PAGE2_LAYER_SIZES）
@@ -704,7 +760,11 @@ class Pages:
             self.pal_now = self.pal
         self.inp.x, self.inp.y = 0, 0
         self.screen_fill = -1                       # 页2 的底色来自色带，不是 0x44D200
-        self.sky_color = 0xB4                       # 序列引擎初始只有一条 0xB4 全屏带（0x456180）
+        # 0x458D60 → 0x456180：色带表重置为单条 {0xB4, 0x200}
+        self.band_table = [[0xB4, 0x200]]
+        self.band_count, self.band_start, self.band_scroll = 1, 0, 0
+        self.band_speed = self.band_frames = 0
+        self.sky_color = 0xB4
         self.ui52c.clear(); self.ui4fc.clear()
         self.p2_loaded.clear(); self.p2_sky.clear()
         # 0x452D3E：0x459C90(0x56B95C, cfg) —— CHANGEDISPLAY==0 或 OPMOVIE!=0 时挂上资源 77 记录流
@@ -727,12 +787,12 @@ class Pages:
             self.flags.set(FLAG_CLICK)
             self.log(f"page2 click → flags=0x{self.flags.bits:X}")
         self.key_command(self.inp.rec.key)
-        # 0x4562A0：序列引擎色带（页2 只有一条全屏色，颜色随时间切换）
-        if self.sky_color >= 0:
-            self.canvas.fill(self.sky_color)
+        # 0x4562A0：色带（栈式，只铺带子，不整屏清！—— mosaic 像素靠这个保留下来）
+        self.band_draw()
         # 0x445A30：0x6F000008 时间轴（层装载 / 快照拷贝 / 记录流）
         self.tick_ui(self.ui52c)
         self.draw()                                 # 4CC/4FC 显示表（页2 无节点）
+        self.band_advance()                         # 0x456270 帧末推进色带
         return self.flags.is_empty()
 
     def page2_finish(self) -> None:
@@ -1053,6 +1113,15 @@ class Pages:
                 ecx = int(sky[i][0])
                 if ecx > t:
                     break
+
+        # 0x456240(seq, speed, frames)：t=0x899 → (-40,12)、t=0xB93 → (-28,17)
+        # （速度是**负**的：0x4560C0 里 `if ([seq+0xC] <= 0) return` ⇒ 滚动量变负时不吞带，
+        #   而 0x4562A0 的 h=500-(-40)=540 被 480 截断 ⇒ 这两次调用在当前带表下是"无视觉变化"的，
+        #   但按原码保留调用）
+        for (tt, sp, fr) in ((0x899, -0x28, 0xC), (0xB93, -0x1C, 0x11)):
+            if t == tt:
+                self.band_scroll_for(sp, fr)
+                self.log(f"page2 t={t} band scroll speed={sp} frames={fr}")
 
         # 快照/拷贝表（0x43FB03）
         for (tt, lay, flag) in p2.get("copy", []):
