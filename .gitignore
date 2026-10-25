@@ -1,0 +1,16 @@
+# Python 字节码缓存
+__pycache__/
+*.py[cod]
+
+# Godot 编译产物（由 remake/build_assets.py 重新生成，252MB，不入库）
+remake/godot/assets/
+
+# Godot 导入缓存（.import 产物，可重建）
+remake/godot/.godot/
+
+# Godot 运行时 HOME（字体/着色器缓存，2.8MB）
+.godot_home/
+
+# 编辑器/OS 杂项
+.DS_Store
+*.swp
