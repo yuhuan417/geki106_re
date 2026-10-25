@@ -1024,6 +1024,58 @@ class Pages:
                 self.flags.set(FLAG_CLICK)
                 self.log(f"page1 end → flags |= 0x10000 (t={t})")
 
+        # 明暗脉冲表（0x43FE77）：到期项 → 0x430400(&out, a, b, 0x61000005, c)
+        #   0x61000005 的 init 是 **0x42730B**、行为 **0x427600**：
+        #   [ent+0x1C]=a（起始亮度）、[ent+0x20]=b（目标亮度）、[ent+0x24]=c（步进，signed byte）
+        for (tt, fa, fb, fc) in p2.get("flash", []):
+            if t == int(tt):
+                va, vb = int(fa), int(fb)
+                if va >= 0x8000: va -= 0x10000
+                if vb >= 0x8000: vb -= 0x10000
+                vc = int(fc) & 0xFF
+                if vc >= 0x80: vc -= 0x100
+                e2 = self.spawn(self.ui52c, 0x61000005)
+                e2.beh = "flash"
+                e2.aux = va          # [0x1C]
+                e2.a3 = vb           # [0x20]
+                e2.a4 = vc           # [0x24]
+                self.log(f"page2 t={t} 亮度 {va} → {vb} 每帧 {vc:+d}")
+
+        # 0x456240(seq, speed, frames)：t=0x899 → (-40,12)、t=0xB93 → (-28,17)
+        # （速度是**负**的：0x4560C0 里 `if ([seq+0xC] <= 0) return` ⇒ 滚动量变负时不吞带，
+        #   而 0x4562A0 的 h=500-(-40)=540 被 480 截断 ⇒ 这两次调用在当前带表下是"无视觉变化"的，
+        #   但按原码保留调用）
+        for (tt, sp, fr) in ((0x899, -0x28, 0xC), (0xB93, -0x1C, 0x11)):
+            if t == tt:
+                self.band_scroll_for(sp, fr)
+                self.log(f"page2 t={t} band scroll speed={sp} frames={fr}")
+
+        # 快照/拷贝表（0x43FB03）
+        for (tt, lay, flag) in p2.get("copy", []):
+            if t != int(tt):
+                continue
+            lay = int(lay)
+            if int(flag):
+                self.layers.snapshot(lay, self.canvas)       # 0x44D190(layer)
+                self.canvas.fill(0xB4)                       # 0x44D200(0xB4)
+                self.log(f"page2 t={t} 屏幕 → layer{lay} + 填0xB4")
+            else:
+                self.layers.copy(lay, 6, (0, 0, W, H), (0, 0))  # 0x44D060(6,(0,0),layer,(0,0,640,480))
+                self.log(f"page2 t={t} layer{lay} → layer6")
+
+        # ★ 通知页（图3）：0x43FEE4..0x440040 在栈上建 18 字节记录表 {i16 t, u8 layer, dst(x,y), src(l,t,r,b)}
+        #   记录 0：t=-58、layer=6、dst=(0x30,0x80)=(48,128)、src=(0,-,0x220=544,0x20=32)
+        #   记录 1：dst=(48,176)、src t=0x20,b=0x40 ；记录 2：dst=(48,224) … 共 5 条（48 = h*1.5）
+        #   0x4405EA 的循环按 `[rec-4]`(=t) 与计时器比较，命中即 0x44D010(mgr, layer=6, &src, &dst)
+        #   ⇒ **bm_otit(544x160) 的 5 条 32px 条带被贴到 (48,128+48*i)** —— 正是玩家截图里的图3。
+        if t >= -58:
+            # 0x4405EA 的记录表循环**每帧**执行（按 t 过滤），所以通知页是持续显示的
+            lay6 = self.layers.tab.get(6)
+            if lay6 is not None:
+                for i in range(5):
+                    self.canvas.blit(lay6.buf, (0, i * 32, 544, i * 32 + 32),
+                                     (48, 128 + i * 48), key=0)
+
     # 0x43E1C0（0x6F000002，OPMOVIE / "Now Loading" 进度屏）
     def _opmovie(self, e: UiEntity) -> None:
         # 0x43E1C0：t<0xF4 时按 RT_STRING id=t 取文件名，只对 .ggd/.bmp 调 0x455090 载入；
@@ -1157,45 +1209,6 @@ class Pages:
                 # 0x43F974..0x43F996：0x4561D0(seq, &{0xD0,0x1F4}{color,0x1F4}, 2, 1, 0)
                 self.band_push([[0xD0, 0x1F4], [self.sky_color, 0x1F4]], 2, 1, 0)
                 self.log(f"page2 t={t} sky <- 0x{self.sky_color:02X}")
-
-        # 明暗脉冲表（0x43FE77）：到期项 → 0x430400(&out, a, b, 0x61000005, c)
-        #   0x61000005 的 init 是 **0x42730B**、行为 **0x427600**：
-        #   [ent+0x1C]=a（起始亮度）、[ent+0x20]=b（目标亮度）、[ent+0x24]=c（步进，signed byte）
-        for (tt, fa, fb, fc) in p2.get("flash", []):
-            if t == int(tt):
-                va, vb = int(fa), int(fb)
-                if va >= 0x8000: va -= 0x10000
-                if vb >= 0x8000: vb -= 0x10000
-                vc = int(fc) & 0xFF
-                if vc >= 0x80: vc -= 0x100
-                e2 = self.spawn(self.ui52c, 0x61000005)
-                e2.beh = "flash"
-                e2.aux = va          # [0x1C]
-                e2.a3 = vb           # [0x20]
-                e2.a4 = vc           # [0x24]
-                self.log(f"page2 t={t} 亮度 {va} → {vb} 每帧 {vc:+d}")
-
-        # 0x456240(seq, speed, frames)：t=0x899 → (-40,12)、t=0xB93 → (-28,17)
-        # （速度是**负**的：0x4560C0 里 `if ([seq+0xC] <= 0) return` ⇒ 滚动量变负时不吞带，
-        #   而 0x4562A0 的 h=500-(-40)=540 被 480 截断 ⇒ 这两次调用在当前带表下是"无视觉变化"的，
-        #   但按原码保留调用）
-        for (tt, sp, fr) in ((0x899, -0x28, 0xC), (0xB93, -0x1C, 0x11)):
-            if t == tt:
-                self.band_scroll_for(sp, fr)
-                self.log(f"page2 t={t} band scroll speed={sp} frames={fr}")
-
-        # 快照/拷贝表（0x43FB03）
-        for (tt, lay, flag) in p2.get("copy", []):
-            if t != int(tt):
-                continue
-            lay = int(lay)
-            if int(flag):
-                self.layers.snapshot(lay, self.canvas)       # 0x44D190(layer)
-                self.canvas.fill(0xB4)                       # 0x44D200(0xB4)
-                self.log(f"page2 t={t} 屏幕 → layer{lay} + 填0xB4")
-            else:
-                self.layers.copy(lay, 6, (0, 0, W, H), (0, 0))  # 0x44D060(6,(0,0),layer,(0,0,640,480))
-                self.log(f"page2 t={t} layer{lay} → layer6")
 
         # 记录流窗口（0x43FA2D 循环）
         if self.p2_stream is not None:
