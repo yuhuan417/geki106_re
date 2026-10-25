@@ -1363,9 +1363,13 @@ class Pages:
         # 记录流窗口（0x43FA2D）：**只在 [start, end) 内**才 0x459D60 取一帧并贴屏；
         # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页2 开头闪出记录里的一小块
         # 红色「撃」（玩家实测：图3 之前有一闪而过的小红字）。
+        # 窗口判定（0x43FA35 `jl`：`end < t` 才跳过；0x43FA5D `jle`：`next.start <= t` 才继续走）
+        # ⇒ 活跃窗口 = **闭区间 [start, end]**。全 5 段长度合计 = 3+171+515+429+945 = 2063+5 = 2068，
+        # 正好等于资源 77 的记录帧数（之前写成左闭右开，每段少 1 帧 ⇒ 最后 5 条永远播不到，
+        # 流播完的 flags |= 1 也就永不触发，页2 到不了页3）。
         if self.p2_stream is not None:
             for (s0, s1) in p2.get("windows", []):
-                if int(s0) <= t < int(s1):
+                if int(s0) <= t <= int(s1):
                     recs = self.p2_stream.advance()
                     if recs is None:
                         self.flags.set(1)                    # 0x43FA47：流播完 → flags |= 1
