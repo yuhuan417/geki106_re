@@ -389,6 +389,7 @@ class TextRenderer:
             # 所以这里第二顺位就是 msgothic.ttc；两者都没有才用 Noto 兜底。
             for cand in (str(REMAKE / "fonts/msmincho.ttc"),
                          str(REMAKE / "fonts/msmincho.ttf"),
+                         str(REMAKE / "fonts/msgothic.ttc"),
                          "/mnt/c/Windows/Fonts/msmincho.ttc",
                          "/mnt/c/Windows/Fonts/msgothic.ttc",
                          "C:/Windows/Fonts/msmincho.ttc",
@@ -1107,6 +1108,8 @@ class Pages:
                 self._menu_root(e)
             elif e.beh == "menu_row":
                 self._menu_row(e)
+            elif e.beh == "scene_bg":
+                self._scene_bg(e)
             elif e.beh == "fade_in":
                 self._fade_in(e)
             elif e.beh == "flash":
@@ -1240,8 +1243,15 @@ class Pages:
         if st0 > 4:
             st0 = 0
         if st0 == 0:
-            # 0x4255FF：0x449E10(ent,0,10) → 清 4CC 队列 + 层13←RT_STRING 10 + 色键0
-            self.ui46c.clear()
+            # 0x4255FF → 0x449E10(ent, 0, 10)：
+            #   ① 0x45C740 取"当前场景"描述 → ② 0x45FE10 应用（卸层/装层/色带/4CC 背景节点）
+            #   ③ 0x44C640(13,10) + 0x44CE60(13,0) 最后才装层13
+            sc = self.data.get("scene0")
+            if sc:
+                self.apply_scene(sc)
+            else:
+                self.ui46c.clear()
+                self.log("page3 state0：scene0 数据缺失（§16.34 待解），仅装层13")
             self.layers.bind(13, 10)
             self.layers.color_key(13, 0)
             for i in range(8):                            # 0x425633..0x425656 循环 8 次
@@ -1323,6 +1333,58 @@ class Pages:
             else:
                 d.active = (e.aux & 0x20) != 0
         e.aux += 1
+
+    # 0x430520（类型 0x4100000D 场景背景实体的行为）：计数器自减，到 0 自尽
+    def _scene_bg(self, e: UiEntity) -> None:
+        """0x430520：`[ent+0x1C]-- ; ==0 → 返回 0(自尽)`。
+
+        构造时 `[ent+0x1C] = -1`（0x4293FF），所以永不归零 ⇒ **静态背景节点**。
+        """
+        v = int(e.a3) - 1
+        e.a3 = v
+        if v == 0:
+            e.alive = False
+            if e.disp:
+                e.disp.active = False
+
+    # 0x45FE10（= 0x402072）：把"当前场景"重新应用一遍
+    def apply_scene(self, sc: dict) -> None:
+        """0x45FE10 逐条：卸全部层 → 逐层装载(层号=下标)+色键0 → 推色带 → 生成背景节点入 4CC。
+
+        场景描述（84 字节记录 + 层ID数组 + 色带表 + 0x20 字节实体记录）在原件里是
+        **运行期数据**（`0x4AB5CC` / `0x4AC4EC` 两个实例，由 `[0x56CCD8]` 选），
+        见 ANALYSIS §16.34；复刻侧改从 pages_data["scene0"] 读同样的字段。
+        """
+        # 0x45FE56：先把 14 个层全部销毁（type != 0x41000012 时）
+        self.layers.free_all()
+        # 0x45FE5D：层号 = 下标，从层0 起连续装载，并设色键0
+        for i, rid in enumerate(sc.get("layers", [])):
+            rid = int(rid)
+            if rid:
+                self.layers.load(i, rid)
+                self.layers.color_key(i, 0)          # 0x44CE60(层i, 0)
+        # 0x45FE90：0x4561D0(0x4CD484, 表, 表项数, a, b)
+        bt = sc.get("band") or []
+        if bt:
+            a, b = (int(v) for v in sc.get("band_args", (2, 1)))
+            self.band_push([[int(e["color"]) & 0xFF, int(e["h"]) & 0xFFFF] for e in bt],
+                           len(bt), a, b, 0)
+        # 0x45FEAC：背景实体记录 {+0 层号, +4 源矩形*, +0x14 目标点*, +0x1c 启用} → 4CC
+        self.ui46c.clear()
+        for rec in sc.get("ents", []):
+            if not int(rec.get("on", 1)):
+                continue
+            lay = int(rec["layer"])
+            if lay == 0x0D:                          # 0x45FEB6：层13 的记录跳过
+                continue
+            e = UiEntity(type_word=0x4100000D)
+            e.beh = "scene_bg"
+            e.a3 = -1                                # 0x4293FF
+            e.disp = DisplayNode(lay,
+                                 [int(v) for v in rec["src"]],
+                                 [int(v) for v in rec["dst"]])
+            self.ui46c.append(e)
+        self.log(f"scene 应用：层 {len(sc.get('layers', []))} / 色带 {len(bt)} / 背景节点 {len(self.ui46c)}")
 
     # 0x449DA0：生成 0x61000005(0 → -255, 步进 -8) = 32 帧淡出
     def _menu_fade_out(self) -> None:
