@@ -74,6 +74,15 @@ def load_data() -> dict:
         return json.load(f)
 
 
+# 0x44CAA0 载入调色板时先做的一次"亮度/对比"变换（0x44CCBD 的 0x44B790 调用）：
+#   a2 = field(0xFE000000)*4 - 0xC8、a3 = field(0x1FC0000)*4 - 0xC8
+#   （0x45AFC0 返回的是 `([App+4] & mask) >> 位号` 的**字段值**，不是位号）
+# 字段 = 50 时 a2 = a3 = 0 ⇒ 恒等变换。这两个字段由 GRPD/配置数据写进 [App+4]，
+# 游戏内没有对应 ini 键（ini 只有 OPMOVIE/CHANGEDISPLAY/SND/MOUSE1-2/JOY1-3/...），
+# 出厂默认下为恒等，故复刻版取 (0,0)；若将来解出配置来源再填。
+PAL_ADJUST = (0, 0)
+
+
 def load_palette() -> np.ndarray:
     """bmcm/bm_pal.bmp → (256,3) uint8；与 pages_data.json 的 palette 一致，优先读 bmp。"""
     p = GAME_DIR / "bmcm" / "bm_pal.bmp"
@@ -112,14 +121,18 @@ def fade_palette(pal: np.ndarray, a: int, b: int) -> np.ndarray:
         v = clamp(src + ((src - 0x80) * b >> 6), 0, 255)
         dst = clamp(v + a, 0, 255)
 
-    逐通道作用于 256 项目的调色板；b=0 时就是纯亮度 a（a=-256 → 全黑，a=0 → 原色）。
+    原码 `ecx = 0xFF` ⇒ **只处理 0..254 共 255 项**（第 255 项原样保留，循环体里
+    `lodsb×3 / stosb×3 / inc esi / inc edi` 跳过每项的 4 号字节）。b=0 时就是纯亮度 a
+    （a=-256 → 全黑，a=0 → 原色）。调用方 `add esp,0x28` 自己清栈（0x44B790 是裸 `ret`）。
     """
-    v = pal.astype(np.int32)
+    out = pal.copy()
+    v = pal[:255].astype(np.int32)
     v = v + (((v - 128) * int(b)) >> 6)
     np.clip(v, 0, 255, out=v)
     v = v + int(a)
     np.clip(v, 0, 255, out=v)
-    return v.astype(np.uint8)
+    out[:255] = v.astype(np.uint8)
+    return out
 
 
 class Canvas:
