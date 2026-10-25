@@ -91,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     pend_dx = pend_dy = 0          # 自上一"帧"以来累积的鼠标位移
     pend_key = 0                   # 自上一帧以来最后一次映射到的键码
     pend_shot = pend_lock = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
+    pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
     while running and pages.page != 0 and not pages.quit:
         # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
         keycode = 0
@@ -103,6 +104,14 @@ def main(argv: list[str] | None = None) -> int:
                     pend_shot = True
                 elif ev.key in (pygame.K_x, pygame.K_v):
                     pend_lock = True
+                elif ev.key == pygame.K_LEFT:
+                    pend_dir["left"] += 1
+                elif ev.key == pygame.K_RIGHT:
+                    pend_dir["right"] += 1
+                elif ev.key == pygame.K_UP:
+                    pend_dir["up"] += 1
+                elif ev.key == pygame.K_DOWN:
+                    pend_dir["down"] += 1
                 if ev.key == pygame.K_1:
                     pages.finish(); pages.page = 1; pages.enter()
                 elif ev.key == pygame.K_2:
@@ -125,8 +134,11 @@ def main(argv: list[str] | None = None) -> int:
             # 所以把"本间隔内出现过 KEYDOWN"也算作按下，只作用于下一个到期帧。
             "shot": keys[pygame.K_c] or pend_shot,
             "lock": keys[pygame.K_x] or keys[pygame.K_v] or pend_lock,
-            "left": keys[pygame.K_LEFT], "right": keys[pygame.K_RIGHT],
-            "up": keys[pygame.K_UP], "down": keys[pygame.K_DOWN],
+            # 方向键同理：按住靠 get_pressed()，**点按**靠事件锁存（否则一次快按会落在两帧之间）
+            "left": keys[pygame.K_LEFT] or pend_dir["left"] > 0,
+            "right": keys[pygame.K_RIGHT] or pend_dir["right"] > 0,
+            "up": keys[pygame.K_UP] or pend_dir["up"] > 0,
+            "down": keys[pygame.K_DOWN] or pend_dir["down"] > 0,
         }
 
         # ---- 帧门 0x45A5A0：到期才走一帧
@@ -140,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
             pend_dx = pend_dy = 0
             pend_key = 0
             pend_shot = pend_lock = False
+            for _k in pend_dir:
+                pend_dir[_k] = 0
             pages.advance()
             frame += 1
             # ---- 显示（0x44C350 索引→RGB + present）
