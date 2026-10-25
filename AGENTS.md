@@ -19,6 +19,17 @@
    注意：**只经 thunk 调用的函数要查 thunk 的 caller**（如 `0x40184D`→0x451110），
    页调度是 `jmp [ecx*4+0x4595E4]`，入口已由跳表播种自动展开。
 
+## 版本管理（本地 git）
+
+本目录是一个本地 git 仓库（没有远端，纯本地存档）。约定：
+
+- **每次要试错/大改之前先 `git commit`**（拿不准就 `git stash`），改完验证再提交一次。
+- 提交信息写"做了什么 + 依据的地址/结论"，例如 `页3：按 0x427710 实现淡入（a=-256→0）`。
+- 里程碑打 tag：`git tag pages1-3`（当前：页1 完成、页2 记录流、页3 菜单+淡入起步）。
+- 提交前可先跑无头验证：`python3 remake/pygame/run.py --frames 300 --headless --fixed`。
+- 大件不入库（`.gitignore`）：`remake/godot/assets/`（252MB 编译产物）、`remake/godot/.godot/`（导入缓存）、
+  `.godot_home/`、`__pycache__/`。需要时用 `python3 remake/build_assets.py` 重建。
+
 ## 文档地图
 
 | 文件 | 内容 | 地位 |
