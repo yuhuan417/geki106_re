@@ -1198,6 +1198,23 @@ class Pages:
                 self.band_scroll_for(sp, fr)
                 self.log(f"page2 t={t} band scroll speed={sp} frames={fr}")
 
+        # 记录流窗口（0x43FA2D）：**只在 [start, end) 内**才 0x459D60 取一帧并贴屏；
+        # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页2 开头闪出记录里的一小块
+        # 红色「撃」（玩家实测：图3 之前有一闪而过的小红字）。
+        if self.p2_stream is not None:
+            for (s0, s1) in p2.get("windows", []):
+                if int(s0) <= t < int(s1):
+                    recs = self.p2_stream.advance()
+                    if recs is None:
+                        self.flags.set(1)                    # 0x43FA47：流播完 → flags |= 1
+                        self.log(f"page2 t={t} 记录流结束 → flags=0x{self.flags.bits:X}")
+                    else:
+                        for (lay, src, dst) in recs:
+                            lay_tab = self.layers.tab.get(lay)
+                            if lay_tab is not None:
+                                self.canvas.blit_scaled(lay_tab.buf, src, dst, key=0)
+                    break
+
         # 快照/拷贝表（0x43FB03）
         for (tt, lay, flag) in p2.get("copy", []):
             if t != int(tt):
@@ -1223,23 +1240,6 @@ class Pages:
                 for i in range(5):
                     self.canvas.blit(lay6.buf, (0, i * 32, 544, i * 32 + 32),
                                      (48, 128 + i * 48), key=0)
-
-        # 记录流窗口（0x43FA2D）：**只在 [start, end) 内**才 0x459D60 取一帧并贴屏；
-        # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页2 开头闪出记录里的一小块
-        # 红色「撃」（玩家实测：图3 之前有一闪而过的小红字）。
-        if self.p2_stream is not None:
-            for (s0, s1) in p2.get("windows", []):
-                if int(s0) <= t < int(s1):
-                    recs = self.p2_stream.advance()
-                    if recs is None:
-                        self.flags.set(1)                    # 0x43FA47：流播完 → flags |= 1
-                        self.log(f"page2 t={t} 记录流结束 → flags=0x{self.flags.bits:X}")
-                    else:
-                        for (lay, src, dst) in recs:
-                            lay_tab = self.layers.tab.get(lay)
-                            if lay_tab is not None:
-                                self.canvas.blit_scaled(lay_tab.buf, src, dst, key=0)
-                    break
 
     def present(self) -> None:
         """0x44D740 的调色板部分：`frame=++[0xC90]`，仅偶数帧且 [0xC8C]!=0 时执行。
