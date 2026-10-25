@@ -540,8 +540,19 @@ class Input:
                 mdx = int(round(mdx / n * self.RADIUS))
                 mdy = int(round(mdy / n * self.RADIUS))
             dx += mdx; dy += mdy
-        # 0x44EB60：记录里的 X/Y = [mgr+0x14]/[mgr+0x18] + 本帧位移，累加**不钳位**
-        # （钳位发生在玩家实体 0x448C70 自己那里：x≤446、y≤400）
+        # 0x44E9A0..0x44E9E2：**先钳位移再加**（不是加完再钳）
+        #   if (X + dx > X上限) dx = X上限 - X
+        #   if (Y + dy < Y下限) dy = Y下限 - Y
+        #   if (Y + dy > Y上限) dy = Y上限 - Y
+        # 指针是屏幕光标，边界即 640×480 画面（页3 菜单 4 条 ×128px 带正好铺满 Y∈[0,512)）。
+        if self.x + dx > W - 1:
+            dx = (W - 1) - self.x
+        if self.x + dx < 0:
+            dx = -self.x
+        if self.y + dy > H - 1:
+            dy = (H - 1) - self.y
+        if self.y + dy < 0:
+            dy = -self.y
         self.x += dx
         self.y += dy
         r.x, r.y, r.dx, r.dy = self.x, self.y, dx, dy
