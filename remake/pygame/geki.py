@@ -260,6 +260,11 @@ class Layers:
         self.tab[n] = Layer(int(w), int(h))
         return True
 
+    def free_all(self) -> None:
+        """0x44CEE0：销毁全部 14 个层表面（循环 0..13 调层析构 0x401875(层,0)）。"""
+        for n in range(14):
+            self.tab[n] = Layer(W, H)
+
     def color_key(self, n: int, idx: int) -> None:
         """0x44CE60：SetColorKey(DDCKEY_SRCBLT, idx) —— 设色键，不是清屏。"""
         if n in self.tab:
@@ -762,6 +767,7 @@ class Pages:
     def page1_finish(self) -> None:
         # 0x452010：KillTimer → 0x44CEE0 → r=0x45B070(flags)
         self.timer.kill()
+        self.layers.free_all()
         r = self.flags.lowest()
         self.screen_fill = -1
         if r in (0x100, 0x200):
@@ -858,7 +864,7 @@ class Pages:
 
     def page2_step(self) -> bool:
         # 0x452EB0：0x458B80(一次) → 0x458CB0(present) → 0x44EB60 → SetCursorPos(320,240)
-        self.inp.x, self.inp.y = 320, 240
+        # SetCursorPos 只回中**硬件**光标，虚拟指针 [mgr+0x14/0x18] 由 0x44EB60 累加位移
         # [0x4AB596]/[0x4AB597]（左右键按下沿）→ flags |= 0x10000 → 收尾去页3
         if self.inp.rec.e0 or self.inp.rec.e1:
             self.flags.set(FLAG_CLICK)
@@ -884,6 +890,7 @@ class Pages:
         self.present()
         self.canvas.fill(0xB4)
         self.present()
+        self.layers.free_all()          # 0x452FD3 0x44CEE0
         self.p2_stream = None
         r = self.flags.lowest()
         if r in (0x100, 0x200):
@@ -928,15 +935,18 @@ class Pages:
         self.keys.update(self.inp.rec)                 # 0x4AB5B0 位图 = 攻击/锁定按住
         # 0x452252：0x458FD0(rec[6]) 键码 → 旗标（码1 = ESC → 0x200）
         self.key_command(self.inp.rec.key)
-        # 0x45225F：0x4562A0(0x4CD484) 色带推进
+        self.begin_frame()                             # 0x458CB0 → 0x44D740 的 ±255 整屏填充
+        # 0x45225F：0x4562A0(0x4CD484) 色带（页3 不推带 ⇒ 沿用上一页留下的带 = 0xB4 黑屏）
+        self.band_draw()
         # 0x452269：0x458F80 = 0x43A350(4CC) → 0x430840(渲4CC) → 0x44B0D0(4FC)
-        #           → 0x445A30(52C) → 0x430840(渲4FC) → 0x456270(色带)
+        #           → 0x445A30(52C) → 0x430840(渲4FC) → 0x456270(色带推进)
         self.tick_ui(self.ui4fc)          # 4FC 行为（菜单总控 + 8 行）
         self.tick_ui(self.ui52c)          # 52C 行为（亮度渐变 0x61000005）
         self.ui46c = [e for e in self.ui46c if e.alive]
         self.ui4fc = [e for e in self.ui4fc if e.alive]
         self.ui52c = [e for e in self.ui52c if e.alive]
         self.draw()
+        self.band_advance()               # 0x456270
         # 0x452270：0x45AFF0(0x4AB5C0, 0) → 旗标是否全空
         return self.flags.is_empty()
 
@@ -948,9 +958,17 @@ class Pages:
             0x100000 → 页0              0x2000000 → 页14
             其它 → 页0xFF（错误退出）
         """
+        # 0x4522A3 0x45A510(0x4AB570)：定时器收束；失败 → flags |= 0x40
         self.timer.kill()
+        # 0x4522BD 0x44D200(0xB4) → 0x4522CC 0x458CB0(present)
         self.canvas.fill(0xB4)
+        self.present()
+        # 0x4522D3 0x44D200(0xB4) → 0x4522E2 0x458CB0(present)
         self.canvas.fill(0xB4)
+        self.present()
+        # 0x4522E9 0x44CEE0：销毁 14 个层表面
+        self.layers.free_all()
+        # 0x4522F3 0x45B070(0x4AB5C0)：取最低置位 → 页号表
         r = self.flags.lowest()
         if r in (0x100, 0x200, 0x100000):
             self.page = 0
