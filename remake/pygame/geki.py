@@ -1338,10 +1338,17 @@ class Pages:
                     e.p["sel"] = sel
                     self._menu_fade_out()
                 else:
-                    # 0x4256DB：攻击键按下但候选为 0 → 用锁定键状态构造 2/3 并挪虚拟指针
-                    k2 = 1 if self.keys.test(2) else 0
-                    sel = 2 + k2
+                    # 0x4256DB..0x425729：候选为 0（「遊戲開始」）时按下确认 **不是确定**，
+                    # 而是切到左列（rows 4..7）并把指针挪到对应带：
+                    #   base = keys.test(1) ? 4 : 6        （0x45AFF0(0x4AB5B0,1) = 攻击按住）
+                    #   base += keys.test(2) ? 1 : 0       （0x45AFF0(0x4AB5B0,2) = 锁定按住）
+                    #   sel = base；0x44E620(inp, 0, sel*128 - 0x1C0)
+                    # 于是 sar(y,7)=0..3，配上 a4 的 bit2 → sel 稳定落在 4..7。
+                    k1 = self.keys.test(1)
+                    k2 = self.keys.test(2)
+                    sel = (4 if k1 else 6) + (1 if k2 else 0)
                     self.inp.set_pos(0, sel * 128 - 0x1C0)
+                    self.log(f"page3 state2：確認於「遊戲開始」→ 切左列 sel={sel} y={sel*128-0x1C0}")
             else:
                 if self.inp.rec.e1 and sel >= 4:          # 0x425751：锁定键按下且列为 1 → 归 0
                     sel = 0
