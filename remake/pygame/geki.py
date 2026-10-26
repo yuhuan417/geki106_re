@@ -1115,7 +1115,20 @@ class Pages:
         e = UiEntity(type_word=type_word, a3=a3, a4=a4)
         hi = type_word & 0xFF000000
         if hi == 0x42000000:
-            if type_word == 0x42000004:
+            # 0x42 家族（脚本 OP03 的摆放物）。目前只实现 0x42000004（色块条）；
+            # 其余先挂一个安全空行为，避免分发时 e.beh 未定义导致崩溃（§16.81 的 ctor 表）：
+            #   0x42000001 ctor 0x43567C / 行为 0x437940（阶段节拍，t 满 0x102 结束）
+            #   0x42000002 ctor 0x4356E5 / 行为 0x437B00（计时 spawner）
+            #   0x42000005 ctor 0x4358B4 / 行为 0x437E50
+            if type_word == 0x42000001:
+                e.beh = "phase_driver"
+            elif type_word == 0x42000002:
+                e.beh = "timed_spawner"
+                e.a3 = -72          # [+0x20]
+                e.aux = 144         # [+0x24]
+            elif type_word == 0x42000005:
+                e.beh = "op03_misc"
+            elif type_word == 0x42000004:
                 # 0x43578A ctor：尺寸按 desc 索引取 {12,18,36,54}
                 e.beh = "bar_block"               # 行为 0x437DB0
                 e.aux = 0x24                      # [+0x24] 初值（每帧 -1）
@@ -1201,6 +1214,12 @@ class Pages:
                 self._title_timeline(e)
             elif e.beh == "opmovie":
                 self._opmovie(e)
+            elif e.beh == "phase_driver":
+                self._phase_driver(e)
+            elif e.beh == "timed_spawner":
+                self._timed_spawner(e)
+            elif e.beh == "op03_misc":
+                self._op03_misc(e)
             elif e.beh == "bar_block":
                 self._bar_block(e)
             elif e.beh == "scene_segment":
@@ -1262,9 +1281,33 @@ class Pages:
                 self.flags.set(FLAG_CLICK)
                 self.log(f"page1 end → flags |= 0x10000 (t={t})")
 
+    # 0x437940（0x42000001，阶段节拍）
+    def _phase_driver(self, e: UiEntity) -> None:
+        e.t += 1
+        if e.t >= 0x102:
+            e.alive = False
+
+    # 0x437B00（0x42000002，计时 spawner：-72→0、144 每帧 -2）
+    def _timed_spawner(self, e: UiEntity) -> None:
+        e.t += 1
+        if e.a3 < 0x280:
+            e.a3 += 1
+            e.aux -= 2
+        else:
+            e.alive = False
+
+    # 0x437E50（0x42000005，暂不绘制）
+    def _op03_misc(self, e: UiEntity) -> None:
+        e.t += 1
+
     # 0x437DB0（0x42000004，色块条：平移 + 变宽）
     def _bar_block(self, e: UiEntity) -> None:
         """x += v>>3、y += v>>4、宽度 = 2*[+0x28]*计数、左边界 = x-宽度（§16.86）。"""
+        if e.disp is None:                            # 没有显示节点时（无源矩形）不画
+            e.t += 1
+            if e.aux <= 0:
+                e.alive = False
+            return
         v = e.aux
         e.a3 += 1                                     # [+0x20] 计数
         e.aux = v - 1
