@@ -819,6 +819,14 @@ class Pages:
         self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.p1_done.clear()
         # a3 = bitindex(0x4AB5B0, 0x2000) 即 ini 的 OPMOVIE 开关（0x43E09A 分支用）
+        # 开场脚本（资源 65 的 flow-VM 程序，§16.78）：opmovie 里按 OP03 生成摆放实体
+        try:
+            import json as _json
+            self.opng_script = _json.loads(
+                (REMAKE / "opng_script.json").read_text(encoding="utf-8"))
+        except Exception as _e:
+            self.opng_script = []
+            self.log(f"page1：opng_script.json 读取失败 {_e}")
         self.spawn(self.ui52c, 0x6F000001, a3=1 if OPMOVIE else 0)
         self.timer.set_period(0)                   # SetPeriod(0) → 60fps
         self.log("page1.enter")
@@ -1347,6 +1355,24 @@ class Pages:
         # 摆指针(idx*49+0x18) → 生成 0x6F000003（段渲染）。触发条件未完全确认，暂按首帧生成一次。
         if e.t == 0:
             self.opmovie_imgs = []                     # 场景层列表（累积）
+            # 脚本 res_65_OpngStream 的 OP03 条目（全在 t=0）：按 type 生成摆放实体。
+            # 坐标只做 16 位截断（§16.84：真正的落位由父坐标 + 0x30 / 位移量决定，后续接）
+            self.opmovie_op03 = 0
+            for _ins in getattr(self, "opng_script", []):
+                if _ins.get("op") != "OP03" or not _ins.get("args"):
+                    continue
+                _a = _ins["args"][0]
+                if len(_a) < 3:
+                    continue
+                _x, _y, _ty = int(_a[0]) & 0xFFFF, int(_a[1]) & 0xFFFF, int(_a[2])
+                if _ty < 0:
+                    _ty += 1 << 32
+                if (_ty & 0xFF000000) != 0x42000000:
+                    continue
+                _ent = self.spawn(self.ui52c, _ty)
+                if _ent is not None and _ent.disp is not None:
+                    _ent.disp.dst[0], _ent.disp.dst[1] = _x, _y
+                self.opmovie_op03 += 1
         if e.t == 1:
             self.scene_ab = False                      # [0x56CCD8] = 0 → 用 0x4AB5CC 那套表
             self.spawn(self.ui52c, 0x6F000003)
