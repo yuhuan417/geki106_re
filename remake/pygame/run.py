@@ -88,7 +88,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[video] window_size={pygame.display.get_window_size()} pos={_pos} "
               f"active={pygame.display.get_active()} bits={screen.get_bitsize()} "
               f"displays={pygame.display.get_num_displays()}", flush=True)
-        if _drv == "dummy":
+        if _drv in ("offscreen", "dummy"):
+            print(f"[video] 警告：SDL 驱动是 {_drv} ⇒ 有帧率但**不会显示窗口**。"
+                  "WSLg 下通常是 Wayland 不可用（libdecor 失败）后 SDL 自动回退，"
+                  "或 X server 无响应（可先 `xset -q` 自检）。", file=sys.stderr, flush=True)
+        elif _drv == "dummy":
             print("[video] 警告：当前是 dummy 驱动 ⇒ 不会弹窗！WSLg 请执行 "
                   "export DISPLAY=:0（或 unset SDL_VIDEODRIVER）后重跑。", file=sys.stderr, flush=True)
     # 原作每帧 SetCursorPos(320,240) + 相对位移采样，系统光标不可见
