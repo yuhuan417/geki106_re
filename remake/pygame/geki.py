@@ -789,10 +789,21 @@ class Pages:
 
     def advance(self) -> None:
         """一帧：step 返回 0 → finish（页号切换）→ 页机重新分发。"""
+        if self.page == 0xFF and not self.quit:
+            # 0x4595A8：`OutputDebugString("This program will be closed."@0x4A4A64)` +
+            # 页号清 0 → 0x4595CD PostQuitMessage(0)。即整程序退出。
+            self.log('page 0xFF → "This program will be closed." → 退出')
+            self.quit = True
+            return
         if self.page == 0 or self.quit:
             return
         if not self.step():
             self.finish()
+            if self.page == 0xFF:
+                # 0x4595A8 → 0x4595CD PostQuitMessage：整程序退出
+                self.log('page 0xFF → "This program will be closed." → 退出')
+                self.quit = True
+                return
             if self.page != 0 and not self.quit:
                 self.enter()
 
@@ -1597,10 +1608,10 @@ class Pages:
             # （= 资源77 帧数），所以"发现播完"的那一次调用必落在最后一个窗口之后
             # （t > 4299）；不补这一步，页2 就永远等不到收尾旗标。
             if t > int(p2["windows"][-1][1]) and self.p2_stream.pos >= self.p2_stream.size:
-                # 原码 0x43FA47 是 `flags |= 1`，而 0x452FE7 的映射里 0x1 → 页 0xFF；
-                # 但真机实测（自动跑完不点鼠标）该时刻进入的是**菜单页**，说明 0xFF 在页机
-                # 0x459360 里有特殊处理（待查）。此处按实测行为走 0x10000 → 页3。
-                self.flags.set(FLAG_CLICK)
+                # 原码 0x43FA47 `flags |= 1` → 0x452FE7 映射到页 0xFF；
+                # 页 0xFF 的处理器 0x4595A8 会打印 "This program will be closed."(0x4A4A64)
+                # 并把页号清 0，随后 0x4595CD 调 PostQuitMessage ⇒ **不点鼠标就自动关游戏**。
+                self.flags.set(1)
                 self.log(f"page2 t={t} 记录流已播完 → flags=0x{self.flags.bits:X}")
 
         # 快照/拷贝表（0x43FB03）
