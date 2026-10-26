@@ -60,7 +60,11 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     # 原作是固定 640x480 8bpp 全屏；这里固定 640x480 窗口，1:1 像素，不缩放、不可 resize
     os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "1")
-    pygame.init()
+    # 复刻版没有音频：把音频子系统钉成 dummy，并**不用 pygame.init()**（它会连带初始化
+    # mixer，在没有声卡的 WSLg/容器里会卡住或长时间探测 ALSA，表现为"启动就卡"）。
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    pygame.display.init()
+    pygame.font.init()
     pygame.display.set_caption("撃破伝 v1.06 — 640x480 (pages 1-3)")
     screen = pygame.display.set_mode(WINDOW_SIZE, 0, 32)
     if tuple(screen.get_size()) != WINDOW_SIZE:
