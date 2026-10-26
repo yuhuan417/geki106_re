@@ -1122,6 +1122,13 @@ class Pages:
               a3: int = 0, a4: int = 0) -> UiEntity:
         e = UiEntity(type_word=type_word, a3=a3, a4=a4)
         hi = type_word & 0xFF000000
+        if hi == 0x46000000:
+            if type_word == 0x46000001:
+                # 0x435AF8 ctor：矩形 (0x120,0x180)-(0x1DF,0x23F) = (288,384)-(479,575)
+                e.beh = "panel_46"                # 行为 0x437FC0
+                e.rect = (0x120, 0x180, 0x1DF, 0x23F)
+                e.a3 = 0                          # 滑出位移累计
+            return e
         if hi == 0x42000000:
             # 0x42 家族（脚本 OP03 的摆放物）。目前只实现 0x42000004（色块条）；
             # 其余先挂一个安全空行为，避免分发时 e.beh 未定义导致崩溃（§16.81 的 ctor 表）：
@@ -1228,6 +1235,8 @@ class Pages:
                 self._timed_spawner(e)
             elif e.beh == "op03_misc":
                 self._op03_misc(e)
+            elif e.beh == "panel_46":
+                self._panel46(e)
             elif e.beh == "bar_block":
                 self._bar_block(e)
             elif e.beh == "scene_segment":
@@ -1288,6 +1297,16 @@ class Pages:
             else:
                 self.flags.set(FLAG_CLICK)
                 self.log(f"page1 end → flags |= 0x10000 (t={t})")
+
+    # 0x437FC0（0x46000001，面板：t<=160 静止，之后线性滑出）
+    def _panel46(self, e: UiEntity) -> None:
+        e.t += 1
+        if e.t > 0xA0:                                # 0x437FD2：eax = 0xA0 - t
+            v = 0xA0 - e.t
+            e.disp.dst[0] += v                        # x 全量
+            e.disp.dst[1] += v >> 1                   # y 半量（0x437FDA sar 1）
+        if e.disp.dst[1] < -0xA0:                     # 0x437FF5：父 y < -160 结束
+            e.alive = False
 
     # 0x437940（0x42000001，阶段节拍）
     def _phase_driver(self, e: UiEntity) -> None:
@@ -1367,7 +1386,7 @@ class Pages:
                 _x, _y, _ty = int(_a[0]) & 0xFFFF, int(_a[1]) & 0xFFFF, int(_a[2])
                 if _ty < 0:
                     _ty += 1 << 32
-                if (_ty & 0xFF000000) != 0x42000000:
+                if (_ty & 0xFF000000) not in (0x42000000, 0x46000000):
                     continue
                 _ent = self.spawn(self.ui52c, _ty)
                 if _ent is not None and _ent.disp is not None:
