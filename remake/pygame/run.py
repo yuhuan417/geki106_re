@@ -64,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[video] 警告: 实际窗口 {screen.get_size()} != {WINDOW_SIZE}", file=sys.stderr)
     else:
         print(f"[video] 固定 {WINDOW_SIZE[0]}x{WINDOW_SIZE[1]}（1:1，无缩放）")
+        _drv = pygame.display.get_driver()
+        print(f"[video] SDL 驱动 = {_drv}  DISPLAY={os.environ.get('DISPLAY','(未设置)')!r}  "
+              f"WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY','(未设置)')!r}", flush=True)
+        if _drv == "dummy":
+            print("[video] 警告：当前是 dummy 驱动 ⇒ 不会弹窗！WSLg 请执行 "
+                  "export DISPLAY=:0（或 unset SDL_VIDEODRIVER）后重跑。", file=sys.stderr, flush=True)
     # 原作每帧 SetCursorPos(320,240) + 相对位移采样，系统光标不可见
     pygame.mouse.set_visible(False)
     clock_font = pygame.font.Font(None, 16) if args.debug_hud else None
