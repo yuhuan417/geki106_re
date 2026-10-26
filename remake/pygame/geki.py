@@ -735,6 +735,7 @@ class Pages:
         self.ui4fc: list[UiEntity] = []
         self.ui46c: list[UiEntity] = []
         self.screen_fill = -1
+        self.bar_color = 0xD9          # 0x42000004 色块条用的索引（ctor 里由 desc 决定，暂取亮色）
         self.trace: list[str] = []
         self.p1_done: set[int] = set()
         self.p2_loaded: dict[int, int] = {}
@@ -1113,6 +1114,13 @@ class Pages:
               a3: int = 0, a4: int = 0) -> UiEntity:
         e = UiEntity(type_word=type_word, a3=a3, a4=a4)
         hi = type_word & 0xFF000000
+        if hi == 0x42000000:
+            if type_word == 0x42000004:
+                # 0x43578A ctor：尺寸按 desc 索引取 {12,18,36,54}
+                e.beh = "bar_block"               # 行为 0x437DB0
+                e.aux = 0x24                      # [+0x24] 初值（每帧 -1）
+                e.a4 = 0x18                       # [+0x28]，宽度系数
+            return e
         if hi == 0x6F000000:
             idx = type_word - 0x6F000001
             if idx == 0:
@@ -1193,6 +1201,10 @@ class Pages:
                 self._title_timeline(e)
             elif e.beh == "opmovie":
                 self._opmovie(e)
+            elif e.beh == "bar_block":
+                self._bar_block(e)
+            elif e.beh == "scene_segment":
+                self._scene_segment(e)
             elif e.beh == "menu_root":
                 self._menu_root(e)
             elif e.beh == "menu_row":
@@ -1249,6 +1261,23 @@ class Pages:
             else:
                 self.flags.set(FLAG_CLICK)
                 self.log(f"page1 end → flags |= 0x10000 (t={t})")
+
+    # 0x437DB0（0x42000004，色块条：平移 + 变宽）
+    def _bar_block(self, e: UiEntity) -> None:
+        """x += v>>3、y += v>>4、宽度 = 2*[+0x28]*计数、左边界 = x-宽度（§16.86）。"""
+        v = e.aux
+        e.a3 += 1                                     # [+0x20] 计数
+        e.aux = v - 1
+        e.disp.dst[0] += v >> 3
+        e.disp.dst[1] += v >> 4
+        w = 2 * e.a4 * e.a3
+        x, y = e.disp.dst
+        if w > 0:
+            self.canvas.fill_rect((max(0, x - w), max(0, y), min(W, x), min(H, y + 4)),
+                                  self.bar_color)
+        if e.aux <= 0:
+            e.alive = False
+        e.t += 1
 
     # 0x43E410（0x6F000003，场景段渲染）
     def _scene_segment(self, e: UiEntity) -> None:
