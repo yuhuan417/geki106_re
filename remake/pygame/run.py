@@ -60,13 +60,16 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     # 原作是固定 640x480 8bpp 全屏；这里固定 640x480 窗口，1:1 像素，不缩放、不可 resize
     os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "1")
+    # WSLg 下窗口有时会被摆到屏幕外/异常的坐标上（表现为"窗口没弹出来"但 active=True）
+    os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "80,80")
     # 复刻版没有音频：把音频子系统钉成 dummy，并**不用 pygame.init()**（它会连带初始化
     # mixer，在没有声卡的 WSLg/容器里会卡住或长时间探测 ALSA，表现为"启动就卡"）。
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.display.init()
     pygame.font.init()
     pygame.display.set_caption("撃破伝 v1.06 — 640x480 (pages 1-3)")
-    screen = pygame.display.set_mode(WINDOW_SIZE, 0, 32)
+    # depth 交给 SDL 自己选（XWayland 上硬要 32bpp visual 有可能拿不到，窗口建了却不显示）
+    screen = pygame.display.set_mode(WINDOW_SIZE, 0)
     if tuple(screen.get_size()) != WINDOW_SIZE:
         print(f"[video] 警告: 实际窗口 {screen.get_size()} != {WINDOW_SIZE}", file=sys.stderr)
     else:
@@ -78,9 +81,13 @@ def main(argv: list[str] | None = None) -> int:
         pygame.event.pump()
         screen.fill((0, 0, 0))
         pygame.display.flip()
-        print(f"[video] window_size={pygame.display.get_window_size()} "
-              f"active={pygame.display.get_active()} focus={pygame.display.get_active()}",
-              flush=True)
+        try:
+            _pos = pygame.display.get_window_position()
+        except Exception:
+            _pos = "?"
+        print(f"[video] window_size={pygame.display.get_window_size()} pos={_pos} "
+              f"active={pygame.display.get_active()} bits={screen.get_bitsize()} "
+              f"displays={pygame.display.get_num_displays()}", flush=True)
         if _drv == "dummy":
             print("[video] 警告：当前是 dummy 驱动 ⇒ 不会弹窗！WSLg 请执行 "
                   "export DISPLAY=:0（或 unset SDL_VIDEODRIVER）后重跑。", file=sys.stderr, flush=True)
