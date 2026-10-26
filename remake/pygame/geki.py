@@ -50,7 +50,10 @@ DRAW_DISPLAY_NODES = os.environ.get("GEKI_PANELS", "1") != "0"
 #   页1 t=290 时只看 [ent+0x24]=bitindex(0x4AB5B0,0x2000)==OPMOVIE：非0 → 生成 0x6F000002（Now Loading 预载屏）
 #   页2 进场看 (CHANGEDISPLAY==0 || OPMOVIE!=0) 决定是否挂资源77记录流
 # 原目录没有 geki.ini ⇒ 取默认 0（与 MFC GetProfileInt 无该项时返回默认值一致）
-OPMOVIE = os.environ.get("GEKI_OPMOVIE", "0") != "0"
+# ini 键 OPMOVIE（0x4A48A4）：页2 进场 0x452D15 读它，**默认值 1**（0x452D17 `push 1` 是
+# GetPrivateProfile 风格的默认值，0x458AF0/0x458AFC 取不到键就用它）。页1 进场 0x451EBE
+# 用 0x45AFF0(0x4AB5B0, 0x2000) 的结果作为实体参数 [ent+0x24] → 非 0 才播开场动画。
+OPMOVIE = os.environ.get("GEKI_OPMOVIE", "1") != "0"
 CHANGEDISPLAY = os.environ.get("GEKI_CHANGEDISPLAY", "0") != "0"
 
 # 0x4AB5C0 旗标（已实证）
@@ -1243,10 +1246,19 @@ class Pages:
             if name and _re.search(r"(?i)\.ggd$", name):
                 ok = self.layers.load(13, e.t)          # 0x455090 装载（进层13，仅副作用）
                 self.log(f"opmovie load id={e.t} {name} -> {ok}")
+                # 0x43DD20(t,0xF) → 0x45FE10：把本帧装进来的 GGD 绑到层 0 并把层0贴屏
+                lay = self.layers.tab.get(13)
+                if lay is not None and ok:
+                    e.img = (lay.w, lay.h, lay.buf.copy())
             elif name and _re.search(r"(?i)\.bmp$", name):
                 self.log(f"opmovie palette id={e.t} {name}")   # 调色板类资源（bm_pal/pald/pals）
         # 0x44D200(mgr,0xB4) + "Now Loading...%3d/%3d"（0x44D330，h=0x20，fg=0xD9，bg=0xB4）
         self.screen_fill = 0xB4
+        # 0x43E27D 之后 0x43DD20 的合成：已装载的图从 (0,0) 贴到主表面（层0 → 屏幕）
+        img = getattr(e, "img", None)
+        if img is not None:
+            w, h, buf = img
+            self.canvas.blit(buf, (0, 0, w, h), (0, 0), key=0)
         e.texts = [{"str": "Now Loading...%3d/%3d" % (e.t, 0xF4),
                     "x": 0, "y": 0, "h": 0x20, "fg": 0xD9}]
         e.t += 1
