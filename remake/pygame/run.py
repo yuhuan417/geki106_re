@@ -47,12 +47,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--shots", default="", help="多个帧号，逗号分隔（做对比图用）")
     ap.add_argument("--out", default=str(HERE / "shots"), help="PNG 输出目录")
     ap.add_argument("--headless", action="store_true", help="无窗口（SDL dummy）")
+    ap.add_argument("--video", default="", help="强制 SDL 视频驱动（x11 / wayland / dummy）")
     ap.add_argument("--fixed", action="store_true", help="不按真实时间，尽快跑帧")
     ap.add_argument("--debug-hud", action="store_true", help="叠加调试信息（非原作内容）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
     args = ap.parse_args(argv)
 
+    if args.video:
+        os.environ["SDL_VIDEODRIVER"] = args.video
     if args.headless:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     # 原作是固定 640x480 8bpp 全屏；这里固定 640x480 窗口，1:1 像素，不缩放、不可 resize
@@ -67,6 +70,13 @@ def main(argv: list[str] | None = None) -> int:
         _drv = pygame.display.get_driver()
         print(f"[video] SDL 驱动 = {_drv}  DISPLAY={os.environ.get('DISPLAY','(未设置)')!r}  "
               f"WAYLAND_DISPLAY={os.environ.get('WAYLAND_DISPLAY','(未设置)')!r}", flush=True)
+        # 立刻推一帧并泵一次事件，强制窗口被映射（WSLg 下有些情况下不会自己 map）
+        pygame.event.pump()
+        screen.fill((0, 0, 0))
+        pygame.display.flip()
+        print(f"[video] window_size={pygame.display.get_window_size()} "
+              f"active={pygame.display.get_active()} focus={pygame.display.get_active()}",
+              flush=True)
         if _drv == "dummy":
             print("[video] 警告：当前是 dummy 驱动 ⇒ 不会弹窗！WSLg 请执行 "
                   "export DISPLAY=:0（或 unset SDL_VIDEODRIVER）后重跑。", file=sys.stderr, flush=True)
