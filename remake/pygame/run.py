@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -95,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     pend_key = 0                   # 自上一帧以来最后一次映射到的键码
     pend_shot = pend_lock = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
     pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
+    _t_last = time.perf_counter()
     while running and pages.page != 0 and not pages.quit:
         # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
         keycode = 0
@@ -159,6 +161,12 @@ def main(argv: list[str] | None = None) -> int:
                 pend_dir[_k] = 0
             pages.advance()
             frame += 1
+            # 活体指示：窗口模式每秒报一次帧率（不是原作内容，只用于排查"看着像卡住"）
+            if not args.headless and frame % 30 == 0:
+                _now = time.perf_counter()
+                _fps = 30.0 / max(1e-6, _now - _t_last)
+                _t_last = _now
+                print(f"[fps] frame={frame} page={pages.page} {_fps:.1f} fps", flush=True)
             # ---- 显示（0x44C350 索引→RGB + present）
             rgb = canvas.to_rgb(getattr(pages, "pal_now", getattr(pages, "pal", palette)))
             if geki.FLIP_SCREEN:
