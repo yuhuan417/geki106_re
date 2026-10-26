@@ -35,3 +35,17 @@ python3 remake/pygame/run.py --page 1 --frames 340 --headless --fixed \
 
 改完务必回归：`--page 2 --frames 4800 --headless --fixed`（应打印
 `page2 t=4300 记录流已播完` → `"This program will be closed."` → 退出）。
+
+---
+
+## 2026-10-26 更新：OPMOVIE 场景层已复刻完成
+
+`0x43E1C6` 的 `LoadStringA` 装载循环 + `opmovie_imgs` 累积 + 4FC 遍前贴出，已实测出画面：
+
+```
+帧300(t=10) 43 色 → 帧340(t=50) 107 色 → 帧380(t=90) 136 色 → 帧410(t=120) 144 色
+```
+
+帧 380 即为「野草 龍蛇 馬鷹 猿狼 獅猟 鶏傲 嫉食」组字墙，与原作一致。
+⇒ 原目标“补 OPMOVIE 场景层”达成；剩余的四类实体（0x42/0x46）只是脚本里附加的装饰/面板，
+不影响这一层。
