@@ -502,6 +502,10 @@ class Input:
 
     SPEED = 4
     RADIUS = 5
+    # [0x4AB454+0x4D]：键盘/摇杆位移总开关。页1-3 进场都不会置它（页3 的 0x45212C 只写 +0x34），
+    # 而 0x44E7FC 是 `if ([inp+0x4D] == 0) → 跳过整段 dx/dy 计算`（0x44E807..0x44E81B），
+    # 所以**原作菜单里方向键不移动指针**（真机实测按住 ↓ 4.5s 选中项不动）。
+    kbd_move = False
 
     def __init__(self):
         self.rec = Record()
@@ -528,10 +532,11 @@ class Input:
         r.r1 = (not b1) and self._prev[1]
         self._prev = (b0, b1)
         dx = dy = 0
-        if keys.get("left"): dx -= self.SPEED
-        if keys.get("right"): dx += self.SPEED
-        if keys.get("up"): dy -= self.SPEED
-        if keys.get("down"): dy += self.SPEED
+        if self.kbd_move:                       # 0x44E7FC 的开关
+            if keys.get("left"): dx -= self.SPEED
+            if keys.get("right"): dx += self.SPEED
+            if keys.get("up"): dy -= self.SPEED
+            if keys.get("down"): dy += self.SPEED
         mdx, mdy = mouse_delta
         if mdx or mdy:
             # 0x44E9xx：鼠标相对位移限幅到 radius
