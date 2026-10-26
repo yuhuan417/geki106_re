@@ -48,8 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--headless", action="store_true", help="无窗口（SDL dummy）")
     ap.add_argument("--fixed", action="store_true", help="不按真实时间，尽快跑帧")
     ap.add_argument("--debug-hud", action="store_true", help="叠加调试信息（非原作内容）")
-    ap.add_argument("--kbd-menu", action="store_true",
-                    help="允许方向键移动指针（**非原作**：原件 [0x4AB454+0x4D]=0 时不响应方向键）")
+    ap.add_argument("--no-kbd-menu", action="store_true",
+                    help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
     args = ap.parse_args(argv)
 
     if args.headless:
@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     canvas = geki.Canvas()
     text = geki.TextRenderer(palette)
     inp = geki.Input()
-    inp.kbd_move = bool(args.kbd_menu)     # 原作默认 False（见 geki.Input.kbd_move 注释）
+    inp.kbd_move = not bool(args.no_kbd_menu)   # 真机默认：方向键一按一档
     timer = geki.Timer()
     flags = geki.Flags()
     pages = geki.Pages(data, palette, text, canvas, inp, timer, flags)

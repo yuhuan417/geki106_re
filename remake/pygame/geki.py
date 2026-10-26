@@ -502,16 +502,18 @@ class Input:
 
     SPEED = 4
     RADIUS = 5
-    # [0x4AB454+0x4D]：键盘/摇杆位移总开关。页1-3 进场都不会置它（页3 的 0x45212C 只写 +0x34），
-    # 而 0x44E7FC 是 `if ([inp+0x4D] == 0) → 跳过整段 dx/dy 计算`（0x44E807..0x44E81B），
-    # 所以**原作菜单里方向键不移动指针**（真机实测按住 ↓ 4.5s 选中项不动）。
-    kbd_move = False
+    # [0x4AB454+0x4D]：键盘/摇杆位移总开关（0x44E7FC 处 `if (==0) 跳过整段 dx/dy 计算`）。
+    # 真机实测（扫描码 0xD0 注入）：**按一次方向键正好走一项**，长按 0.5s 也只走一项
+    # ⇒ 步进是"按下沿 × 一档"，不是连续位移（一格 = 0x80 = 128px，正好一条菜单带）。
+    kbd_move = True
+    KBD_STEP = 0x80
 
     def __init__(self):
         self.rec = Record()
         self.x, self.y = 320, 240
         self.base = (0, 0)
         self._prev = (False, False)
+        self._prevdir = {}          # 方向键"上一帧是否按住"，用于取按下沿
 
     def set_mode(self, mode: int) -> None:
         """0x44EDA0(0x4AB454, mode)：输入模式（0 = 游戏内光标模式）。"""
@@ -533,10 +535,14 @@ class Input:
         self._prev = (b0, b1)
         dx = dy = 0
         if self.kbd_move:                       # 0x44E7FC 的开关
-            if keys.get("left"): dx -= self.SPEED
-            if keys.get("right"): dx += self.SPEED
-            if keys.get("up"): dy -= self.SPEED
-            if keys.get("down"): dy += self.SPEED
+            # 按下沿 → 走**一整档**（真机实测一按一项）；按住不连续推进
+            for name, sx, sy in (("left", -1, 0), ("right", 1, 0),
+                                 ("up", 0, -1), ("down", 0, 1)):
+                held = bool(keys.get(name))
+                if held and not self._prevdir.get(name, False):
+                    dx += sx * self.KBD_STEP
+                    dy += sy * self.KBD_STEP
+                self._prevdir[name] = held
         mdx, mdy = mouse_delta
         if mdx or mdy:
             # 0x44E9xx：鼠标相对位移限幅到 radius
@@ -550,12 +556,12 @@ class Input:
         #   if (Y + dy < Y下限) dy = Y下限 - Y
         #   if (Y + dy > Y上限) dy = Y上限 - Y
         # 指针是屏幕光标，边界即 640×480 画面（页3 菜单 4 条 ×128px 带正好铺满 Y∈[0,512)）。
-        if self.x + dx > W - 1:
-            dx = (W - 1) - self.x
+        if self.x + dx > 448:            # 0x44E9A0：X 上限 [inp+0x2C]（预设 0x17 = 448）
+            dx = 448 - self.x
         if self.x + dx < 0:
             dx = -self.x
-        if self.y + dy > H - 1:
-            dy = (H - 1) - self.y
+        if self.y + dy > 400:            # Y 上限 [inp+0x30]（预设 0x17 = 400）
+            dy = 400 - self.y
         if self.y + dy < 0:
             dy = -self.y
         self.x += dx
