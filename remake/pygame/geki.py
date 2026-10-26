@@ -1120,6 +1120,11 @@ class Pages:
                 e.bgc = 0xB4                     # ctor: [ent+0x20] = 0xB4
             elif idx == 1:
                 e.beh = "opmovie"                # 0x43E1C0
+            elif idx == 2:
+                # 0x43D8F0 ctor：段号 = [0x4AB5A0]/49（魔数 0x5397829D + sar 4）；
+                # 行为 0x43E410 每帧再按指针重算并铺该段的 84 字节场景记录
+                e.beh = "scene_segment"          # 0x43E410
+                e.a4 = int(self.inp.y) // 49
             elif idx == 7:
                 e.beh = "title_timeline"         # 0x43F560
                 e.t = int(self.data["page2"]["timer_start"])
@@ -1245,6 +1250,20 @@ class Pages:
                 self.flags.set(FLAG_CLICK)
                 self.log(f"page1 end → flags |= 0x10000 (t={t})")
 
+    # 0x43E410（0x6F000003，场景段渲染）
+    def _scene_segment(self, e: UiEntity) -> None:
+        """0x6F000003：按指针 Y/49 取段号，铺该段 84 字节场景记录（§16.61/16.64）。"""
+        seg = int(self.inp.y) // 49
+        lim = (self.keys.test(0xF00000) or 8) if self.keys.test(1) else 8
+        if seg >= lim:                              # 0x43E475：越界 → 回卷指针
+            seg = max(0, lim - 1)
+            self.inp.set_pos(0x140, seg * 49 + 0x18)  # 0x44E620(inp, 320, idx*49+0x18)
+        e.a4 = seg
+        # TODO(§16.70)：段数据（mgr+8 / mgr+0x740 的 84 字节记录）尚未取到，此处仅记录段号
+        if not getattr(e, "_logged", False):
+            e._logged = True
+            self.log(f"scene_segment：段号 {seg}（上限 {lim}）")
+
     # 0x43E1C0（0x6F000002，OPMOVIE / "Now Loading" 进度屏）
     def _opmovie(self, e: UiEntity) -> None:
         # 0x43E1C0：t<0xF4 时按 RT_STRING id=t 取文件名，只对 .ggd/.bmp 调 0x455090 载入；
@@ -1252,6 +1271,12 @@ class Pages:
         # t>0xF4 → flags |= 0x10000（进页2）。0x43DD20(t,0xF) 负责把这一帧的图形合成上屏
         # （0x45FE10：把描述子里的 GGD id 逐个绑到层 0..n-1，再把层0贴屏）。
         import re as _re
+        # 0x43E8C7..0x43E91F：切场景管理器(0x4AC4EC) → 写键位 1/2 → 置 [0x56CCD8] →
+        # 摆指针(idx*49+0x18) → 生成 0x6F000003（段渲染）。触发条件未完全确认，暂按首帧生成一次。
+        if e.t == 1:
+            self.scene_ab = False                      # [0x56CCD8] = 0 → 用 0x4AB5CC 那套表
+            self.spawn(self.ui52c, 0x6F000003)
+            self.log("opmovie：生成 0x6F000003 段渲染（[0x56CCD8]=0）")
         if e.t < 0xF4:                                  # 0..243：按字符串 id = 帧号装载资源
             name = self.layers.strings.get(str(e.t), "")
             if name and _re.search(r"(?i)\.ggd$", name):
