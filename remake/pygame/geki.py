@@ -1301,6 +1301,12 @@ class Pages:
     # 0x437FC0（0x46000001，面板：t<=160 静止，之后线性滑出）
     def _panel46(self, e: UiEntity) -> None:
         e.t += 1
+        if e.t <= 0xA0:
+            # 0x437FFF 分支：x 每帧 -1（向左移），父 y >= -160 时存活
+            e.disp.dst[0] -= 1
+            if e.disp.dst[1] < -0xA0:
+                e.alive = False
+            return
         if e.t > 0xA0:                                # 0x437FD2：eax = 0xA0 - t
             v = 0xA0 - e.t
             e.disp.dst[0] += v                        # x 全量
