@@ -1593,6 +1593,15 @@ class Pages:
                             if lay_tab is not None:
                                 self.canvas.blit_scaled(lay_tab.buf, src, dst, key=0)
                     break
+            # 0x459D60 播完后返回 0 ⇒ 0x43FA47 `flags |= 1`。窗口表 5 段闭区间合计正好 2068
+            # （= 资源77 帧数），所以"发现播完"的那一次调用必落在最后一个窗口之后
+            # （t > 4299）；不补这一步，页2 就永远等不到收尾旗标。
+            if t > int(p2["windows"][-1][1]) and self.p2_stream.pos >= self.p2_stream.size:
+                # 原码 0x43FA47 是 `flags |= 1`，而 0x452FE7 的映射里 0x1 → 页 0xFF；
+                # 但真机实测（自动跑完不点鼠标）该时刻进入的是**菜单页**，说明 0xFF 在页机
+                # 0x459360 里有特殊处理（待查）。此处按实测行为走 0x10000 → 页3。
+                self.flags.set(FLAG_CLICK)
+                self.log(f"page2 t={t} 记录流已播完 → flags=0x{self.flags.bits:X}")
 
         # 快照/拷贝表（0x43FB03）
         for (tt, lay, flag) in p2.get("copy", []):
