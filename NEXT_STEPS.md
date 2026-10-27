@@ -38,7 +38,14 @@ python3 remake/pygame/run.py --page 1 --frames 340 --headless --fixed \
 
 ---
 
-## 2026-10-26 更新：OPMOVIE 场景层已复刻完成
+## 2026-10-27 更正：OPMOVIE 不绘制任何图（原“累积贴图墙”结论作废，勘误 A-38）
+
+`0x43E1C6` 全文读完：`0x455090` 只是资源槽装载器（缓存复用），函数内无 BltFast。
+真实画面 = `0x44D200(0xB4)` 黑底 + `0x4022C0(x=0,y=0,h=0x20,fg=0xD9,bg=0xB4)` 的
+`"Now Loading...%3d/244"` 白字。已删除实现里自造的 `opmovie_imgs` 累积贴图遍。
+组字墙在**页2**（res 77 记录流）。
+
+## （已作废）2026-10-26 更新：OPMOVIE 场景层已复刻完成
 
 `0x43E1C6` 的 `LoadStringA` 装载循环 + `opmovie_imgs` 累积 + 4FC 遍前贴出，已实测出画面：
 

@@ -1379,7 +1379,6 @@ class Pages:
         # 0x43E8C7..0x43E91F：切场景管理器(0x4AC4EC) → 写键位 1/2 → 置 [0x56CCD8] →
         # 摆指针(idx*49+0x18) → 生成 0x6F000003（段渲染）。触发条件未完全确认，暂按首帧生成一次。
         if e.t == 0:
-            self.opmovie_imgs = []                     # 场景层列表（累积）
             # 脚本 res_65_OpngStream 的 OP03 条目（全在 t=0）：按 type 生成摆放实体。
             # 坐标只做 16 位截断（§16.84：真正的落位由父坐标 + 0x30 / 位移量决定，后续接）
             self.opmovie_op03 = 0
@@ -1407,19 +1406,17 @@ class Pages:
             if name and _re.search(r"(?i)\.ggd$", name):
                 ok = self.layers.load(13, e.t)          # 0x455090 装载（进层13，仅副作用）
                 self.log(f"opmovie load id={e.t} {name} -> {ok}")
-                # 0x43DD20(t,0xF) → 0x45FE10：把本帧装进来的 GGD 绑到层 0 并把层0贴屏
-                lay = self.layers.tab.get(13)
-                if lay is not None and ok:
-                    # 场景层是**累积**的：每帧只把新装进来的图追加进显示列表，
-                    # 之后每帧在清屏/文字之后把这些图依次贴上（层序 = 装载顺序）
-                    self.opmovie_imgs.append((lay.w, lay.h, lay.buf.copy()))
+                # 0x43E1C6 只做"装载进资源槽"(0x455090)，**不绘制**；
+                # 屏幕内容只有 0x44D200(0xB4) 填充 + "Now Loading" 文字（见函数末尾）。
             elif name and _re.search(r"(?i)\.bmp$", name):
                 self.log(f"opmovie palette id={e.t} {name}")   # 调色板类资源（bm_pal/pald/pals）
         # 0x44D200(mgr,0xB4) + "Now Loading...%3d/%3d"（0x44D330，h=0x20，fg=0xD9，bg=0xB4）
         self.screen_fill = 0xB4
         # 0x43E27D 之后 0x43DD20 的合成：已装载的图从 (0,0) 贴到主表面（层0 → 屏幕）
+        # 0x43E2B0 push 0xB4 / push 0xD9 / push 0x20 / push &str / push 0 / push 0 / push 0
+        # ⇒ 0x4022C0(mgr, x=0, y=0, str, h=0x20, fg=0xD9, bg=0xB4)：底色与清屏同为 0xB4
         e.texts = [{"str": "Now Loading...%3d/%3d" % (e.t, 0xF4),
-                    "x": 0, "y": 0, "h": 0x20, "fg": 0xD9}]
+                    "x": 0, "y": 0, "h": 0x20, "fg": 0xD9, "bg": 0xB4}]
         e.t += 1
         if e.t > 0xF4:
             self.flags.set(FLAG_CLICK)
@@ -1832,10 +1829,6 @@ class Pages:
                 # 0x44D330(mgr, y, x, str, h, fg, bg)：bg = SetBkColor ⇒ 先铺一格底色
                 self.text.draw(c, tx["str"], int(tx["x"]), int(tx["y"]),
                                int(tx["h"]), int(tx["fg"]), int(tx.get("bg", -1)) & 0xFF)
-        # OPMOVIE 累积的场景图：原件由 0x45FE10 生成背景节点(0x4100000D)进 0x4AD4CC，
-        # 由 0x430840 的 4FC 遍绘制 ⇒ 必须在 0x44D200 填充与文字**之后**画。
-        for (w, h, buf) in getattr(self, "opmovie_imgs", []):
-            c.blit(buf, (0, 0, w, h), (0, 0), key=0)
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
         self.present()          # 0x458CB0 → 0x44D740（调色板操作 + Blt）
