@@ -863,6 +863,9 @@ class Pages:
         self.timer = timer
         self.flags = flags
         self.sysf = Flags()          # 0x56CC84：系统旗标（0x10 = 离开本页）
+        # 0x56CC8C/0x56CC90：自机位置镜像（页面重置清零）。页13 无自机 ⇒ 恒 0，
+        # 但 `0x42BB9E` 会读 `[0x56CC90]`，故仍需存在。
+        self.mirror = {"x": 0, "y": 0}
         self.layers = Layers(data)
         self.page = 0
         self.ui52c: list[UiEntity] = []
@@ -1778,6 +1781,9 @@ class Pages:
         0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26, 8),
         0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26, 8),
         0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5, 0x10),
+        # 0x42B433：rect(l,t,r,b)=(0x60,0x198,0x77,0x1AF)、层 0、24×24、
+        # 行为 0x40215D→0x42BB80（首帧吸自机 y + 横向涨缩），dst 减 0xC
+        0x12081123: ((0x60, 0x198, 0x77, 0x1AF), "follow", 0, 0xC, 0x40215D, 0xC, 0),
         # 0x42B683（0x12091122 / 0x120B1121 共用）：32×32、速度 0、行为 0x401BAE→0x42B9C0
         # （与 0x42C050 同构的横向涨缩 + 屏幕可见性），dst 减 8
         0x12091122: ((0, 0xE0, 0x1F, 0xFF), "pulse", 0, 0x10, 0x401BAE, 8),
@@ -1794,7 +1800,7 @@ class Pages:
         if row is None:
             self.log(f"0x12 特效 type=0x{ty:X} @({x},{y}) → 该支矩形未定案，不生成")
             return None
-        rect, kind, speed, life, beh, half = row
+        rect, kind, speed, life, beh, half, layer = (row + (1,))[:7]
         if kind is None:
             self.log(f"0x12 特效 0x{ty:X} @({x},{y}) rect={rect} 行为 0x{beh:X} 未读 → 不生成")
             return None
@@ -1817,7 +1823,7 @@ class Pages:
         e.disp = DisplayNode(1, list(rect),
                              [int(x) - half, int(y) - half])
         self.ui46c.append(e)
-        self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} life={life} @({x},{y}) rect={rect}")
+        self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} [+0xC]={life} @({x},{y}) rect={rect}")
         return e
 
     @staticmethod
@@ -1859,12 +1865,30 @@ class Pages:
                 d += 0x100 if d <= 0 else -0x100       # 0x42C064..0x42C078
                 e.p["vy"] = d
             self._fx12_integrate(e)                    # 0x42C07D
-            self._fx12_visibility(e)
             if e.disp:
                 if e.disp.rect[0] & 0x3F:              # 0x42C08A test byte [eax],0x3F
                     e.disp.grow(-0x20, 0, -0x20, 0)
                 else:
                     e.disp.grow(0x20, 0, 0x20, 0)
+            self._fx12_place(e)                        # 0x42C0A3 dst=(x-half,y-half)
+            self._fx12_visibility(e)                   # 0x42C0BF push 0x10
+            return
+        if e.p.get("kind") == "follow":                # 0x42BB80（0x12081123）
+            self._fx12_integrate(e)                    # 0x42BB83
+            cnt = e.p.get("cnt", 0)
+            if cnt == 0:                               # 0x42BB8D je 0x42BB9E
+                e.p["y"] = self.mirror_y()             # [+8] = [0x56CC90]
+            else:
+                cnt += 1                               # 0x42BB8F inc eax
+                e.p["cnt"] = cnt
+                e.p["blink"] = 1 if cnt > 3 else 0     # 0x42BB93 setg al
+            if e.disp:
+                if e.disp.rect[0] == 0x60:             # 0x42BBAF cmp dword [eax],0x60
+                    e.disp.grow(0x18, 0, 0x18, 0)
+                else:
+                    e.disp.grow(-0x18, 0, -0x18, 0)
+            self._fx12_place(e)                        # 0x42BBD1 sub 0xC → dst
+            self._fx12_visibility(e)
             return
         # ---- track：0x42C320 ----
         tx = self.inp.x                                # 0x4021EE(0x4AD43C,&out1,&out2)：页13 取虚拟指针
@@ -1884,6 +1908,17 @@ class Pages:
                 e.p["vx"], e.p["vy"] = vx[0], vy[0]
         self._fx12_integrate(e)                        # 0x42C3D4
         self._fx12_visibility(e)
+
+    def mirror_y(self) -> int:
+        """`[0x56CC90]`：自机 y 镜像（页13 无自机 ⇒ 0）。"""
+        return int(self.mirror["y"])
+
+    def _fx12_place(self, e: UiEntity) -> None:
+        """`0x42C0A3`/`0x42BBD1`/`0x42BA2A`：dst = (x−half, y−half)。"""
+        if e.disp:
+            h = e.p["half"]
+            e.disp.dst[0] = e.p["x"] - h
+            e.disp.dst[1] = e.p["y"] - h
 
     def _fx12_visibility(self, e: UiEntity) -> None:
         """`0x4021E9`(m=半宽) 与 `[+0x18]` 的与：不满足即结束（`al && [+0x18]`）。"""
