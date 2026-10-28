@@ -866,6 +866,10 @@ class Pages:
         # 0x56CC8C/0x56CC90：自机位置镜像（页面重置清零）。页13 无自机 ⇒ 恒 0，
         # 但 `0x42BB9E` 会读 `[0x56CC90]`，故仍需存在。
         self.mirror = {"x": 0, "y": 0}
+        # 0x4AD4CC：特效/尾迹队列。0x458E70 的第 6 项（call 0x40161D→0x43A350）每帧 tick 它；
+        # 记录 `0x401686`→`0x43A3C0` 会 new 出实体再走 `0x4355E0`（按 type&0xFF000000 分类构造）。
+        # 类 0x41 的显示/行为尚未解，故此处先按原序记录，不上屏。
+        self.trailq = []
         self.layers = Layers(data)
         self.page = 0
         self.ui52c: list[UiEntity] = []
@@ -1781,6 +1785,9 @@ class Pages:
         0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26, 8),
         0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26, 8),
         0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5, 0x10),
+        # 0x42B2A3：rect(l,t,r,b)=(0x100,0xD0,0x10F,0xDF)、层 1、16×16、
+        # 行为 0x401D43→0x42BC40（**每帧**塞一条 0x41000015 入 0x4AD4CC 再积分）
+        0x12061124: ((0x100, 0xD0, 0x10F, 0xDF), "trail", 0, 0xA, 0x401D43, 8),
         # 0x42B433：rect(l,t,r,b)=(0x60,0x198,0x77,0x1AF)、层 0、24×24、
         # 行为 0x40215D→0x42BB80（首帧吸自机 y + 横向涨缩），dst 减 0xC
         0x12081123: ((0x60, 0x198, 0x77, 0x1AF), "follow", 0, 0xC, 0x40215D, 0xC, 0),
@@ -1872,6 +1879,15 @@ class Pages:
                     e.disp.grow(0x20, 0, 0x20, 0)
             self._fx12_place(e)                        # 0x42C0A3 dst=(x-half,y-half)
             self._fx12_visibility(e)                   # 0x42C0BF push 0x10
+            return
+        if e.p.get("kind") == "trail":                 # 0x42BC40（0x12061124）
+            self.trailq.append({                       # 0x42BC5C..0x42BC7B
+                "x": int(e.p["x"]), "y": int(e.p["y"]),
+                "type": 0x41000015, "a3": 0,
+            })
+            self._fx12_integrate(e)                    # 0x42BC80
+            self._fx12_place(e)                        # 0x42BC87 sub 8
+            self._fx12_visibility(e)                   # 0x42BCA3 push 0x10
             return
         if e.p.get("kind") == "follow":                # 0x42BB80（0x12081123）
             self._fx12_integrate(e)                    # 0x42BB83
