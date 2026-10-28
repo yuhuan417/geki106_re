@@ -1770,11 +1770,17 @@ class Pages:
     # ---- 0x12 特效族（§16.118.10）---------------------------------------
     #  (层=1 bm_cm32, 源矩形 l,t,r,b, 行为, 速度上限 [+0x2C])
     FX12_TABLE = {
-        0x12061127: ((0xA0, 0xC0, 0xAF, 0xCF), "track", None),
-        0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "track", 0x200),
-        0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "track", 0x100),
-        0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "track", 0x180),
-        0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0),
+        # type: (rect(l,t,r,b), kind|None, 速度[+0x2C], 寿命[+0xC], 行为[+0x40])
+        # 分支依据 0x42B256 分派比较链（§16.118.10，勘误 A-37）
+        0x12061127: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26),
+        0x12071126: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26),
+        0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", 0x200, 0xA, 0x401C26),
+        0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26),
+        0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26),
+        0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5),
+        # 0x42B683（0x12091122 / 0x120B1121 共用）：32×32、速度 0、16 帧、行为 0x401BAE 未读
+        0x12091122: ((0, 0xE0, 0x1F, 0xFF), None, 0, 0x10, 0x401BAE),
+        0x120B1121: ((0, 0xE0, 0x1F, 0xFF), None, 0, 0x10, 0x401BAE),
     }
 
     def fx12_spawn(self, ty: int, x: int, y: int, a3: int = 0) -> "UiEntity | None":
@@ -1785,9 +1791,12 @@ class Pages:
         """
         row = self.FX12_TABLE.get(ty & 0xFFFFFFFF)
         if row is None:
-            self.log(f"0x12 特效 type=0x{ty:X} @({x},{y}) → 该支行为/矩形未定案，不生成")
+            self.log(f"0x12 特效 type=0x{ty:X} @({x},{y}) → 该支矩形未定案，不生成")
             return None
-        rect, kind, speed = row
+        rect, kind, speed, life, beh = row
+        if kind is None:
+            self.log(f"0x12 特效 0x{ty:X} @({x},{y}) rect={rect} 行为 0x{beh:X} 未读 → 不生成")
+            return None
         e = UiEntity(type_word=ty, a3=int(a3))
         e.beh = "fx12"
         e.p["kind"] = kind
@@ -1798,12 +1807,13 @@ class Pages:
         e.p["px"] = int(x) << 8                       # [+0x24]
         e.p["py"] = int(y) << 8                       # [+0x28]
         e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
-        e.p["spd"] = int(speed)
+        e.p["spd"] = int(speed or 0)
+        e.p["life"] = int(life)
         half = ((rect[2] - rect[0]) >> 1)             # 0x42B7D8：减半宽/半高
         e.disp = DisplayNode(1, list(rect),
                              [int(x) - half, int(y) - half])
         self.ui46c.append(e)
-        self.log(f"0x12 特效 0x{ty:X} kind={kind} @({x},{y}) rect={rect}")
+        self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} life={life} @({x},{y}) rect={rect}")
         return e
 
     @staticmethod
@@ -1947,7 +1957,7 @@ class Pages:
         """`0x448277 jmp [slot*4 + 0x448A30]` = `{0x44827E, 0x4482DA, 0x448356, 0x4483AC}`
         （t<0x5A 的效果段）。目前只有槽0 读到：每 6 帧生成 `0x120B1121` @(0xB0,0x78) a3=0xE00。"""
         if slot == 0 and t % 6 == 0:                   # 0x44827E..0x44828A
-            self.log(f"actor 0x0A 槽0 t={t} → spawn 0x120B1121 (0xB0,0x78) a3=0xE00（未实现）")
+            self.actor_spawn(0xB0, 0x78, 0x120B1121, 0xE00)
         elif slot in (1, 2, 3) and t == 0:
             self.log(f"actor 0x0A 槽{slot} 效果段（0x4482DA/0x448356/0x4483AC）未读")
 
