@@ -913,7 +913,8 @@ class Pages:
         self.p1_done: set[int] = set()
         self.p13_frames = 0          # 0x56CCA8（页13 的帧计数）
         self.p13_portrait_arr = None # 0x6F000007 画出的整屏人像（0x43F340）
-        self.p13_src = None          # res_79 的 60×320 原始像素（滚动源）
+        self.p13_src = None          # res_79 的 60×320 原始字节（瓦片索引，滚动源）
+        self.p13_mono = False        # 0x43F246 的 16 色近似标志
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
         self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
@@ -2223,17 +2224,17 @@ class Pages:
             return
         if not e.p.get("drawn"):                       # 0x43F34C test eax,eax / jne 0x43F403
             e.p["drawn"] = True
-            mono = self.keys.test(0x400)               # 0x43F35A 之后的 0x45AFF0(…,0x400)
-            src = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)[:, :0x50].copy()
-            if mono:
-                src[:, :] = 0xB4
-            self.p13_src = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)
-            e.p["cols"] = list(range(0x50))            # 块列 → 源列
-            self.p13_portrait_arr = np.repeat(np.repeat(src, 8, axis=0), 8, axis=1)
+            mono = self.keys.test(0x400)               # 0x43F35A 之后的 0x45B030(…,0x400)（位清时真）
+            res = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)
+            self.p13_src = res                          # 原始字节（滚动时按列取）
+            self.p13_mono = mono
+            e.p["cols"] = list(range(0x50))            # 块列 → 源列（res_79 的列号）
+            self.p13_portrait_arr = None               # 由 _portrait_build 生成
             e.p["cur"] = 0
             # 0x43F38A → 0x4023C4(rec,0,0,0x4F000009,1)；0x43F3BE → a3=0
             self.wipe4f = [{"a3": 1, "cur": 0}, {"a3": 0, "cur": 0}]
-            self.log("0x6F000007：res_79 左 80×60 块铺满 + 两块 0x4F000009 擦切")
+            self._portrait_build(e)
+            self.log("0x6F000007：res_79 瓦片索引 → 层4 的 8×8 块铺满层5 + 两块 0x4F000009 擦切")
         if self.p13_src is None:
             return
         cur = int(e.p["cur"])
@@ -2252,9 +2253,21 @@ class Pages:
                     cur += 1                           # 0x43F472..0x43F475
                 n -= 1
             e.p["cur"] = cur
-            cur_cols = self.p13_src[:, cols]           # 60×80
-            self.p13_portrait_arr = np.repeat(np.repeat(cur_cols, 8, axis=0), 8, axis=1)
+            self._portrait_build(e)
         e.p["cur"] = cur
+
+    def _portrait_build(self, e: UiEntity) -> None:
+        """把人像层（层5）按当前窗口列 `cols` 重新拼成 640×480。"""
+        if self.p13_src is None:
+            return
+        if self.p13_src is None:
+            return
+        res = self.p13_src                            # 60×0x140
+        cols = e.p["cols"]
+        c = res[:, cols]                              # 60×80：每块一个颜色索引
+        if self.p13_mono:                             # 0x43F246：16 色近似时 color=0xB4
+            c = np.full_like(c, 0xB4)
+        self.p13_portrait_arr = np.repeat(np.repeat(c, 8, axis=0), 8, axis=1)
 
     def _tick_wipe4f(self) -> None:
         """行为 `0x439BD0`（ctor 分支 `0x436E45`）：`[+0x20]` 追 `选中槽*0x50`，按余数 0x50 取擦切位。"""
