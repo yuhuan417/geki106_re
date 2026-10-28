@@ -64,7 +64,7 @@
 - `remake/build_assets.py` / `build_glyphs.py` — 资产编译器（extracted → godot/assets）
 - `remake/build_pages_data.py` — 页1-3 数据表提取（RT_STRING 152 条 + 调色板 + 层尺寸 + 页2 时间轴
   + 页1 时间轴/换色/文字表 + 旗标位）→ `remake/pages_data.json`
-- `remake/pygame/` — **页1-3 复刻（2026-10-25 起取代 Godot 版）**：`geki.py` = 640×480 8bpp
+- `remake/pygame/` — **页1/2/3/13 复刻（2026-10-25 起取代 Godot 版；13 = 选择画面，§16.118）**：`geki.py` = 640×480 8bpp
   索引画布 + 层管理 + 0x44D330 文字 + 输入记录 + 60Hz 帧门 + 页机/页1-3；`run.py` = 运行器
   （固定 640×480、1:1 无缩放、`--headless/--fixed/--shot`）
 - `remake/replicate_page_bg.py` — 页2 背景机制复刻（§14 验证脚手架）

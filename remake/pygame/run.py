@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""页1-3 运行器（pygame）：自己的 60Hz 帧门 + 8bpp 画布，不依赖任何引擎循环。
+"""页1/2/3/13 运行器（pygame）：自己的 60Hz 帧门 + 8bpp 画布，不依赖任何引擎循环。
 
 用法:
     python3 remake/pygame/run.py                     # 从页1 开始跑（ESC 退出，1/2/3 调试切页）
-    python3 remake/pygame/run.py --page 2            # 直接进页2
+    python3 remake/pygame/run.py --page 2            # 直接进页2（3/13 同理）
     python3 remake/pygame/run.py --frames 300 --headless --fixed   # 无窗口跑 300 帧（脚本/CI）
     python3 remake/pygame/run.py --frames 300 --shot 250 --out /tmp   # 第 250 帧存 PNG
 """
@@ -40,8 +40,8 @@ for i in range(1, 13):
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="撃破伝 页1-3 复刻（pygame）")
-    ap.add_argument("--page", type=int, default=1, help="起始页（1/2/3）")
+    ap = argparse.ArgumentParser(description="撃破伝 页1/2/3/13 复刻（pygame）")
+    ap.add_argument("--page", type=int, default=1, help="起始页（1/2/3/13）")
     ap.add_argument("--frames", type=int, default=0, help="跑 N 帧后退出（0=无限）")
     ap.add_argument("--shot", type=int, default=-1, help="第 N 帧存 PNG")
     ap.add_argument("--shots", default="", help="多个帧号，逗号分隔（做对比图用）")
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.display.init()
     pygame.font.init()
-    pygame.display.set_caption("撃破伝 v1.06 — 640x480 (pages 1-3)")
+    pygame.display.set_caption("撃破伝 v1.06 — 640x480 (pages 1-3, 13)")
     # depth 交给 SDL 自己选（XWayland 上硬要 32bpp visual 有可能拿不到，窗口建了却不显示）
     screen = pygame.display.set_mode(WINDOW_SIZE, 0)
     if tuple(screen.get_size()) != WINDOW_SIZE:

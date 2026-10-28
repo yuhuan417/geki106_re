@@ -87,6 +87,25 @@ MENU_EXIT_FLAGS = (0x2000000, 0x40000, 0x80000, 0x100000,
                    0x20000, 0x20000, 0x20000, 0x20000)
 
 
+# 页13 的 20 个流程脚本（槽 ← 脚本 id；0x454405..0x45458B 逐条，§16.110）
+P13_SCRIPTS = ((0, 0x27), (1, 0x28), (2, 0x1C), (3, 0x1C), (4, 0x16), (5, 0x1E),
+               (6, 0x22), (7, 0x23), (8, 0x20), (9, 0x21), (10, 0x1D), (11, 0x15),
+               (12, 0x1B), (13, 0x17), (14, 0x26), (15, 0x25), (16, 0x19),
+               (17, 0x1A), (18, 0x18), (19, 0x1F))
+# 页13 的层装载表（0x4542E1..0x45433F：0x44C640(层, 资源)）
+P13_LAYERS = ((0, 0x07), (1, 0x08), (2, 0x20), (3, 0xB3), (4, 0xB4))
+
+# 0x498A88：输入预设记录表（14 字节/项，实测前 6 项）
+P13_PRESET_TABLE = {
+    0: bytes.fromhex('01 01 00 01 80 00 00 00 00 00 00 00 00 00'),
+    1: bytes.fromhex('01 01 00 01 36 00 00 00 00 00 00 00 00 00'),
+    2: bytes.fromhex('01 01 00 01 31 00 00 00 00 00 00 00 00 00'),
+    3: bytes.fromhex('01 01 00 01 d6 00 00 00 00 00 00 00 00 00'),
+    4: bytes.fromhex('01 01 00 01 64 00 00 00 00 00 00 00 00 00'),
+    5: bytes.fromhex('01 01 00 01 80 00 00 00 00 00 00 00 00 00'),
+}
+
+
 # ---------------------------------------------------------------------------- 数据
 def load_data() -> dict:
     with open(DATA_PATH, encoding="utf-8") as f:
@@ -592,6 +611,19 @@ class Input:
         """0x44E470：直接写虚拟指针 [mgr+0x14]/[mgr+0x18]（不钳位）。"""
         self.x, self.y = int(x), int(y)
 
+    def set_preset(self, preset: int, flag: int = 0) -> None:
+        """0x44E620(mgr, preset, x, y) → 0x44E4A0(mgr, preset, flag)：把预设记录
+        （表 `0x498A88 + preset*0x0E`，14 字节）拷进 `[mgr+0x4C]`。
+
+        表内容（`0x498A88`，逐项 14 字节）：
+            0: 01 01 00 01 **80** …    1: …**36**…   2: …**31**…
+            3: 01 01 00 01 **D6** …    4: …**64**…   5: …**80**…
+        ⇒ 前 4 字节固定 `01 01 00 01`，第 5 字节是速度档（0x80=1.0 基准，0xD6=1.67 倍）。
+        页13 用**预设 3**（光标最快），页3 用预设 0。
+        """
+        self.preset = int(preset)
+        self.preset_rec = P13_PRESET_TABLE.get(int(preset), b"")
+
     def build(self, keys, mouse_buttons, mouse_delta=(0, 0), keycode: int = 0) -> Record:
         b0 = bool(mouse_buttons[0]) or keys.get("shot", False)
         b1 = bool(mouse_buttons[2]) or keys.get("lock", False)
@@ -691,16 +723,47 @@ class KeyMgr:
         self.bits = 0
 
     def update(self, rec) -> None:
-        self.bits = (1 if rec.b0 else 0) | (2 if rec.b1 else 0)
+        """**不写** `[0x4AB5B0+4]`：那张位图的 bit0/bit1 是**模式选择**（bit0=鍛錬、
+        bit1=操作器），由页3 菜单 state4 的 `0x45B0A0(0x4AB5B0,1/2,…)`（0x4257BE/0x4257D0）
+        写入、页4 进场读取（0x45060A/0x45061C）、页13 收尾用 `0x45AFF0(…,1)` 决定去页12 还是页4；
+        按键"按住/按下沿"全在帧记录 `0x4AB594`（+0/+1 按住、+2/+3 按下沿）。
+
+        旧实现把 bit0/bit1 当成"攻击/锁定按住"每帧覆盖，会把模式选择清掉 ⇒ 已删。
+        （0x44E660 轮询写的是帧记录：`0x44E810 [edi]=dx<<cl`、`0x44E81B [edi+4]=dy<<cl`、
+        `0x44E7DB [edi+8]/[edi+9]`，edi = 记录指针，不是 0x4AB5B0。）
+        """
+        return
 
     def test(self, mask: int) -> bool:
         return (self.bits & mask) != 0
 
     def write(self, mask: int, val: int) -> None:
+        """0x45B0A0(obj, mask, val)：mask 只有一个位时置位/清位。"""
         if val:
             self.bits |= mask
         else:
             self.bits &= ~mask
+
+    # ---- 0x45AFC0 / 0x45B0E0 / 0x45B030：位段读写与反向测试（§10.2）------
+    def field(self, mask: int) -> int:
+        """0x45AFC0(obj, mask) = `([+4] & mask) >> 位号` —— 返回**字段值**（不是位号）。"""
+        if not mask:
+            return 0
+        pos = (mask & -mask).bit_length() - 1
+        return (self.bits & mask) >> pos
+
+    def set_field(self, mask: int, value: int) -> None:
+        """0x45B0E0(obj, mask, value)：mask 与其最低置位同步左移、value 同步左移，
+        再 `[+4] = ([+4] and-not mask) or (mask and value<<位号)`（§16.97 勘误：不是"清位"）。"""
+        if not mask:
+            return
+        pos = (mask & -mask).bit_length() - 1
+        v = (int(value) << pos) & mask
+        self.bits = (self.bits & ~mask) | v
+
+    def clear_test(self, mask: int) -> bool:
+        """0x45B030(obj, mask)：反向测试 —— 位**未**置位时返回真。"""
+        return (self.bits & mask) == 0
 
 
 class Flags:
@@ -807,6 +870,9 @@ class Pages:
         self.bar_color = 0xD9          # 0x42000004 色块条用的索引（ctor 里由 desc 决定，暂取亮色）
         self.trace: list[str] = []
         self.p1_done: set[int] = set()
+        self.p13_frames = 0          # 0x56CCA8（页13 的帧计数）
+        self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
+        self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
         self.p2_loaded: dict[int, int] = {}
         self.p2_sky: set[int] = set()
         self.quit = False
@@ -832,6 +898,8 @@ class Pages:
             self.page2_enter()
         elif self.page == 3:
             self.page3_enter()
+        elif self.page == 13:
+            self.page13_enter()
         elif self.page == 4:
             self.log("page 4 = 游戏本体（由 main.py 的 game 循环接手）")
             self.quit = True
@@ -846,6 +914,8 @@ class Pages:
             return self.page2_step()
         if self.page == 3:
             return self.page3_step()
+        if self.page == 13:
+            return self.page13_step()
         return False
 
     def finish(self) -> None:
@@ -856,6 +926,8 @@ class Pages:
             self.page2_finish()
         elif self.page == 3:
             self.page3_finish()
+        elif self.page == 13:
+            self.page13_finish()
 
     def advance(self) -> None:
         """一帧：step 返回 0 → finish（页号切换）→ 页机重新分发。"""
@@ -1185,6 +1257,106 @@ class Pages:
             self.page = 0xFF
         self.log(f"page3.finish flags=0x{self.flags.bits:X} → page {self.page}")
 
+    # ---- 页13（0x454280 / 0x454720 / 0x454840）= 选择画面 ------------------
+    def page13_enter(self) -> None:
+        """0x454280：页13 进场（逐步对齐，含 3 条错误旗标）。
+
+        顺序：`[0x56CCA8]=0` → `0x44CDF0(mgr,1,对比,亮度,-255)` → 5 层 + 建层5
+        → 6 个色键 → `0x44E620(mgr,3,0,0)` 预设3 + 指针(0,0) + `0x44EDA0(mgr,0)`
+        → 20 个流程脚本（槽0..0x13）→ `0x458D60` 场景重置 → `0x44F600(0x4AB514,1,7)`
+        → `0x45EF10(0x4CD4A0,1)` 关卡号=1 → 生成 `0x6F000006` 入 0x4AD52C
+        → `0x45A490(0x4AB570,0)` SetPeriod(0) → 返回 `0x45AFF0(0x4AB5C0,0)`。
+        """
+        self.p13_frames = 0                             # 0x454283 [0x56CCA8] = 0
+        if "1" in self.data.get("palettes", {}):
+            self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
+            self.pal_now = self.pal
+        # 0x4542C3 push b / push a / push 1 → 0x44CDF0(mgr, 1, a, b)，第 5 参 -255 由
+        # `push 0xFFFFFF01`（0x454291）留在栈上提供 ⇒ 进场即**全黑**，由淡入实体拉回来。
+        self.fade_to(-255, 0)
+        ok = True
+        for lay, res in P13_LAYERS:                     # 0x4542E1..0x45433F
+            ok = self.layers.bind(lay, res) and ok
+        ok = self.layers.create(5, W, H) and ok         # 0x45435D 0x44C560(5,640,480)
+        for i in range(6):                              # 0x45436F..0x4543C9 色键 0
+            self.layers.color_key(i, 0)
+        if not ok:
+            self.flags.set(2)                           # 0x4543D4 → 0x45AF30(2)
+        # 0x4543D9 失败分支之后：push 0/0/0/3 → 0x44E620(mgr,3,0,0)；0x4543F0 → 0x44EDA0(mgr,0)
+        self.inp.set_preset(3)
+        self.inp.set_pos(0, 0)
+        self.inp.set_mode(0)
+        for slot, ident in P13_SCRIPTS:                 # 0x454405..0x45458B
+            if not self.flow_script_load(slot, ident):
+                self.flags.set(8)                       # 0x454594
+        self.scene_reset()                              # 0x4545B8 0x458D60
+        self.midi_play(7)                               # 0x4545A0 0x44F600(0x4AB514,1,7)
+        self.score_level = 1                            # 0x4545BD 0x45EF10(0x4CD4A0,1)
+        self.spawn(self.ui52c, 0x6F000006)              # 0x4545C9 → 0x445AA0(0x4AD52C)
+        if not self.timer.set_period(0):                # 0x4545FD 0x45A490(0x4AB570,0)
+            self.flags.set(0x40)
+        self.enter_ok = self.flags.is_empty()
+        self.log(f"page13.enter（层0..4+建层5 / 20 脚本 / 0x6F000006 / SetPeriod0）"
+                 f"ok={self.enter_ok}")
+
+    def page13_step(self) -> bool:
+        """0x454720：`0x458B80` → `0x458CB0` → `0x44EB60` → `SetCursorPos(320,240)`
+        → `0x458FD0` → `[0x56CCA8]++` → `0x4562A0` → 碰撞 `0x43C060`(4AD46C,4AD43C)
+        → `0x458E70` → `0x458EF0(this,0)` → 返回 `0x45AFF0(0x4AB5C0,0)`。"""
+        self.keys.update(self.inp.rec)                  # 0x4AB5B0 位图
+        # 0x454769 0x458FD0(rec[6])：键码 → 旗标（ESC = 0x200）
+        self.key_command(self.inp.rec.key)
+        self.begin_frame()                              # 0x458CB0 → 0x44D740 的 ±255 填充
+        self.p13_frames += 1                            # 0x454776 [0x56CCA8]++
+        self.band_draw()                                # 0x454786 0x4562A0
+        # 0x454794 0x43C060(ctx,0x4AD46C,0x4AD43C)：本复刻还没有自机/敌弹实体，跳过碰撞
+        self.tick_ui(self.ui4fc)                        # 0x458E70：4FC 行为+绘制
+        self.tick_ui(self.ui52c)                        #   52C（淡入/淡出、缩略图）
+        self.tick_ui(self.ui46c)                        #   4CC（演员）
+        self.ui46c = [e for e in self.ui46c if e.alive]
+        self.ui4fc = [e for e in self.ui4fc if e.alive]
+        self.ui52c = [e for e in self.ui52c if e.alive]
+        self.draw()                                     # 含 present
+        self.band_advance()                             # 0x456270
+        return self.flags.is_empty()
+
+    def page13_finish(self) -> None:
+        """0x454840：停 MIDI → KillTimer → 2×(填0xB4+present) → 释放层 → 旗标映射
+
+            `0x100` → 页0           `0x200` → 页3
+            `0x10000` → 写 `[0x4AB5C8]=0x20000`，`bit0(0x4AB5B0)`(=鍛錬) ? 页12 : 页4
+            其它 → 0xFF
+        """
+        self.timer.kill()                               # 0x454843/0x45484D
+        self.canvas.fill(0xB4); self.present()          # 0x454867..0x454878
+        self.canvas.fill(0xB4); self.present()          # 0x45487D..0x45488E
+        self.layers.free_all()                          # 0x454893 0x44CEE0
+        r = self.flags.lowest()                         # 0x4548A2 0x45B070
+        if r == 0x100:                                  # 0x4548FC
+            self.page = 0
+        elif r == 0x200:                                # 0x4548F0
+            self.page = 3
+        elif r == 0x10000:                              # 0x4548C8
+            self.theatre = 0x20000                      # 0x4548CF [0x4AB5C8] = 0x20000
+            self.page = 12 if self.keys.test(1) else 4  # 0x4548D9 0x45AFF0(0x4AB5B0,1)
+        else:
+            self.page = 0xFF
+        self.log(f"page13.finish flags=0x{self.flags.bits:X} → page {self.page}"
+                 f"（theatre=0x{self.theatre:X}）")
+
+    # ---- 页13 用到的三条外部调用（音频/脚本 VM 未移植，按原返回约定记账）------
+    def flow_script_load(self, slot: int, ident: int) -> bool:
+        """0x450140(0x4AB4B0, slot, id)：把流程脚本装进槽。流程 VM（0x450FE0）
+        只在页4 的 step 里 tick（唯一 caller 0x451327），页13 只是**预装载**。"""
+        self.p13_scripts = getattr(self, "p13_scripts", {})
+        self.p13_scripts[int(slot)] = int(ident)
+        return True
+
+    def midi_play(self, ident: int) -> bool:
+        """0x44F600(0x4AB514, loop=1, id)：BGM。pygame 版无音频子系统。"""
+        self.log(f"0x44F600 MIDI play id={ident}（无音频子系统，跳过）")
+        return True
+
     # ---- 键命令 0x458FD0 --------------------------------------------------
     def key_command(self, key: int) -> None:
         if key == 0:
@@ -1241,6 +1413,15 @@ class Pages:
                 # 行为 0x43E410 每帧再按指针重算并铺该段的 84 字节场景记录
                 e.beh = "scene_segment"          # 0x43E410
                 e.a4 = int(self.inp.y) // 49
+            elif idx == 5:
+                # 0x43D970 ctor（页13 的选择画面总控）：[1C]=[20]=[24]=[28]=0，
+                # 并 `0x45B0E0(0x4AB5B0, 0xC000, 0)` 把"选中槽"字段清 0；
+                # 行为 0x43EDB0（7 态机，§16.118）
+                e.beh = "psel"
+                e.a3 = 0            # [+0x1C] 状态
+                e.a4 = 0            # [+0x20] 状态内帧计数
+                e.aux = 0           # [+0x24] 上次槽位
+                self.keys.set_field(0xC000, 0)
             elif idx == 7:
                 e.beh = "title_timeline"         # 0x43F560
                 e.t = int(self.data["page2"]["timer_start"])
@@ -1290,6 +1471,30 @@ class Pages:
                 e.disp = DisplayNode(0x0D,
                                      [left, 0x88 + 0x28 * k, left + w, 0xA7 + 0x28 * k],
                                      [MENU_ROW_DSTX[row], 0x118 + 0x30 * k])
+            elif idx == 25:                       # 0x5F00001B ctor 0x424EDB
+                # 选中槽的**高亮框**：每帧按 0x45AFC0(0x4AB5B0,0xC000) 重建源矩形
+                # （层3 bm_psel 的第 slot+5 条 48px 带），dst 固定 (0, 0x1C0)。
+                e.beh = "psel_band"               # 行为 0x426B20
+                # ctor rect (0,0xF0,0xBF,0x11F)；`0x401753(0x1C0, 0)` → eax=0x1C0 进
+                # `[node+0x14]`(=dst.x, 见 0x45A189 的 `[+0x14]-l+r`)、edx=0 进 `[+0x18]`(=dst.y)
+                e.disp = DisplayNode(3, [0, 0xF0, 0xBF, 0x11F], [0x1C0, 0])
+            elif idx == 26:                       # 0x5F00001C ctor 0x424F3C
+                # `[+0x1C] = rec[3]`（相位基准 1 或 2）、`[+0x20] = 0`；
+                # 源 = 层3 第 a 组带 (0, 48a+0x60, 0xEF, 48a+0x8F)，
+                # dst = (x=72a+0x108, y=160a+0x28) —— a=1 照準自動、a=2 照準固定
+                a = int(a3) & 0xFF
+                e.beh = "psel_blink"              # 行为 0x426BA0
+                e.a3 = a                          # [+0x1C]
+                e.aux = 0                         # [+0x20]
+                # `0x401753(0xA0a+0x28, 0x48a+0x108)`：arg1 → dst.x、arg2 → dst.y
+                e.disp = DisplayNode(3, [0, 0x30 * a + 0x60, 0xEF, 0x30 * a + 0x8F],
+                                     [0xA0 * a + 0x28, 0x48 * a + 0x108])
+            elif idx == 27:                       # 0x5F00001D ctor 0x424FCD
+                # 输入设备标签（a=0 鼠 / a=1 操作器），`[+0x1C] = -1` ⇒ 永不死
+                a = int(a3) & 0xFF
+                e.beh = "psel_hint"               # 行为 0x430520（倒计时）
+                e.t = -1
+                e.disp = DisplayNode(3, [0, 0x30 * a, 0x8F, 0x30 * a + 0x2F], [0, 0])
             else:
                 e.beh = f"unimpl_5F_{idx}"
                 self.log(f"ui 0x5F idx {idx} 未实现（§16.7）")
@@ -1323,6 +1528,14 @@ class Pages:
                 self._bar_block(e)
             elif e.beh == "scene_segment":
                 self._scene_segment(e)
+            elif e.beh == "psel":
+                self._psel(e)
+            elif e.beh == "psel_band":
+                self._psel_band(e)
+            elif e.beh == "psel_blink":
+                self._psel_blink(e)
+            elif e.beh == "psel_hint":
+                self._psel_hint(e)
             elif e.beh == "menu_root":
                 self._menu_root(e)
             elif e.beh == "menu_row":
@@ -1514,6 +1727,107 @@ class Pages:
         if e.t >= 0x78 or self.inp.rec.e0:
             e.alive = False
             d.active = False
+
+    # ---- 页13（选择画面）的四个实体 ----------------------------------------
+    def spawn_flash(self, cur: int, target: int, step: int) -> UiEntity:
+        """0x61000005 的 init 0x42730B：`[0x1C]=a（当前） [0x20]=b（目标） [0x24]=c（步进）`。"""
+        e = self.spawn(self.ui52c, 0x61000005)
+        e.aux, e.a3, e.a4 = int(cur), int(target), int(step)
+        return e
+
+    def actor_spawn(self, x: int, y: int, ty: int) -> None:
+        """0x448FF0(0x4AD40C, {x,y,type,0,0})：演员实体（生成器 0x445C00，§10.4）。
+
+        页13 用类型 **0x0A**，走 0x446061/0x446227 的"其他"分支 → **0x448C70（玩家头像/自机）**，
+        即选择画面中间那台自机。pygame 版尚未移植页4 的演员系统，这里只记账。
+        """
+        self.log(f"actor spawn ({x},{y}) type=0x{ty:X} → 未实现（0x445C00/0x448C70）")
+
+    def _psel(self, e: UiEntity) -> None:
+        """0x43EDB0：页13 选择画面总控（7 态机）。
+
+        槽位 = `[0x4AB59C]`（虚拟指针 X）/ 128；`0x45B030(0x4AB5B0,0x80000)` 为真
+        （= 0x80000 位**未**置位）时槽 3 被 `SetCursorPos(0x1E0,0xF0)` 拽回槽 2。
+        态 0 生成子实体；态 1/3/5 各停 `0x10` 帧；态 2 = 选择中（换槽写 `0xC000` 字段、
+        按 [0x4AB596] 确定 / [0x4AB597] 取消）；态 4 → 旗标 `0x10000`；态 6 → 旗标 `0x200`。
+        """
+        n = int(self.inp.x) // 128
+        if self.keys.clear_test(0x80000) and n == 3:
+            self.inp.set_pos(0x1E0, 0xF0)                 # 0x43EDED SetCursorPos(480,240)
+            n = 2
+        state = e.a3
+        changed = (n != e.aux)                            # 0x43EE0F setne al
+        e.aux = n                                         # 0x43EE16 [ebx+0x24] = esi
+        if state == 0:                                    # 0x43EE26（进场生成）
+            self.actor_spawn(0xA0, 0x78, 0x0A)            #   {160,120,0xA,0} → 0x4AD40C
+            self.spawn_flash(-255, 0, 0x10)               #   淡入 -255→0、每帧 +16
+            self.spawn(self.ui52c, 0x6F000007)            #   缩略图（0x43F340，未实现）
+            self.spawn(self.ui4fc, 0x5F00001B)            #   高亮框
+            self.spawn(self.ui4fc, 0x5F00001C, a3=1)      #   照準－自動 标签
+            self.spawn(self.ui4fc, 0x5F00001C, a3=2)      #   照準－固定 标签
+            self.spawn(self.ui4fc, 0x5F00001D,
+                       a3=self.keys.field(2) & 0xFF)      #   鼠 / 操作器 标签
+            e.a3 = 1
+        elif state in (1, 3, 5):                          # 0x43F00E：停 0x10 帧后推进
+            if e.a4 == 0x10:
+                e.a3 = state + 1
+        elif state == 2:                                  # 0x43F023
+            if changed:
+                self.keys.set_field(0xC000, n)            #   0x45B0E0(0x4AB5B0,0xC000,n)
+                self.actor_spawn(0xA0, 0x78, 0x0A)        #   重铺（0x43F037..0x43F06F）
+            if self.inp.rec.e0:                           #   [0x4AB596] 攻击键 → 确定
+                e.a3 = 3
+                self.inp.set_mode(1)                      #   0x44EDA0(mgr,1)
+                self.spawn_flash(0, -255, -0x10)           #   淡出 0→-255、每帧 -16
+            elif self.inp.rec.e1:                         #   [0x4AB597] 锁定键 → 取消
+                e.a3 = 5
+                self.inp.set_mode(1)
+                self.spawn_flash(0, -255, -0x10)
+        elif state == 4:                                  # 0x43F0DA
+            self.flags.set(0x10000)
+        elif state == 6:                                  # 0x43F0E1
+            self.flags.set(0x200)
+        # 0x43F0F0 尾部：状态变了 → `[+0x20]=0`；没变 → `[+0x20]++`
+        if state != e.a3:
+            e.a4 = 0
+        else:
+            e.a4 += 1
+
+    def _psel_band(self, e: UiEntity) -> None:
+        """0x426B20（0x5F00001B）：每帧把源矩形换成"第 slot+5 条"48px 带。
+
+        `(0x45AFC0(0x4AB5B0,0xC000)+5)*3*16` = `48*(slot+5)`，宽 0..0xEF、高 0x2F，
+        dst 不动（ctor 写的 (0,0x1C0)）。
+        """
+        row = (self.keys.field(0xC000) + 5) * 3 * 16
+        if e.disp:
+            e.disp.rect[:] = [0, row, 0xEF, row + 0x2F]
+
+    def _psel_blink(self, e: UiEntity) -> None:
+        """0x426BA0（0x5F00001C）：16 帧一相的显隐门。
+
+        `cnt=[+0x20]++; if ((cnt&0x10)==0 && [+0x1C]==slot) 隐藏; else slot==3 ? 隐藏 : 显示`
+        """
+        cur = self.keys.field(0xC000)
+        cnt = e.aux
+        e.aux = (cnt + 1) & 0xFFFFFFFF
+        if (cnt & 0x10) != 0:
+            vis = (cur != 3)
+        else:
+            vis = (e.a3 != cur) and (cur != 3)
+        if e.disp:
+            e.disp.active = vis
+
+    def _psel_hint(self, e: UiEntity) -> None:
+        """0x430520（0x5F00001D / 0x61000006）：`[+0x1C]--`，减到 0 则死。
+
+        页13 的 ctor 写 `[+0x1C] = -1` ⇒ 永远不为 0 ⇒ 只是**静态贴图**。
+        """
+        if e.t == 0:
+            e.t = -1
+            e.alive = False
+        else:
+            e.t -= 1
 
     def _flash(self, e: UiEntity) -> None:
         """0x427600（0x61000005 的亮度渐变）：cur=[0x1C]、target=[0x20]、step=[0x24]。"""
