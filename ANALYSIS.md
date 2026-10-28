@@ -4860,9 +4860,15 @@ ctor `0x42B210` 公共段（`0x42B220..0x42B252`）：`[+0x10]=1`、`[+0x18]=1`�
 
 各支公共形状（`0x42B2A3` 为例）：`push b; push r; push t; push l`（**push 序 = b,r,t,l**）→
 `mov [esi+0x40]=行为` → `mov [esi+0xC]=N` → `mov [display+0]=1`（**显示层恒为 1**）→
-`jmp 0x42B7AA`（公共尾：`0x40238D` 建 rect、拷 4 dword 到 `[display+4]`；dst 由
-`[+0x24]>>8`/`[+0x28]>>8` 减去**源矩形半宽高**得到 —— `0x120F112A` 的 32×32 处实测
-`0x42B768 sub ecx,0x10` 与 `0x42B76B..` 对 `[+8]` 同样减 `0x10`，即 dst 以 (x,y) 为中心）。
+`jmp 0x42B7AA`（公共尾：`0x40238D` 建 rect、拷 4 dword 到 `[display+4]`；公共尾 `0x42B7AA..0x42B7EA` 已读全：
+`call 0x40238D` → 4 dword 拷进 `[display+4]`（rect）→
+`edx=[+4]-8`、`ecx=[+8]-8`（`0x42B7D4 sub ecx,8` / `0x42B7D8 sub edx,8`）→ `0x401753(edx,ecx)`（恒等 thunk）
+→ `[display+0x14]=eax`、`[display+0x18]=edx`。
+⇒ **dst = (x − 半宽, y − 半高)**；16×16 支减 `8`，32×32 支（`0x120F112A`，`0x42B768 sub ecx,0x10`）减 `0x10`。
+即所有 `0x12` 特效以生成点为中心。
+
+**`[+0x2C]`（速度）不由 ctor 赋值** —— ctor 只写 `[+0x0C]/[+0x10]/[+0x14]/[+0x18]/[+0x1C]/[+0x20]/[+0x24]/[+0x28]`
+与显示节点；`[+0x2C]` 须在生成器 `0x430400` 或记录字段里找（待定）。
 
 已核实的 (type, 行为, `[+0xC]`, rect) —— `0x40238D(l,t,r,b)`：
 
