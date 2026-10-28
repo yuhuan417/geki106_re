@@ -51,7 +51,7 @@
 | remake/build_assets.py | 资产编译器 → Godot 格式 |
 | remake/build_glyphs.py | 字形切割 |
 | remake/godot/ | Godot 4.3 重制工程（可运行） |
-| remake/replicate_page_bg.py（上级目录） | 页1 背景机制复刻 |
+| remake/replicate_page_bg.py（上级目录） | 页2 背景机制复刻 |
 | kanji_compose.py | 汉字精灵拼装实验 |
 | layer_decode.py / dec83.py | #83-89 解码 |
 | behaviors.asm | 18 行为函数反汇编存档 |

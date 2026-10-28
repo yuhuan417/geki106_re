@@ -44,14 +44,14 @@ W, H = 640, 480
 FLIP_GGD_ROWS = os.environ.get("GEKI_NO_FLIP_GGD", "") == ""
 FLIP_SCREEN = os.environ.get("GEKI_FLIP_SCREEN", "") != ""
 # 显示表渲染：0x430840 = `add ecx,4; jmp 0x45A170`（按队列渲染显示表）。
-# 页0-2 的 step 0x458F80 每帧调它两次：0x458F8F(4CC 之后) 与 0x458FAD(4FC 之后)。
+# 页1-3 的 step 0x458F80 每帧调它两次：0x458F8F(4CC 之后) 与 0x458FAD(4FC 之后)。
 DRAW_DISPLAY_NODES = os.environ.get("GEKI_PANELS", "1") != "0"
 # ini 的 OPMOVIE / CHANGEDISPLAY（0x458AE0 = CWinApp::GetProfileInt，读 geki.ini/注册表）：
-#   页0 t=290 时只看 [ent+0x24]=bitindex(0x4AB5B0,0x2000)==OPMOVIE：非0 → 生成 0x6F000002（Now Loading 预载屏）
-#   页1 进场看 (CHANGEDISPLAY==0 || OPMOVIE!=0) 决定是否挂资源77记录流
+#   页1 t=290 时只看 [ent+0x24]=bitindex(0x4AB5B0,0x2000)==OPMOVIE：非0 → 生成 0x6F000002（Now Loading 预载屏）
+#   页2 进场看 (CHANGEDISPLAY==0 || OPMOVIE!=0) 决定是否挂资源77记录流
 # 原目录没有 geki.ini ⇒ 取默认 0（与 MFC GetProfileInt 无该项时返回默认值一致）
-# ini 键 OPMOVIE（0x4A48A4）：页1 进场 0x452D15 读它，**默认值 1**（0x452D17 `push 1` 是
-# GetPrivateProfile 风格的默认值，0x458AF0/0x458AFC 取不到键就用它）。页0 进场 0x451EBE
+# ini 键 OPMOVIE（0x4A48A4）：页2 进场 0x452D15 读它，**默认值 1**（0x452D17 `push 1` 是
+# GetPrivateProfile 风格的默认值，0x458AF0/0x458AFC 取不到键就用它）。页1 进场 0x451EBE
 # 用 0x45AFF0(0x4AB5B0, 0x2000) 的结果作为实体参数 [ent+0x24] → 非 0 才播开场动画。
 OPMOVIE = os.environ.get("GEKI_OPMOVIE", "1") != "0"
 CHANGEDISPLAY = os.environ.get("GEKI_CHANGEDISPLAY", "0") != "0"
@@ -71,7 +71,7 @@ KEY_ESC, KEY_PAUSE, KEY_SPACE, KEY_PRINTSCR, KEY_TAB = 1, 2, 3, 4, 5
 CMD_MAP = [0, 11, 11, 1, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 2,
            3, 4, 5, 6, 7, 8, 9, 10, 11, 1, 1]
 
-# ---- 页2 菜单行 0x5F000006（ctor 0x424579）------------------------------------
+# ---- 页3 菜单行 0x5F000006（ctor 0x424579）------------------------------------
 # ctor 在栈帧里连排三张 8 项表（帧偏移依次 F+0x00 / F+0x20 / F+0x40）：
 #   [esp+edi*4+0x10] @d=-0x200 → F+edi*4      = 源矩形 left
 #   [esp+edi*4+0x44] @d=-0x214 → F+0x20+edi*4 = 目标 x
@@ -398,7 +398,7 @@ class P2Stream:
         return recs
 
 
-# ------------------------------------------------------- 页1 尾部表（§16.93，栈上表已抽出）
+# ------------------------------------------------------- 页2 尾部表（§16.93，栈上表已抽出）
 # ⑫ 4CC 精灵表：0x440B3A..0x440CCB 建于 [esp+0x64]，8 字节 {i16 t, i16 a, i16 b, i16 c}
 #    si 继承值 = 0x78（0x44016F）、di = 0x6B8（0x440B35）
 P2_PANELS = [
@@ -624,7 +624,7 @@ class Input:
         #   if (X + dx > X上限) dx = X上限 - X
         #   if (Y + dy < Y下限) dy = Y下限 - Y
         #   if (Y + dy > Y上限) dy = Y上限 - Y
-        # 指针是屏幕光标，边界即 640×480 画面（页2 菜单 4 条 ×128px 带正好铺满 Y∈[0,512)）。
+        # 指针是屏幕光标，边界即 640×480 画面（页3 菜单 4 条 ×128px 带正好铺满 Y∈[0,512)）。
         if self.x + dx > 448:            # 0x44E9A0：X 上限 [inp+0x2C]（预设 0x17 = 448）
             dx = 448 - self.x
         if self.x + dx < 0:
@@ -877,14 +877,14 @@ class Pages:
             if self.page != 0 and not self.quit:
                 self.enter()
 
-    # ---- 页0（0x451E00 / 0x451F80 / 0x452010）------------------------------
+    # ---- 页1（0x451E00 / 0x451F80 / 0x452010）------------------------------
     def page1_enter(self) -> None:
         self.layers.bind(13, 9)                # 0x44C640(mgr,13,9) → bm_tilg
         self.layers.create(2, W, H)            # 0x44C560(2,640,480)
         self.layers.color_key(13, 0)           # 0x44CE60(13,0)
         self.inp.x, self.inp.y = 0, 0          # 0x44E620(预设0,0,0,0) + 0x44EDA0(0)
         # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
-        # 漏清 4CC 会让页0 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
+        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
         self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.p1_done.clear()
         # a3 = bitindex(0x4AB5B0, 0x2000) 即 ini 的 OPMOVIE 开关（0x43E09A 分支用）
@@ -924,7 +924,7 @@ class Pages:
             self.page = 0xFF
         self.log(f"page1.finish flags=0x{self.flags.bits:X} -> page {self.page}")
 
-    # ---- 页1（0x452A00 / 0x452EB0 / 0x452F80）------------------------------
+    # ---- 页2（0x452A00 / 0x452EB0 / 0x452F80）------------------------------
     # ---- 色带引擎 0x456180/0x4561D0/0x4562A0/0x456240/0x456270 -------------------
     def band_push(self, table: list[list[int]], count: int, start: int, scroll: int) -> None:
         """0x4561D0(seq, table, count, startIdx, scroll)：整表替换（表按 4 字节项 {u8 color,u8 pad,i16 h}）。"""
@@ -992,7 +992,7 @@ class Pages:
         self.band_speed = self.band_frames = 0
         self.sky_color = 0xB4
         # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
-        # 漏清 4CC 会让页0 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
+        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
         self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.p2_loaded.clear(); self.p2_sky.clear()
         # 0x452D3E：0x459C90(0x56B95C, cfg) —— CHANGEDISPLAY==0 或 OPMOVIE!=0 时挂上资源 77 记录流
@@ -1034,7 +1034,7 @@ class Pages:
         self.begin_frame()
         # 0x4562A0：色带（栈式，只铺带子，不整屏清！—— mosaic 像素靠这个保留下来）
         self.band_draw()
-        # 0x43A350：4CC 行为遍（页1 的 4F 飞入面板在这里动；0x458F80 的第一道）
+        # 0x43A350：4CC 行为遍（页2 的 4F 飞入面板在这里动；0x458F80 的第一道）
         self.tick_ui(self.ui46c)
         # 0x445A30：0x6F000008 时间轴（层装载 / 快照拷贝 / 记录流 / 字形条 / 面板生成）
         self.tick_ui(self.ui52c)
@@ -1064,7 +1064,7 @@ class Pages:
             self.page = 0xFF
         self.log(f"page2.finish flags=0x{self.flags.bits:X} → page {self.page}")
 
-    # ---- 页2（0x4520A0 / 0x452220 / 0x4522A0）------------------------------
+    # ---- 页3（0x4520A0 / 0x452220 / 0x4522A0）------------------------------
     def page3_enter(self) -> None:
         """0x4520A0（页3 进场）：逐条对齐，含 3 条错误旗标与末尾的旗标测试。
 
@@ -1137,7 +1137,7 @@ class Pages:
         # 0x452252：0x458FD0(rec[6]) 键码 → 旗标（码1 = ESC → 0x200）
         self.key_command(self.inp.rec.key)
         self.begin_frame()                             # 0x458CB0 → 0x44D740 的 ±255 整屏填充
-        # 0x45225F：0x4562A0(0x4CD484) 色带（页2 不推带 ⇒ 沿用上一页留下的带 = 0xB4 黑屏）
+        # 0x45225F：0x4562A0(0x4CD484) 色带（页3 不推带 ⇒ 沿用上一页留下的带 = 0xB4 黑屏）
         self.band_draw()
         # 0x452269：0x458F80 = 0x43A350(4CC) → 0x430840(渲4CC) → 0x44B0D0(4FC)
         #           → 0x445A30(52C) → 0x430840(渲4FC) → 0x456270(色带推进)
@@ -1455,7 +1455,7 @@ class Pages:
     def _opmovie(self, e: UiEntity) -> None:
         # 0x43E1C0：t<0xF4 时按 RT_STRING id=t 取文件名，只对 .ggd/.bmp 调 0x455090 载入；
         # 每帧用 0x44D200(0xB4) 清屏 + 0x44D330 打 "Now Loading...%3d/%3d"，t++；
-        # t>0xF4 → flags |= 0x10000（进页1）。0x43DD20(t,0xF) 负责把这一帧的图形合成上屏
+        # t>0xF4 → flags |= 0x10000（进页2）。0x43DD20(t,0xF) 负责把这一帧的图形合成上屏
         # （0x45FE10：把描述子里的 GGD id 逐个绑到层 0..n-1，再把层0贴屏）。
         import re as _re
         # 0x43E8C7..0x43E91F：切场景管理器(0x4AC4EC) → 写键位 1/2 → 置 [0x56CCD8] →
@@ -1531,7 +1531,7 @@ class Pages:
         if cur == e.a3:
             e.alive = False
 
-    # 0x427710（0x61000008 = 状态快照环驱动，页1 不用）
+    # 0x427710（0x61000008 = 状态快照环驱动，页2 不用）
     def _fade_in(self, e: UiEntity) -> None:
         """0x427385 的初值 + 0x427710 的推进：
 
@@ -1745,8 +1745,8 @@ class Pages:
             e.alive = False
             d.active = False
 
-    # 0x43F560（页1 时间轴）
-    # ------------------------------------------------------------ 页1 字形条/面板
+    # 0x43F560（页2 时间轴）
+    # ------------------------------------------------------------ 页2 字形条/面板
     def _p2_glyph(self, a: int, b: int, attr: int, layer: int) -> None:
         """0x43F230(ent, a, b, attr, layer)：层4（16×16 图集）的 8×8 单元 → 层 layer 的 (a*8,b*8)。
 
@@ -1933,12 +1933,12 @@ class Pages:
                 self.log(f"page2 t={t} band scroll speed={sp} frames={fr}")
 
         # 记录流窗口（0x43FA2D）：**只在 [start, end) 内**才 0x459D60 取一帧并贴屏；
-        # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页1 开头闪出记录里的一小块
+        # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页2 开头闪出记录里的一小块
         # 红色「撃」（玩家实测：图3 之前有一闪而过的小红字）。
         # 窗口判定（0x43FA35 `jl`：`end < t` 才跳过；0x43FA5D `jle`：`next.start <= t` 才继续走）
         # ⇒ 活跃窗口 = **闭区间 [start, end]**。全 5 段长度合计 = 3+171+515+429+945 = 2063+5 = 2068，
         # 正好等于资源 77 的记录帧数（之前写成左闭右开，每段少 1 帧 ⇒ 最后 5 条永远播不到，
-        # 流播完的 flags |= 1 也就永不触发，页1 到不了页2）。
+        # 流播完的 flags |= 1 也就永不触发，页2 到不了页3）。
         if self.p2_stream is not None:
             for (s0, s1) in p2.get("windows", []):
                 if int(s0) <= t <= int(s1):
@@ -1954,7 +1954,7 @@ class Pages:
                     break
             # 0x459D60 播完后返回 0 ⇒ 0x43FA47 `flags |= 1`。窗口表 5 段闭区间合计正好 2068
             # （= 资源77 帧数），所以"发现播完"的那一次调用必落在最后一个窗口之后
-            # （t > 4299）；不补这一步，页1 就永远等不到收尾旗标。
+            # （t > 4299）；不补这一步，页2 就永远等不到收尾旗标。
             if t > int(p2["windows"][-1][1]) and self.p2_stream.pos >= self.p2_stream.size:
                 # 原码 0x43FA47 `flags |= 1` → 0x452FE7 映射到页 0xFF；
                 # 页 0xFF 的处理器 0x4595A8 会打印 "This program will be closed."(0x4A4A64)
@@ -1981,7 +1981,7 @@ class Pages:
         #   0x4405EA 的循环按 `[rec-4]`(=t) 与计时器比较，命中即 0x44D010(mgr, layer=6, &src, &dst)
         #   ⇒ **bm_otit(544x160) 的 5 条 32px 条带被贴到 (48,128+48*i)** —— 正是玩家截图里的图3。
         # 0x4405EA 的循环：`movsx edx,word[ecx-4]`(记录时间) / `cmp edx,eax`(计时器) / `jl 0x440651`(跳过)
-        #   ⇒ **`记录时间 >= 计时器` 时才贴**。记录时间 = -58 ⇒ 通知页从页1 一开始(t=-420)就显示，
+        #   ⇒ **`记录时间 >= 计时器` 时才贴**。记录时间 = -58 ⇒ 通知页从页2 一开始(t=-420)就显示，
         #   直到 t=-58 为止（共 362 帧 ≈ 6 秒），而不是等到 -58 才出现（那是把判断写反了）。
         # 0x4405EA 的循环（`t_start <= t <= t_end` 才贴；0x44D010 带色键 0x11）。
         # 贴屏本身发生在 52C 行为遍里，而 52C 遍在 4CC 渲染**之后**（§16.9 的帧序）⇒
