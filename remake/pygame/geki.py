@@ -3179,10 +3179,18 @@ class Pages:
         注意：4FC 的显示节点（0x5F 擦入效果）是**最后**画的，会盖在文字上面。
         """
         c = self.canvas
-        # 页13：0x6F000007 首帧画的整屏人像（0x43F340 逐像素 0x43F230 → 8×8 块）＝最底层背景，
-        # 画在 4CC 演员（选中机体大字）之下。
+        # 页13 的真实次序（`0x4547B1`→`0x458E70` 行为遍 → `0x4547BA`→`0x458EF0` 渲染遍）：
+        # 行为遍里 52C 的文字（`0x44D330`）先上屏；渲染遍再按
+        # 55C(0x40195B) → **4CC 人像切片** → 43C → 49C → **40C 汉字** → **46C 特效** → 4FC
+        # 的顺序画显示表（`0x402531`→`0x430840`→`0x45A170`→`0x44D010` flags 0x11 = 色键0）。
+        # 所以文字在**人像之前**画，人像是色键0（黑透明）⇒ 文字从人像的暗部透出来。
+        for e in self.ui52c:
+            for tx in e.texts:
+                self.text.draw(c, tx["str"], int(tx["x"]), int(tx["y"]),
+                               int(tx["h"]), int(tx["fg"]), int(tx.get("bg", -1)) & 0xFF)
         if self.p13_portrait_arr is not None:
-            c.buf[:, :] = self.p13_portrait_arr
+            arr = self.p13_portrait_arr
+            c.buf[arr != 0] = arr[arr != 0]            # 0x44D010 flags 0x11：色键 0 = 透明
         # 0x4F000009（层 5 = 0x44C560(5,640,480) 整屏层）：把整屏缓冲按擦切位切片再贴回去
         # 0x439C31 a3!=0：源 rect (edi,0)-(0x27F,0x1DF)，dst (0,0)
         # 0x439C84 a3==0：源 rect (0,0)-(edi-1,0x1DF)，dst (0x27F-edi,0)
@@ -3197,7 +3205,10 @@ class Pages:
                     dx, dy = 0x27F - edi, 0
                 ww, hh = r - l, b - t
                 if ww > 0 and hh > 0:
-                    c.buf[dy:dy + hh, dx:dx + ww] = self.p13_portrait_arr[t:t + hh, l:l + ww]
+                    src = self.p13_portrait_arr[t:t + hh, l:l + ww]
+                    dst = c.buf[dy:dy + hh, dx:dx + ww]
+                    dst[src != 0] = src[src != 0]      # 同样色键 0
+
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
             self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）
@@ -3209,11 +3220,6 @@ class Pages:
         self.p2_blits = []
         if self.screen_fill >= 0:
             c.fill(self.screen_fill)
-        for e in self.ui52c:
-            for tx in e.texts:
-                # 0x44D330(mgr, y, x, str, h, fg, bg)：bg = SetBkColor ⇒ 先铺一格底色
-                self.text.draw(c, tx["str"], int(tx["x"]), int(tx["y"]),
-                               int(tx["h"]), int(tx["fg"]), int(tx.get("bg", -1)) & 0xFF)
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
         self.present()          # 0x458CB0 → 0x44D740（调色板操作 + Blt）
