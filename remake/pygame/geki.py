@@ -1534,6 +1534,8 @@ class Pages:
                 self._psel_band(e)
             elif e.beh == "psel_blink":
                 self._psel_blink(e)
+            elif e.beh == "kanji_actor":
+                self._kanji_actor(e)
             elif e.beh == "psel_hint":
                 self._psel_hint(e)
             elif e.beh == "menu_root":
@@ -1735,13 +1737,68 @@ class Pages:
         e.aux, e.a3, e.a4 = int(cur), int(target), int(step)
         return e
 
-    def actor_spawn(self, x: int, y: int, ty: int) -> None:
-        """0x448FF0(0x4AD40C, {x,y,type,0,0})：演员实体（生成器 0x445C00，§10.4）。
+    def actor_spawn(self, x: int, y: int, ty: int, a3: int = 0) -> "UiEntity | None":
+        """`0x448FF0(0x4AD40C, {x,y,type,a3,0})` = 演员队列插入，ctor = 生成器 `0x445C00`。
 
-        页13 用类型 **0x0A**，走 0x446061/0x446227 的"其他"分支 → **0x448C70（玩家头像/自机）**，
-        即选择画面中间那台自机。pygame 版尚未移植页4 的演员系统，这里只记账。
+        类型链（`0x445CA7` 起）：`type&0xFF000000==0x1000000` → `0x445CB6`；
+        `type>8` → `0x44603E`：9→`0x446227`(0x40116D→0x447F90)、**10→`0x446117`**、
+        `0x0AFFFFF7` 形态→`0x446059`；≤8：8→`0x44601E`(0x4015FF)、1→`0x445ECE`、
+        5→`0x445E47`、6→`0x445CE7`。页13 只用到 **0x0A**（= 选中机体的大字）。
         """
-        self.log(f"actor spawn ({x},{y}) type=0x{ty:X} → 未实现（0x445C00/0x448C70）")
+        if ty == 0x0A:
+            return self._actor_0A(x, y, a3)
+        self.log(f"actor spawn ({x},{y}) type=0x{ty:X} a3=0x{a3:X} → 未实现（§10.4 的其它类型）")
+        return None
+
+    def _actor_0A(self, x: int, y: int, a3: int) -> UiEntity:
+        """ctor `0x446117`（type 0x0A）：选中机体的大字（48×48）。
+
+        `[+0x40]=0x401BE0(→0x448230)`、`[+0xC]=0xC`、`[+0x10]=0`、`[+0x18]=1`、`[+0x1C]=-1`、
+        `[+0x20]=0x45AFC0(0x4AB5B0,0xC000)`（选中槽）、`[+0x30]=esi(=0 层号)`；
+        显示节点：**层 0（bm_cm48）、rect `(0, 48*槽, 0x2F, 48*槽+0x2F)`**（48×48 汉字图集
+        第 槽 行第 0 列）、dst `= (x-0x18, y-0x18)`（页13 送 (0xA0,0x78) ⇒ (136,96) 居中）。
+        """
+        e = UiEntity(type_word=0x0A, a3=int(a3))
+        e.beh = "kanji_actor"
+        e.t = -1                                  # [+0x1C] = -1，每帧 ++
+        e.aux = 0                                 # [+0xC] = 0xC（本行为不用）
+        e.p["slot"] = self.keys.field(0xC000)     # [+0x20]
+        e.p["x"], e.p["y"] = int(x), int(y)       # [+4]/[+8]
+        n = e.p["slot"]
+        e.disp = DisplayNode(0, [0, 0x30 * n, 0x2F, 0x30 * n + 0x2F],
+                             [int(x) - 0x18, int(y) - 0x18])
+        self.ui46c.append(e)
+        self.log(f"actor 0x0A slot={n} dst=({x-0x18},{y-0x18}) rect={e.disp.rect}")
+        return e
+
+    def _kanji_actor(self, e: UiEntity) -> None:
+        """行为 `0x448230`：槽变了就自尽；t<0x5A 走每槽效果分派；t≥0x39C 结束。
+
+        公共尾 `0x44898B`：表 `0x448A24` 的每槽时间窗 `{0x286,0x28E,0x216,0x39D}`，
+        在 `[th, th+0x1C)` 内按 `t&2` 把源矩形在列 0 / 列 0x30 之间抖动（`rect.l=0 or 0x30`）。
+        """
+        if e.p["slot"] != self.keys.field(0xC000):     # 0x44823A..0x44825A
+            e.alive = False
+            return
+        t = e.t
+        if 0 <= t < 0x5A:                              # 0x44825F cmp ecx,0x5A
+            self._kanji_slot_effect(e, e.p["slot"], t)
+        th = (0x286, 0x28E, 0x216, 0x39D)[e.p["slot"] & 3]
+        if e.disp and th <= t < th + 0x1C:             # 0x4489AD..0x4489DF
+            l = 0x30 if (t & 2) else 0
+            e.disp.rect[0] = l
+            e.disp.rect[2] = l + 0x2F
+        e.t += 1
+        if e.t >= 0x39C:                               # 0x4489FB
+            e.alive = False
+
+    def _kanji_slot_effect(self, e: UiEntity, slot: int, t: int) -> None:
+        """`0x448277 jmp [slot*4 + 0x448A30]` = `{0x44827E, 0x4482DA, 0x448356, 0x4483AC}`
+        （t<0x5A 的效果段）。目前只有槽0 读到：每 6 帧生成 `0x120B1121` @(0xB0,0x78) a3=0xE00。"""
+        if slot == 0 and t % 6 == 0:                   # 0x44827E..0x44828A
+            self.log(f"actor 0x0A 槽0 t={t} → spawn 0x120B1121 (0xB0,0x78) a3=0xE00（未实现）")
+        elif slot in (1, 2, 3) and t == 0:
+            self.log(f"actor 0x0A 槽{slot} 效果段（0x4482DA/0x448356/0x4483AC）未读")
 
     def _psel(self, e: UiEntity) -> None:
         """0x43EDB0：页13 选择画面总控（7 态机）。
