@@ -1772,15 +1772,16 @@ class Pages:
     FX12_TABLE = {
         # type: (rect(l,t,r,b), kind|None, 速度[+0x2C], 寿命[+0xC], 行为[+0x40])
         # 分支依据 0x42B256 分派比较链（§16.118.10，勘误 A-37）
-        0x12061127: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26),
-        0x12071126: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26),
-        0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", 0x200, 0xA, 0x401C26),
-        0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26),
-        0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26),
-        0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5),
-        # 0x42B683（0x12091122 / 0x120B1121 共用）：32×32、速度 0、16 帧、行为 0x401BAE 未读
-        0x12091122: ((0, 0xE0, 0x1F, 0xFF), None, 0, 0x10, 0x401BAE),
-        0x120B1121: ((0, 0xE0, 0x1F, 0xFF), None, 0, 0x10, 0x401BAE),
+        0x12061127: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26, 8),
+        0x12071126: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26, 8),
+        0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", 0x200, 0xA, 0x401C26, 8),
+        0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26, 8),
+        0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26, 8),
+        0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5, 0x10),
+        # 0x42B683（0x12091122 / 0x120B1121 共用）：32×32、速度 0、行为 0x401BAE→0x42B9C0
+        # （与 0x42C050 同构的横向涨缩 + 屏幕可见性），dst 减 8
+        0x12091122: ((0, 0xE0, 0x1F, 0xFF), "pulse", 0, 0x10, 0x401BAE, 8),
+        0x120B1121: ((0, 0xE0, 0x1F, 0xFF), "pulse", 0, 0x10, 0x401BAE, 8),
     }
 
     def fx12_spawn(self, ty: int, x: int, y: int, a3: int = 0) -> "UiEntity | None":
@@ -1793,7 +1794,7 @@ class Pages:
         if row is None:
             self.log(f"0x12 特效 type=0x{ty:X} @({x},{y}) → 该支矩形未定案，不生成")
             return None
-        rect, kind, speed, life, beh = row
+        rect, kind, speed, life, beh, half = row
         if kind is None:
             self.log(f"0x12 特效 0x{ty:X} @({x},{y}) rect={rect} 行为 0x{beh:X} 未读 → 不生成")
             return None
@@ -1809,8 +1810,10 @@ class Pages:
         e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
         e.p["spd"] = int(speed or 0)
         e.p["vis"] = 1                                 # [+0x18] = 1（ctor）
+        e.p["half"] = int(half)
         e.p["life"] = int(life)
-        half = ((rect[2] - rect[0]) >> 1)             # 0x42B7D8：减半宽/半高
+        # 0x42B7D4/0x42B7D8 的减数：各支自己写（16×16 → 8、32×32 → 0x10），
+        # 但 0x42B683 支走 0x42B73E ⇒ 32×32 也减 8，故不能用 rect 宽度推
         e.disp = DisplayNode(1, list(rect),
                              [int(x) - half, int(y) - half])
         self.ui46c.append(e)
@@ -1897,7 +1900,7 @@ class Pages:
         e.p["x"] = e.p["px"] >> 8                      # [+4] = [+0x24] sar 8
         e.p["y"] = e.p["py"] >> 8
         if e.disp:                                     # 0x42C3DB..0x42C3F7
-            half = (e.disp.rect[2] - e.disp.rect[0]) >> 1
+            half = e.p["half"]
             e.disp.dst[0] = e.p["x"] - half
             e.disp.dst[1] = e.p["y"] - half
 
