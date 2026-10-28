@@ -919,6 +919,7 @@ class Pages:
         self.p13_tiles = None        # 层4 的 (2,2,256,8,8) 瓦片表
         self.posq = []               # 0x4AD43C 位置对象队列（0x2300001A）
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
+        self.spark4cc = []           # 0x41000004：4AD4CC 里的命中火花（行为 0x429D40）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
         self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
         self.p2_loaded: dict[int, int] = {}
@@ -1322,6 +1323,7 @@ class Pages:
         self.p13_mono = False
         self.posq = []
         self.actorq = []
+        self.spark4cc = []
         self.wipe4f = []
         if "1" in self.data.get("palettes", {}):
             self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
@@ -1372,7 +1374,9 @@ class Pages:
         self.tick_ui(self.actorq)                       #   4AD40C（0x0A 汉字演员）
         self.tick_ui(self.ui46c)                        #   4AD46C（0x12 特效）
         self._tick_posq()                               #   4AD43C（0x2300001A 位置对象）
+        self._collide_46c_43c()                         # 0x454794 0x43C060(ctx,&46C,&43C)
         self._tick_wipe4f()                             #   4AD4CC（0x4F000009 擦切/尾迹）
+        self._tick_spark4cc()                           #   4AD4CC（0x41000004 命中火花）
         self.tick_ui(self.ui4fc)                        #   4AD4FC
         self.tick_ui(self.ui52c)                        #   4AD52C（淡入淡出、0x6F000006 七态机）
         self.actorq = [e for e in self.actorq if e.alive]
@@ -2423,6 +2427,69 @@ class Pages:
                 live.append(e)
         self.posq = live
 
+    # ---- 0x41000004：命中火花（4CC 队列，ctor 0x428D59 / 行为 0x429D40）----
+    def spark_spawn(self, x: int, y: int, ax: int, ay: int) -> None:
+        """ctor `0x428D59`：`[+0x40]=0x40200E`、`[+0xC]=0x10`、rect `(0xA0,0,0xBF,0x1F)`、
+        `[+0x1C]=a3[0]`、`[+0x20]=a3[4]`、`[+0x24]=x<<2`、`[+0x28]=y<<2`、`[+0x2C]=0x14`、
+        `[+0x18]=1`、显示层 1。"""
+        self.spark4cc.append({"x": (int(x) << 2), "y": (int(y) << 2),
+                              "vx": int(ax), "vy": int(ay), "cnt": 0x14, "life": 0x10,
+                              "rect": [0xA0, 0, 0xBF, 0x1F], "dx": 0, "dy": 0})
+
+    def _tick_spark4cc(self) -> None:
+        """行为 `0x429D40`：位置 += 速度 → `px=pos>>2` → dst `(px-0x10,py-0x10)`；
+        `[+0x2C]--`，当 `[+0x2C]&3==0 && !=0` 时 `0x45A790(rect,0x20,0,0x20,0)`；
+        寿命 `[+0xC]` 每帧 −1（由 4CC 队列的通用计时负责）。"""
+        out = []
+        for e in self.spark4cc:
+            e["x"] += e["vx"]
+            e["y"] += e["vy"]
+            px, py = e["x"] >> 2, e["y"] >> 2
+            e["dx"], e["dy"] = px - 0x10, py - 0x10
+            e["cnt"] = (e["cnt"] - 1) & 0xFFFFFFFF
+            if (e["cnt"] & 3) == 0 and e["cnt"] != 0:
+                e["rect"][0] += 0x20
+                e["rect"][2] += 0x20
+            e["life"] -= 1
+            if e["life"] > 0:
+                out.append(e)
+        self.spark4cc = out
+
+    def _collide_46c_43c(self) -> None:
+        """`0x43C060(ctx,&4AD46C,&4AD43C)`：外层特效、内层位置对象的两两距离判定。
+
+        门：`0x40145B(0x56CCB8,2)` 为真**或** `[+0x14]&0x8000`；内层要求外层 `[+0x10]!=0`。
+        判定 `0x4306C0(ent,x,y,size)`：`al=[ent+0x10]`，`|dx|+|dy| - (ent.size>>2) - (size>>2) - size <= 0`。
+        命中 → `0x43C460`：按被撞对象 `[+0x14]&0x7000` 取 a3（0x1000 速度方向 / 0x2000 随机 ±15 / 其它不生成），
+        投放 `0x41000004` 到 `0x4AD4CC`。
+        """
+        for e in self.ui46c:
+            if not (e.p.get("vis", 1)):
+                continue
+            t = int(getattr(e, "type_word", 0)) & 0xFFFFFFFF
+            if not (self._state2_bit(2) or (t & 0x8000)):
+                continue
+            for o in self.posq:
+                # `0x4306C0(ent=内层, x=外层.x, y=外层.y, a=[外层+0xC])`：
+                # 返回 1 当 `|dx|+|dy| - (S>>2) - (A>>2) - S - A <= 0`（S=[内层+0xC]、A=[外层+0xC]）
+                S = int(o.get("size", 0))
+                A = int(e.p.get("life", 0))
+                d = abs(int(e.p["x"]) - int(o.get("x", 0))) + abs(int(e.p["y"]) - int(o.get("y", 0)))
+                thr = (S >> 2) + (A >> 2) + S + A
+                if d - thr > 0:
+                    continue
+                cls = int(o.get("flag", 0)) & 0x7000
+                if cls == 0x1000:
+                    ax, ay = (o.get("vx", 0) >> 7), (o.get("vy", 0) >> 7)
+                elif cls == 0x2000:
+                    r1 = (self._rng() & 0x1F) - 0xF
+                    r2 = (self._rng() & 0x1F) - 0xF
+                    ax, ay = r1, r2
+                else:
+                    continue
+                self.spark_spawn(o.get("x", 0), o.get("y", 0), ax, ay)
+                break
+
     def _tick_wipe4f(self) -> None:
         """行为 `0x439BD0`（ctor 分支 `0x436E45`）：`[+0x20]` 追 `选中槽*0x50`，按余数 0x50 取擦切位。"""
         target = (self.keys.field(0xC000) & 0xFFFFFFFF) * 0x50   # 0x439BD8 0x4019C9(0x4AB5B0,0xC000)
@@ -3209,6 +3276,11 @@ class Pages:
                     dst = c.buf[dy:dy + hh, dx:dx + ww]
                     dst[src != 0] = src[src != 0]      # 同样色键 0
 
+        # 0x41000004（4CC 队列里的命中火花）：层1 源瓦片、dst 已由行为算好（不缩放）
+        for sp in self.spark4cc:
+            lt = self.layers.tab.get(1)
+            if lt is not None:
+                c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
             self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）
