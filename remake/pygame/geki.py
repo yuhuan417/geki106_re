@@ -2541,12 +2541,15 @@ class Pages:
     def _psel(self, e: UiEntity) -> None:
         """0x43EDB0：页13 选择画面总控（7 态机）。
 
-        槽位 = `[0x4AB59C]`（虚拟指针 X）/ 128；`0x45B030(0x4AB5B0,0x80000)` 为真
+        槽位 = `[0x4AB59C]`（虚拟指针 X）**/ 161**；`0x45B030(0x4AB5B0,0x80000)` 为真
         （= 0x80000 位**未**置位）时槽 3 被 `SetCursorPos(0x1E0,0xF0)` 拽回槽 2。
         态 0 生成子实体；态 1/3/5 各停 `0x10` 帧；态 2 = 选择中（换槽写 `0xC000` 字段、
         按 [0x4AB596] 确定 / [0x4AB597] 取消）；态 4 → 旗标 `0x10000`；态 6 → 旗标 `0x200`。
         """
-        n = int(self.inp.x) // 128
+        # 0x43EDBE..0x43EDDD：`ecx=[0x4AB59C]`，`imul 0xCB8727C1` + `add edx,ecx` + `sar edx,7`
+        # = **除以 161（0xA1）**（按常数逆向：2^39/161 的上取整正是 0xCB8727C1），
+        # 再 `shr/sar` 组合做向零取整 ⇒ 槽 = x/161（640/161≈3.98 ⇒ 4 槽，边界 161/322/483）。
+        n = int(self.inp.x) // 0xA1
         if self.keys.clear_test(0x80000) and n == 3:
             self.inp.set_pos(0x1E0, 0xF0)                 # 0x43EDED SetCursorPos(480,240)
             n = 2
