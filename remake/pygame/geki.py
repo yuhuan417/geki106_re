@@ -913,6 +913,7 @@ class Pages:
         self.p1_done: set[int] = set()
         self.p13_frames = 0          # 0x56CCA8（页13 的帧计数）
         self.p13_portrait_arr = None # 0x6F000007 首帧画出的整屏人像（0x43F340）
+        self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
         self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
         self.p2_loaded: dict[int, int] = {}
@@ -1311,6 +1312,7 @@ class Pages:
         """
         self.p13_frames = 0                             # 0x454283 [0x56CCA8] = 0
         self.p13_portrait_arr = None                    # 0x6F000007 会重新画
+        self.wipe4f = []
         if "1" in self.data.get("palettes", {}):
             self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
             self.pal_now = self.pal
@@ -1356,6 +1358,7 @@ class Pages:
         self.tick_ui(self.ui4fc)                        # 0x458E70：4FC 行为+绘制
         self.tick_ui(self.ui52c)                        #   52C（淡入/淡出、缩略图）
         self.tick_ui(self.ui46c)                        #   4CC（演员）
+        self._tick_wipe4f()                             #   4AD4CC（0x4F000009 擦切）
         self.ui46c = [e for e in self.ui46c if e.alive]
         self.ui4fc = [e for e in self.ui4fc if e.alive]
         self.ui52c = [e for e in self.ui52c if e.alive]
@@ -2221,7 +2224,25 @@ class Pages:
         # x*8 / y*8（0x43F2BD/0x43F2CC 的 lea …*8）⇒ 80×8=640、60×8=480 正好整屏
         self.p13_portrait_arr = np.repeat(np.repeat(src, 8, axis=0), 8, axis=1)
         self.log("0x6F000007：res_79 左 80×60 → 8× 铺满（0x43F340 → 0x43F230/0x44D060）")
-        self.log("0x4F000009 生成（0x43F38A，未实现）")
+        # 0x43F38A → 0x4023C4(rec,0,0,0x4F000009,1) 入 0x4AD4CC；0x43F3BE → 再来一发 a3=0
+        self.wipe4f = [{"a3": 1, "cur": 0}, {"a3": 0, "cur": 0}]
+
+    def _tick_wipe4f(self) -> None:
+        """行为 `0x439BD0`（ctor 分支 `0x436E45`）：`[+0x20]` 追 `选中槽*0x50`，按余数 0x50 取擦切位。"""
+        target = (self.keys.field(0xC000) & 0xFFFFFFFF) * 0x50   # 0x439BD8 0x4019C9(0x4AB5B0,0xC000)
+        for w in self.wipe4f:
+            cur = int(w["cur"])
+            if cur != target:                              # 0x439BF0 cmp eax,ecx / je
+                d = abs(cur - target)
+                step = ((d >> 3) & 0xFFFE) + 1             # 0x439BFB..0x439C03
+                if step >= 0:                              # 0x439C04 js
+                    n = step + 1                           # 0x439C06 lea edx,[eax+1]
+                    while n:                               # 0x439C09..0x439C18
+                        cur = cur + 1 if cur >= target else cur - 1
+                        w["cur"] = cur
+                        n -= 1
+            cur = int(w["cur"])
+            w["pos"] = (cur % 0x50) << 3                   # 0x439C1D..0x439C2A idiv 0x50, shl 3
 
     def _kanji_actor(self, e: UiEntity) -> None:
         """行为 `0x448230`：槽变了就自尽；t<0x5A 走每槽效果分派；t≥0x39C 结束。
@@ -2963,6 +2984,21 @@ class Pages:
         # 画在 4CC 演员（选中机体大字）之下。
         if self.p13_portrait_arr is not None:
             c.buf[:, :] = self.p13_portrait_arr
+        # 0x4F000009（层 5 = 0x44C560(5,640,480) 整屏层）：把整屏缓冲按擦切位切片再贴回去
+        # 0x439C31 a3!=0：源 rect (edi,0)-(0x27F,0x1DF)，dst (0,0)
+        # 0x439C84 a3==0：源 rect (0,0)-(edi-1,0x1DF)，dst (0x27F-edi,0)
+        if self.p13_portrait_arr is not None:
+            for w in self.wipe4f:
+                edi = int(w.get("pos", 0))
+                if w["a3"]:
+                    l, t, r, b = edi, 0, 0x27F, 0x1DF
+                    dx, dy = 0, 0
+                else:
+                    l, t, r, b = 0, 0, edi - 1, 0x1DF
+                    dx, dy = 0x27F - edi, 0
+                ww, hh = r - l, b - t
+                if ww > 0 and hh > 0:
+                    c.buf[dy:dy + hh, dx:dx + ww] = self.p13_portrait_arr[t:t + hh, l:l + ww]
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui46c)
         # ⑧ 静态文字页（0x44D010）：0x445A30 的 52C 遍在 4CC 渲染之后 ⇒ 盖在面板之上
