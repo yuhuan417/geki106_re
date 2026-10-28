@@ -2051,8 +2051,31 @@ class Pages:
                 else:
                     e.disp.grow(0x20, 0, 0x20, 0)
             self._fx12_place(e, 0x10)                  # 0x42BA20 sub 0x10
-            # 0x42BA39：`[+0x2C]`（外部对象指针）非 0 才继续做命中判定与 0x41000004 投放；
-            # ctor `0x42B683` 把它写成 0，故页13 的两支只脉动、不自尽、不投放。
+            # 0x42BA39：`[+0x2C]`（外部对象指针）非 0 才进入命中判定；ctor `0x42B683` 写 0，
+            # 页13 的两支（0x12091122/0x120B1121）直接跳到 0x42BAEC。
+            ext = e.p.get("ext", 0)                    # [+0x2C]
+            if ext:
+                e.p["cnt"] = e.p.get("cnt", 0) + 1     # 0x42BA47 inc edi / [esi+0x30]
+                # 0x42BA47..0x42BA6B：blink = (0x40145B(0x56CCB8,2) && byte[+0x10]==0)
+                blink = self._state2_bit(2) and not e.p.get("blink", 0)
+                e.p["blink"] = 1 if blink else 0       # byte[+0x10]
+                alive = ext.get("alive", True) if isinstance(ext, dict) else True
+                tgt_x = ext.get("x", 0) if isinstance(ext, dict) else 0
+                if not alive:                          # 0x42BA71 byte[eax+0x34] != 0 才保留
+                    pass
+                else:
+                    if e.p["cnt"] < 6:                 # 0x42BA78 jl 0x42BAE5
+                        e.p["ext"] = 0
+                    elif tgt_x > 0x290:                # 0x42BA7E
+                        e.p["ext"] = 0
+                    else:
+                        # 0x42BA87..0x42BAD8：投放 0x41000004 入 0x4AD4CC，
+                        # a3 = 指向 (vx>>7, vy>>7) 的两字点
+                        pt = ((e.p["vx"] >> 7) & 0xFFFFFFFF, (e.p["vy"] >> 7) & 0xFFFFFFFF)
+                        self._spawn_4100_0004(e.p["x"], e.p["y"], pt)
+                        e.alive = False                # 0x42BAD E xor al,al
+                        return
+            self._fx12_visibility(e, 0x10)             # 0x42BAEC 0x4021E9(esi,0x10) + [+0x18]
             return
         if e.p.get("kind") == "pulse":                 # 0x42C050
             d = e.p["vy"]
@@ -2158,11 +2181,33 @@ class Pages:
             e.disp.dst[0] = e.p["x"] - h
             e.disp.dst[1] = e.p["y"] - h
 
-    def _fx12_visibility(self, e: UiEntity) -> None:
-        """`0x4021E9`(m=半宽) 与 `[+0x18]` 的与：不满足即结束（`al && [+0x18]`）。"""
+    def _state2_bit(self, n: int) -> bool:
+        """`0x40145B(0x56CCB8, n)`：全局状态对象 `0x56CCB8` 的第 n 位。
+
+        该对象在页13 链路上没有任何写入点（页4 才建），此处按"位未置"处理并记录一次；
+        本分支在页13 因 `[+0x2C]==0` 不可达，不影响复刻结果。
+        """
+        if not getattr(self, "_state2_logged", False):
+            self._state2_logged = True
+            self.log("0x56CCB8 状态对象未建模（ψ 页13 不可达分支），按 0 处理")
+        return False
+
+    def _spawn_4100_0004(self, x: int, y: int, pt) -> None:
+        """`0x42BAB9` 的投放：`0x4023C4(rec, x, y, 0x41000004, &(vx>>7, vy>>7))` → `0x4AD4CC`。
+
+        该类型的 ctor 尚未读（页13 上 `[+0x2C]` 恒 0，走不到这里），故先只记录不建实体。
+        """
+        self.log(f"0x41000004 投放 ({x},{y}) a3={pt} → ctor 未读，暂不建实体")
+
+    def _fx12_visibility(self, e: UiEntity, m=None) -> None:
+        """`0x4021E9`(m=半宽) 与 `[+0x18]` 的与：不满足即结束（`al && [+0x18]`）。
+
+        `0x42B9C0`/`0x42C050` 的尾部都是 `push 0x10`，即**硬编码 m=0x10**（不按 rect 算）。
+        """
         if not e.disp:
             return
-        m = (e.disp.rect[2] - e.disp.rect[0] + 1) >> 1
+        if m is None:
+            m = (e.disp.rect[2] - e.disp.rect[0] + 1) >> 1
         if not (self._on_screen(e.p["x"], e.p["y"], m) and e.p.get("vis", 1)):
             e.alive = False
 
