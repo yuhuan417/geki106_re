@@ -38,6 +38,8 @@ DATA_PATH = REMAKE / "pages_data.json"
 
 W, H = 640, 480
 
+_PORTRAIT: bytes | None = None      # res_79.bin（页13 全屏人像数据，懒加载）
+
 # 行序/朝向开关（见 §16.9）：
 #   FLIP_GGD_ROWS = True  → GGD 自底向上（DIB）解析，即装载时行倒序
 #   FLIP_SCREEN  = True  → 整屏纵向翻转（若原作的表面是自底向上，则等价）
@@ -871,6 +873,7 @@ class Pages:
         self.trace: list[str] = []
         self.p1_done: set[int] = set()
         self.p13_frames = 0          # 0x56CCA8（页13 的帧计数）
+        self.p13_portrait_arr = None # 0x6F000007 首帧画出的整屏人像（0x43F340）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
         self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
         self.p2_loaded: dict[int, int] = {}
@@ -1268,6 +1271,7 @@ class Pages:
         → `0x45A490(0x4AB570,0)` SetPeriod(0) → 返回 `0x45AFF0(0x4AB5C0,0)`。
         """
         self.p13_frames = 0                             # 0x454283 [0x56CCA8] = 0
+        self.p13_portrait_arr = None                    # 0x6F000007 会重新画
         if "1" in self.data.get("palettes", {}):
             self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
             self.pal_now = self.pal
@@ -1422,6 +1426,13 @@ class Pages:
                 e.a4 = 0            # [+0x20] 状态内帧计数
                 e.aux = 0           # [+0x24] 上次槽位
                 self.keys.set_field(0xC000, 0)
+            elif idx == 6:
+                # 0x43D9A8 ctor（页13 的全屏人像）：[1C]=[20]=[24]=0，然后再清一次 0xC000 字段；
+                # 行为 0x43F340：首帧把 res_79（资源 0x4F，320×60 = 4 张 80×60 人像）的
+                # 左 80 列 × 60 行按 8 倍铺满整屏，随后生成 0x4F000009
+                e.beh = "portrait"
+                e.p["drawn"] = False
+                self.keys.set_field(0xC000, 0)
             elif idx == 7:
                 e.beh = "title_timeline"         # 0x43F560
                 e.t = int(self.data["page2"]["timer_start"])
@@ -1534,6 +1545,8 @@ class Pages:
                 self._psel_band(e)
             elif e.beh == "psel_blink":
                 self._psel_blink(e)
+            elif e.beh == "portrait":
+                self._portrait(e)
             elif e.beh == "kanji_actor":
                 self._kanji_actor(e)
             elif e.beh == "psel_hint":
@@ -1770,6 +1783,43 @@ class Pages:
         self.ui46c.append(e)
         self.log(f"actor 0x0A slot={n} dst=({x-0x18},{y-0x18}) rect={e.disp.rect}")
         return e
+
+    def portrait_data(self) -> bytes:
+        """资源 0x4F（=79）→ `extracted/data/res_79.bin`（19200B = 320×60）。"""
+        global _PORTRAIT
+        if _PORTRAIT is None:
+            f = REMAKE.parent / "extracted" / "data" / "res_79.bin"
+            try:
+                _PORTRAIT = f.read_bytes()
+            except OSError:
+                _PORTRAIT = b""
+        return _PORTRAIT
+
+    def _portrait(self, e: UiEntity) -> None:
+        """行为 `0x43F340`（0x6F000007）：首帧把 80×60 人像按 8 倍铺成 640×480。
+
+        原文：`p = 0x45DDA0(0x4F) + row*0x140`，`col<0x50`、`row<0x3C`，逐像素
+        `0x43F230(ent, col, row, byte[p+col])`；`0x43F230` 以 `x*8 / y*8` 调
+        `0x44D060(0x4AA7B0, …, 4, &rect)` 做一次 8×8 的 Blt（flag 0x10 = KEYSRC）。
+        `0x45AFF0(0x4AB5B0,0x400)` 为真时全部改成 `0xB4`（16 色近似）。
+        未定：`0x43F230` 的 4bit 拆色（`col&0x0F<<4` / `col&0xF0`）—— 暂按源索引填块。
+        """
+        if e.p.get("drawn"):
+            e.alive = False
+            return
+        e.p["drawn"] = True
+        data = self.portrait_data()
+        if not data:
+            self.log("0x6F000007：res_79 缺失，跳过全屏人像")
+            return
+        mono = self.keys.test(0x400)                       # 0x43F238 0x45AFF0(…,0x400)
+        src = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)[:, :0x50]
+        if mono:
+            src = np.full_like(src, 0xB4)
+        # x*8 / y*8（0x43F2BD/0x43F2CC 的 lea …*8）⇒ 80×8=640、60×8=480 正好整屏
+        self.p13_portrait_arr = np.repeat(np.repeat(src, 8, axis=0), 8, axis=1)
+        self.log("0x6F000007：res_79 左 80×60 → 8× 铺满（0x43F340 → 0x43F230/0x44D060）")
+        self.log("0x4F000009 生成（0x43F38A，未实现）")
 
     def _kanji_actor(self, e: UiEntity) -> None:
         """行为 `0x448230`：槽变了就自尽；t<0x5A 走每槽效果分派；t≥0x39C 结束。
@@ -2438,6 +2488,10 @@ class Pages:
         注意：4FC 的显示节点（0x5F 擦入效果）是**最后**画的，会盖在文字上面。
         """
         c = self.canvas
+        # 页13：0x6F000007 首帧画的整屏人像（0x43F340 逐像素 0x43F230 → 8×8 块）＝最底层背景，
+        # 画在 4CC 演员（选中机体大字）之下。
+        if self.p13_portrait_arr is not None:
+            c.buf[:, :] = self.p13_portrait_arr
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui46c)
         # ⑧ 静态文字页（0x44D010）：0x445A30 的 52C 遍在 4CC 渲染之后 ⇒ 盖在面板之上
