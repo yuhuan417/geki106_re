@@ -915,6 +915,7 @@ class Pages:
         self.p13_portrait_arr = None # 0x6F000007 画出的整屏人像（0x43F340）
         self.p13_src = None          # res_79 的 60×320 原始字节（瓦片索引，滚动源）
         self.p13_mono = False        # 0x43F246 的 16 色近似标志
+        self.posq = []               # 0x4AD43C 位置对象队列（0x2300001A）
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
         self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
@@ -1361,6 +1362,7 @@ class Pages:
         self.tick_ui(self.ui4fc)                        # 0x458E70：4FC 行为+绘制
         self.tick_ui(self.ui52c)                        #   52C（淡入/淡出、缩略图）
         self.tick_ui(self.ui46c)                        #   4CC（演员）
+        self._tick_posq()                               #   4AD43C（0x2300001A 位置对象）
         self._tick_wipe4f()                             #   4AD4CC（0x4F000009 擦切）
         self.ui46c = [e for e in self.ui46c if e.alive]
         self.ui4fc = [e for e in self.ui4fc if e.alive]
@@ -2269,6 +2271,70 @@ class Pages:
             c = np.full_like(c, 0xB4)
         self.p13_portrait_arr = np.repeat(np.repeat(c, 8, axis=0), 8, axis=1)
 
+    def posq_spawn(self, x: int, y: int, slot: int) -> None:
+        """`0x401FA5`→`0x43BDC0` 插 `0x4AD43C`，ctor 链 `0x43A7F0`(vtable 0x49874C)
+        → `type&0x2F000000==0x23000000` → `0x4013D9`→`0x40D940`(vtable 0x498000)
+        → `type-0x23000001==0x19` → `0x40DE43`（0x2300001A 分支）。
+
+        ctor 字段：`[+0x40]=0x40242D`(→0x4108C0)、`[+0x1C]=0`、`[+0x24]=-0x40`、
+        `[+0x20]=(y<0x78)?-1:+1`、`[+0x28]=0`、`[+0x2c]=x<<4`、`[+0x30]=y<<4`、
+        `[+0x18]=选中槽+1`。
+        """
+        self.posq.append({
+            "slot1": (slot & 0xFFFFFFFF) + 1,          # 0x40DE85 0x45AFC0(…,0xC000)+1
+            "beh": 0x4108C0,                            # 0x40DE59 [esi+0x40] = 0x40242D
+            "t": 0,                                     # 0x40DE63 [esi+0x1C] = 0
+            "vx": -0x40,                                # 0x40DE67 [esi+0x24] = 0xFFFFFFC0
+            "dir": 1 if y >= 0x78 else -1,              # 0x40DE4A..0x40DE71
+            "vy": 0,                                    # 0x40DE7C [esi+0x28] = 0
+            "fx": (x & 0xFFFFFFFF) << 4,                # 0x40DE76/0x40DE7F
+            "fy": (y & 0xFFFFFFFF) << 4,                # 0x40DE79/0x40DE82
+            "x": x, "y": y,
+        })
+        self.log(f"0x4AD43C 插入 0x2300001A ({x},{y}) slot={slot}（0x40DE43 分支）")
+
+    def _tick_posq(self) -> None:
+        """`0x4108C0`（`0x2300001A` 位置对象行为，`0x458E70` 第 4 个泵队列 `0x4AD43C`）。
+
+        - 选中槽变了（`[+0x18] != 槽+1`）→ `al=0` 自尽（`0x4108D6`）
+        - `t=++[+0x1C]`；`0x3C<t<=0x82`：`[+0x24] = -min(2|t-0x5F|,0x40)`；`t>0xAA`：
+          `[+0x24] = min([+0x24]+2,0x60)`（`0x4108F2..0x410923`）
+        - 同窗：`[+0x28] = (|t-0x5F|-0x23)*[+0x20]*2`（`0x410933..0x410944`）；
+          `0xAA<t<=0xF0`：`[+0x28] = (0x23-|t-0xCD|)*[+0x20]*2`（`0x410951..0x410971`）
+        - `[+0x2c]+=[+0x24]`、`[+0x30]+=[+0x28]`（`0x41097D/0x410985`），
+          `[+4]=[+0x2c]>>4`、`[+8]=[+0x30]>>4`（`0x41098C..0x410995`）
+        - 显示节点 dst = `(x-0x18, y-0x18)`（`0x410998..0x4109AE`），`rect` 全 0 ⇒ 不可见
+        - 存活 = `x < 0x298`（`0x4109B4`）
+        """
+        slot_now = (self.keys.field(0xC000) & 0xFFFFFFFF) + 1   # 0x4108C3..0x4108D5
+        live = []
+        for e in self.posq:
+            if e["slot1"] != slot_now:                  # 0x4108D6 cmp/jne
+                continue
+            t = e["t"] + 1                              # 0x4108DE inc
+            e["t"] = t
+            if 0x3C < t <= 0x82:                        # 0x4108E2..0x4108F0
+                d = abs(t - 0x5F) * 2                   # 0x4108F2..0x4108FA
+                if d > 0x40:                            # 0x4108FC..0x410901
+                    d = 0x40
+                e["vx"] = -d                            # 0x410906 neg
+            if t > 0xAA:                                # 0x41090B
+                v = e["vx"] + 2                         # 0x410913..0x410916
+                if v >= 0x60:                           # 0x410919..0x41091E
+                    v = 0x60
+                e["vx"] = v                             # 0x410923
+            if 0x3C < t <= 0x82:                        # 0x410926..0x410931
+                e["vy"] = (abs(t - 0x5F) - 0x23) * e["dir"] * 2   # 0x410933..0x410944
+            elif 0xAA < t <= 0xF0:                      # 0x410949..0x410957
+                e["vy"] = (0x23 - abs(t - 0xCD)) * e["dir"] * 2   # 0x410959..0x410971
+            e["fx"] += e["vx"]                          # 0x410974..0x410982
+            e["fy"] += e["vy"]                          # 0x41097F..0x410989
+            e["x"] = e["fx"] >> 4                       # 0x41098F sar 4
+            e["y"] = e["fy"] >> 4                       # 0x41098C sar 4
+            if e["x"] < 0x298:                          # 0x4109B1..0x4109C9
+                live.append(e)
+        self.posq = live
+
     def _tick_wipe4f(self) -> None:
         """行为 `0x439BD0`（ctor 分支 `0x436E45`）：`[+0x20]` 追 `选中槽*0x50`，按余数 0x50 取擦切位。"""
         target = (self.keys.field(0xC000) & 0xFFFFFFFF) * 0x50   # 0x439BD8 0x4019C9(0x4AB5B0,0xC000)
@@ -2380,7 +2446,7 @@ class Pages:
         elif 0x180 <= t < 0x220 and (t & 0xF) == 0:    # 0x44892D：与槽无关的位置对象
             # `0x4023C4(rec, 0x298, (t&0x10)?0x28:0xC8, 0x2300001A, 0)`，队列 0x4AD43C、插入 0x401FA5→0x43BDC0
             y = 0x28 if (t & 0x10) else 0xC8           # 0x448942..0x44895D
-            self.log(f"0x4AD43C 位置对象 0x2300001A ({0x298},{y}) t={t} 未实现（0x43BDC0 插入）")
+            self.posq_spawn(0x298, y, slot)             # 0x4AD43C / 0x401FA5→0x43BDC0
         for ty, yy, a3 in recs:
             self.actor_spawn(0xB0, yy, ty, a3)
 
