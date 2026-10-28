@@ -1808,6 +1808,7 @@ class Pages:
         e.p["py"] = int(y) << 8                       # [+0x28]
         e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
         e.p["spd"] = int(speed or 0)
+        e.p["vis"] = 1                                 # [+0x18] = 1（ctor）
         e.p["life"] = int(life)
         half = ((rect[2] - rect[0]) >> 1)             # 0x42B7D8：减半宽/半高
         e.disp = DisplayNode(1, list(rect),
@@ -1815,6 +1816,22 @@ class Pages:
         self.ui46c.append(e)
         self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} life={life} @({x},{y}) rect={rect}")
         return e
+
+    @staticmethod
+    def _on_screen(x: int, y: int, m: int) -> bool:
+        """`0x4021E9`→`0x4305F0`：`(x±m, y±m)` 与屏幕 640×480 是否相交。
+
+        逐条：`(x-m)>0x27F` → 否；`(x+m)<=0` → 否；`(y-m)>0x1DF` → 否；`(y+m)<=0` → 否。
+        """
+        if (x - m) > 0x27F:
+            return False
+        if (x + m) <= 0:
+            return False
+        if (y - m) > 0x1DF:
+            return False
+        if (y + m) <= 0:
+            return False
+        return True
 
     @staticmethod
     def _vset(a: list, b: list, ln: int) -> bool:
@@ -1839,6 +1856,7 @@ class Pages:
                 d += 0x100 if d <= 0 else -0x100       # 0x42C064..0x42C078
                 e.p["vy"] = d
             self._fx12_integrate(e)                    # 0x42C07D
+            self._fx12_visibility(e)
             if e.disp:
                 if e.disp.rect[0] & 0x3F:              # 0x42C08A test byte [eax],0x3F
                     e.disp.grow(-0x20, 0, -0x20, 0)
@@ -1862,6 +1880,15 @@ class Pages:
             if self._vset(vx, vy, spd << 3):           # 0x42C3CC 钳到 [+0x2C]*8
                 e.p["vx"], e.p["vy"] = vx[0], vy[0]
         self._fx12_integrate(e)                        # 0x42C3D4
+        self._fx12_visibility(e)
+
+    def _fx12_visibility(self, e: UiEntity) -> None:
+        """`0x4021E9`(m=半宽) 与 `[+0x18]` 的与：不满足即结束（`al && [+0x18]`）。"""
+        if not e.disp:
+            return
+        m = (e.disp.rect[2] - e.disp.rect[0] + 1) >> 1
+        if not (self._on_screen(e.p["x"], e.p["y"], m) and e.p.get("vis", 1)):
+            e.alive = False
 
     def _fx12_integrate(self, e: UiEntity) -> None:
         """`0x40173A`→`0x42B980`：8.8 位置 += 速度，像素 = 位置>>8；再写 dst。"""
