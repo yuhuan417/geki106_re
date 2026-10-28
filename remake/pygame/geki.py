@@ -915,6 +915,7 @@ class Pages:
         self.p13_portrait_arr = None # 0x6F000007 画出的整屏人像（0x43F340）
         self.p13_src = None          # res_79 的 60×320 原始字节（瓦片索引，滚动源）
         self.p13_mono = False        # 0x43F246 的 16 色近似标志
+        self.p13_tiles = None        # 层4 的 (2,2,256,8,8) 瓦片表
         self.posq = []               # 0x4AD43C 位置对象队列（0x2300001A）
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
@@ -1316,6 +1317,9 @@ class Pages:
         self.p13_frames = 0                             # 0x454283 [0x56CCA8] = 0
         self.p13_portrait_arr = None                    # 0x6F000007 会重新画
         self.p13_src = None
+        self.p13_tiles = None
+        self.p13_mono = False
+        self.posq = []
         self.wipe4f = []
         if "1" in self.data.get("palettes", {}):
             self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
@@ -2228,7 +2232,13 @@ class Pages:
             e.p["drawn"] = True
             mono = self.keys.test(0x400)               # 0x43F35A 之后的 0x45B030(…,0x400)（位清时真）
             res = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)
+            tiles = self._portrait_tiles()             # 0x43F230 的瓦片源 = 层4（bm_psel2 256×256）
+            if tiles is None:
+                self.log("0x43F230：层4(bm_psel2) 缺失，人像跳过")
+                e.alive = False
+                return
             self.p13_src = res                          # 原始字节（滚动时按列取）
+            self.p13_tiles = tiles
             self.p13_mono = mono
             e.p["cols"] = list(range(0x50))            # 块列 → 源列（res_79 的列号）
             self.p13_portrait_arr = None               # 由 _portrait_build 生成
@@ -2258,6 +2268,28 @@ class Pages:
             self._portrait_build(e)
         e.p["cur"] = cur
 
+    def _portrait_tiles(self):
+        """`0x43F230` 的瓦片源：层4（`bmetc\bm_psel2`，256×256）→ `(2,2,256,8,8)` 表。
+
+        源矩形（`0x43F24B..0x43F282`）= `{l=lo*16, t=hi, r=lo*16+8, b=hi+8}`，
+        `hi=color&0xF0`、`lo=color&0xF`；`x` 奇 → `0x45A790(rect,8,0,8,0)`（l/r += 8）、
+        `y` 奇 → `0x45A790(rect,0,8,0,8)`（t/b += 8）。第 0 维是 y 象限、第 1 维是 x 象限。
+        """
+        lay = self.layers.tab.get(4)
+        if lay is None:
+            return None
+        atlas = lay.buf
+        tab = np.zeros((2, 2, 256, 8, 8), dtype=np.uint8)
+        for c in range(256):
+            cx = (c & 0x0F) * 16
+            cy = c & 0xF0
+            for qy in (0, 1):
+                for qx in (0, 1):
+                    y0, x0 = cy + 8 * qy, cx + 8 * qx
+                    if y0 + 8 <= atlas.shape[0] and x0 + 8 <= atlas.shape[1]:
+                        tab[qy, qx, c] = atlas[y0:y0 + 8, x0:x0 + 8]
+        return tab
+
     def _portrait_build(self, e: UiEntity) -> None:
         """把人像层（层5）按当前窗口列 `cols` 重新拼成 640×480。"""
         if self.p13_src is None:
@@ -2266,10 +2298,13 @@ class Pages:
             return
         res = self.p13_src                            # 60×0x140
         cols = e.p["cols"]
-        c = res[:, cols]                              # 60×80：每块一个颜色索引
+        c = res[:, cols]                              # 60×80：每块一个 `color` 字节
         if self.p13_mono:                             # 0x43F246：16 色近似时 color=0xB4
             c = np.full_like(c, 0xB4)
-        self.p13_portrait_arr = np.repeat(np.repeat(c, 8, axis=0), 8, axis=1)
+        qx = np.arange(0x50) & 1                      # 0x43F27B：x 奇 → 源矩形右移 8
+        qy = np.arange(0x3C) & 1                      # 0x43F29D：y 奇 → 源矩形下移 8
+        tile = self.p13_tiles[qy[:, None], qx[None, :], c]      # 60×80×8×8
+        self.p13_portrait_arr = tile.transpose(0, 2, 1, 3).reshape(0x3C * 8, 0x50 * 8)
 
     def posq_spawn(self, x: int, y: int, slot: int) -> None:
         """`0x401FA5`→`0x43BDC0` 插 `0x4AD43C`，ctor 链 `0x43A7F0`(vtable 0x49874C)
