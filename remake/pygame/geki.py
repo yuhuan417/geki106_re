@@ -912,7 +912,8 @@ class Pages:
         self.trace: list[str] = []
         self.p1_done: set[int] = set()
         self.p13_frames = 0          # 0x56CCA8（页13 的帧计数）
-        self.p13_portrait_arr = None # 0x6F000007 首帧画出的整屏人像（0x43F340）
+        self.p13_portrait_arr = None # 0x6F000007 画出的整屏人像（0x43F340）
+        self.p13_src = None          # res_79 的 60×320 原始像素（滚动源）
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.theatre = 0             # 0x4AB5C8 舞台选择器 dword（低字=关卡、高字=模式）
         self.score_level = 0         # 0x4CD4A0 的 [+0x24] 关卡号
@@ -1312,6 +1313,7 @@ class Pages:
         """
         self.p13_frames = 0                             # 0x454283 [0x56CCA8] = 0
         self.p13_portrait_arr = None                    # 0x6F000007 会重新画
+        self.p13_src = None
         self.wipe4f = []
         if "1" in self.data.get("palettes", {}):
             self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
@@ -2201,31 +2203,58 @@ class Pages:
         return _PORTRAIT
 
     def _portrait(self, e: UiEntity) -> None:
-        """行为 `0x43F340`（0x6F000007）：首帧把 80×60 人像按 8 倍铺成 640×480。
+        """行为 `0x43F340`（`0x6F000007`）：首帧铺满 80×60 块，之后按选中槽横向滚动。
 
-        原文：`p = 0x45DDA0(0x4F) + row*0x140`，`col<0x50`、`row<0x3C`，逐像素
-        `0x43F230(ent, col, row, byte[p+col])`；`0x43F230` 以 `x*8 / y*8` 调
-        `0x44D060(0x4AA7B0, …, 4, &rect)` 做一次 8×8 的 Blt（flag 0x10 = KEYSRC）。
-        `0x45AFF0(0x4AB5B0,0x400)` 为真时全部改成 `0xB4`（16 色近似）。
-        未定：`0x43F230` 的 4bit 拆色（`col&0x0F<<4` / `col&0xF0`）—— 暂按源索引填块。
+        首帧（`[+0x1C]==0`）：`p = 0x45DDA0(0x4F) + row*0x140`，`row<0x3C`、`col<0x50`，
+        逐块 `0x43F230(ent, col, row, byte[p+col])`（`0x401082`，8×8 一块）；
+        `0x45AFF0(0x4AB5B0,0x400)` 为真时颜色强制 `0xB4`。画完 `0x43F38A/0x43F3BE` 各投一条
+        `0x4F000009`（a3=1 / a3=0）进 `0x4AD4CC`，并把 `[+0x1C]=-1`（`0x43F3F4`）。
+
+        之后每帧（`0x43F403..0x43F4E3`）：`[+0x20]` 追 `[+0x24] = 选中槽*0x50`，
+        `step = ((|d|>>3)&0xFFFE)+1`，每次 ±1 并**只重画那一列块**：
+        增大（`0x43F43A`）时块列 `x = cur%0x50` ← 源列 `cur+0x50`，`cur++`；
+        减小（`0x43F478`）时块列 `x = (cur-1)%0x50` ← 源列 `cur-1`，`cur--`。
+        `cur == target` 时整段跳过（`0x43F40B je`），但循环中途相等会走"减小"支（照抄）。
         """
-        if e.p.get("drawn"):
-            e.alive = False
-            return
-        e.p["drawn"] = True
         data = self.portrait_data()
         if not data:
             self.log("0x6F000007：res_79 缺失，跳过全屏人像")
+            e.alive = False
             return
-        mono = self.keys.test(0x400)                       # 0x43F238 0x45AFF0(…,0x400)
-        src = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)[:, :0x50]
-        if mono:
-            src = np.full_like(src, 0xB4)
-        # x*8 / y*8（0x43F2BD/0x43F2CC 的 lea …*8）⇒ 80×8=640、60×8=480 正好整屏
-        self.p13_portrait_arr = np.repeat(np.repeat(src, 8, axis=0), 8, axis=1)
-        self.log("0x6F000007：res_79 左 80×60 → 8× 铺满（0x43F340 → 0x43F230/0x44D060）")
-        # 0x43F38A → 0x4023C4(rec,0,0,0x4F000009,1) 入 0x4AD4CC；0x43F3BE → 再来一发 a3=0
-        self.wipe4f = [{"a3": 1, "cur": 0}, {"a3": 0, "cur": 0}]
+        if not e.p.get("drawn"):                       # 0x43F34C test eax,eax / jne 0x43F403
+            e.p["drawn"] = True
+            mono = self.keys.test(0x400)               # 0x43F35A 之后的 0x45AFF0(…,0x400)
+            src = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)[:, :0x50].copy()
+            if mono:
+                src[:, :] = 0xB4
+            self.p13_src = np.frombuffer(data, dtype=np.uint8).reshape(0x3C, 0x140)
+            e.p["cols"] = list(range(0x50))            # 块列 → 源列
+            self.p13_portrait_arr = np.repeat(np.repeat(src, 8, axis=0), 8, axis=1)
+            e.p["cur"] = 0
+            # 0x43F38A → 0x4023C4(rec,0,0,0x4F000009,1)；0x43F3BE → a3=0
+            self.wipe4f = [{"a3": 1, "cur": 0}, {"a3": 0, "cur": 0}]
+            self.log("0x6F000007：res_79 左 80×60 块铺满 + 两块 0x4F000009 擦切")
+        if self.p13_src is None:
+            return
+        cur = int(e.p["cur"])
+        target = (self.keys.field(0xC000) & 0xFFFFFFFF) * 0x50   # 0x43F4CC..0x43F4E3
+        cols = e.p["cols"]
+        if cur != target:                              # 0x43F40B je 0x43F4CC
+            n = (((abs(cur - target) >> 3) & 0xFFFE) + 1) + 1    # 0x43F411..0x43F428
+            while n:
+                if cur >= target:                      # 0x43F432 jge 0x43F478
+                    x = (cur - 1) % 0x50               # 0x43F498..0x43F49C
+                    cols[x] = cur - 1                  # 0x43F48E 源列 = cur-1
+                    cur -= 1                           # 0x43F4B6..0x43F4B9
+                else:
+                    x = cur % 0x50                     # 0x43F455..0x43F458
+                    cols[x] = cur + 0x50               # 0x43F450 源列 = cur+0x50
+                    cur += 1                           # 0x43F472..0x43F475
+                n -= 1
+            e.p["cur"] = cur
+            cur_cols = self.p13_src[:, cols]           # 60×80
+            self.p13_portrait_arr = np.repeat(np.repeat(cur_cols, 8, axis=0), 8, axis=1)
+        e.p["cur"] = cur
 
     def _tick_wipe4f(self) -> None:
         """行为 `0x439BD0`（ctor 分支 `0x436E45`）：`[+0x20]` 追 `选中槽*0x50`，按余数 0x50 取擦切位。"""
