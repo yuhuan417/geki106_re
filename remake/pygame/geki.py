@@ -1850,7 +1850,9 @@ class Pages:
         if kind == "chase":                       # 0x42B4E3..0x42B552
             e.p["mir"] = self.mirror_y()          # [+0x2C]
             e.p["dust"] = 0xF if e.p["y"] != e.p["mir"] else 0   # [+0x30]
-            flag = 1 if ((e.p["dust"] != 0) != (int(x) < 0)) else 0
+            # 0x42B515：flag = ([+0x30]!=0) XOR ([rec+0xC] 有符号 < 0)，不是生发点 x 的符号
+            a3s = int(a3) & 0xFFFFFFFF
+            flag = 1 if ((e.p["dust"] != 0) != (a3s >= 0x80000000)) else 0
             l0, r0 = (0x40, 0x5F) if flag else (0x80, 0x9F)
             e.p["rect"] = [l0, 0xE0, r0, 0xFF]
         elif kind == "drop":                      # 0x42B31C..0x42B3F9
@@ -2200,7 +2202,7 @@ class Pages:
             e.alive = False
             return
         t = e.t
-        if 0 <= t < 0x5A:                              # 0x44825F cmp ecx,0x5A
+        if t >= 0:                                     # 0x44825F cmp ecx,0x5A / jge 0x44843F
             self._kanji_slot_effect(e, e.p["slot"], t)
         th = (0x286, 0x28E, 0x216, 0x39D)[e.p["slot"] & 3]
         if e.disp and th <= t < th + 0x1C:             # 0x4489AD..0x4489DF
@@ -2220,22 +2222,39 @@ class Pages:
         槽1/槽3 各投**两发**：先投一发，再把记录第 4 个 dword（a3）改写成另一值投第二发。
         """
         recs = []
-        if slot == 0:                                  # 0x44827E：t%6==0
+        if slot == 0 and t < 0x5A:                     # 0x44827E：t%6==0
             if t % 6 == 0:                             # 0x448280..0x44828A
-                recs = [(0x120B1121, 0xE00)]
-        elif slot == 1:                                # 0x4482DA：t%6==0，两发
+                recs = [(0x120B1121, 0x78, 0xE00)]
+        elif slot == 1 and t < 0x5A:                   # 0x4482DA：t%6==0，两发
             if t % 6 == 0:                             # 0x4482DC..0x4482E6
-                recs = [(0x12071126, 0xF4000A00),
-                        (0x12071126, 0x0C000A00)]      # 0x44833C 改写 a3 后再投
-        elif slot == 2:                                # 0x448356：t%5==0
+                recs = [(0x12071126, 0x78, 0xF4000A00),
+                        (0x12071126, 0x78, 0x0C000A00)]   # 0x44833C 改写 a3 后再投
+        elif slot == 2 and t < 0x5A:                   # 0x448356：t%5==0
             if t % 5 == 0:                             # 0x448358..0x448362
-                recs = [(0x120F112A, 0xF00)]
-        else:                                          # 0x4483AC：t%7==0，两发
+                recs = [(0x120F112A, 0x78, 0xF00)]
+        elif slot == 3 and t < 0x5A:                   # 0x4483AC：t%7==0，两发
             if t % 7 == 0:                             # 0x4483AE..0x4483B8
-                recs = [(0x120E112D, 0xFA000A64),
-                        (0x120E112D, 0x06000A64)]      # 0x4483FB 第二发
-        for ty, a3 in recs:
-            self.actor_spawn(0xB0, 0x78, ty, a3)
+                recs = [(0x120E112D, 0x78, 0xFA000A64),
+                        (0x120E112D, 0x78, 0x06000A64)]   # 0x4483FB 第二发
+        elif 0x78 <= t < 0xD2:                         # 0x44843F：中段按槽跳 0x448A40
+            if slot == 0:                              # 0x448464：t&7==0，四发
+                if (t & 7) == 0:                       # 0x448464 test cl,7
+                    recs = [(0x12091122, 0x78, 0x4280D00),   # 0x44846D
+                            (0x12091122, 0x78, 0x07900C80),  # 0x4484C3 只改 a3
+                            (0x12091122, 0x75, 0xFBD80D00),  # 0x4484DA 改 y=0x75 + a3
+                            (0x12091122, 0x75, 0xF8700C80)]  # 0x4484F3 只改 a3
+            elif slot == 1:                            # 0x448510：t%6==0，四发
+                if t % 6 == 0:                         # 0x448512..0x44851C
+                    recs = [(0x12061127, 0x78, 0xF6000A00),  # 0x448522
+                            (0x12061127, 0x78, 0x0A000A00),  # 0x448572 只改 a3
+                            (0x12061127, 0x88, 0x0A0008E0),  # 0x448585 y+=0x10 + a3
+                            (0x12061127, 0x68, 0xF60008E0)]  # 0x4485A7 y-=0x20 + a3
+            else:
+                self.log(f"actor 0x0A 槽{slot} 中段（0x4485D3/0x44862F）未读")
+        elif t >= 0x5A:                                # 0x44843F 的两个出口都在 0x44873E
+            self.log(f"actor 0x0A t={t} 走 0x44873E（未读）")
+        for ty, yy, a3 in recs:
+            self.actor_spawn(0xB0, yy, ty, a3)
 
     def _psel(self, e: UiEntity) -> None:
         """0x43EDB0：页13 选择画面总控（7 态机）。
