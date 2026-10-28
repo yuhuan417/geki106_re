@@ -1818,7 +1818,10 @@ class Pages:
         return True
 
     def _fx12(self, e: UiEntity) -> None:
-        """行为 `0x42C320`（track，三型）/ `0x42C050`（pulse，`0x120F112A`）。"""
+        """行为 `0x42C320`（burst，中心**向外**爆散，三型）/ `0x42C050`（pulse，`0x120F112A`）。
+
+        方向 = pos − target（`0x42C362 sub edi,ecx`），故为爆散而非追踪（勘误 A-36）。
+        """
         if e.p.get("kind") == "pulse":                 # 0x42C050
             v = e.p["vx"] - (e.p["vx"] & 0xFFFFFFFF)   # 占位，下面用 vy 语义
             d = e.p["vy"]
