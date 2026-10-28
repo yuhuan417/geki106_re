@@ -1785,6 +1785,13 @@ class Pages:
         0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26, 8),
         0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26, 8),
         0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5, 0x10),
+        # 0x42B62E：rect(l,t,r,b)=(0x100,0xF0,0x10F,0xFF)、层 1、16×16、
+        # 速度 [+0x2C]=rec[0]/4（有符号）、[+0x18]=-1、
+        # 行为 0x4021B2→0x42C210（落体抛物线 + 每帧 0x41000018）
+        0x120C112C: ((0x100, 0xF0, 0x10F, 0xFF), "arc2", "x/4", 0xC, 0x4021B2, 8),
+        # 0x42B6B8：rect(l,t,r,b)=(0x78,0x1F8,0x8F,0x20F)、层 0、24×24、速度 rec[0]/4、
+        # 行为 0x4022F2→0x42C120（dst 减 0xC、可见性 m=8、每帧 0x41000017）
+        0x120D112B: ((0x78, 0x1F8, 0x8F, 0x20F), "arc1", "x/4", 0xC, 0x4022F2, 0xC, 0, 8),
         # 0x42B2A3：rect(l,t,r,b)=(0x100,0xD0,0x10F,0xDF)、层 1、16×16、
         # 行为 0x401D43→0x42BC40（**每帧**塞一条 0x41000015 入 0x4AD4CC 再积分）
         0x12061124: ((0x100, 0xD0, 0x10F, 0xDF), "trail", 0, 0xA, 0x401D43, 8),
@@ -1807,7 +1814,9 @@ class Pages:
         if row is None:
             self.log(f"0x12 特效 type=0x{ty:X} @({x},{y}) → 该支矩形未定案，不生成")
             return None
-        rect, kind, speed, life, beh, half, layer = (row + (1,))[:7]
+        rect, kind, speed, life, beh, half, layer, m = (row + (1, 0))[:8]
+        if m == 0:
+            m = half
         if kind is None:
             self.log(f"0x12 特效 0x{ty:X} @({x},{y}) rect={rect} 行为 0x{beh:X} 未读 → 不生成")
             return None
@@ -1821,13 +1830,15 @@ class Pages:
         e.p["px"] = int(x) << 8                       # [+0x24]
         e.p["py"] = int(y) << 8                       # [+0x28]
         e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
-        e.p["spd"] = int(speed or 0)
+        # 0x42B62E/0x42B6B8：速度 = 生成记录 x（有符号 /4，cdq+and 3+sar 2）
+        e.p["spd"] = int(int(x) >> 2) if speed == "x/4" else int(speed or 0)
         e.p["vis"] = 1                                 # [+0x18] = 1（ctor）
         e.p["half"] = int(half)
+        e.p["m"] = int(m)
         e.p["life"] = int(life)
         # 0x42B7D4/0x42B7D8 的减数：各支自己写（16×16 → 8、32×32 → 0x10），
         # 但 0x42B683 支走 0x42B73E ⇒ 32×32 也减 8，故不能用 rect 宽度推
-        e.disp = DisplayNode(1, list(rect),
+        e.disp = DisplayNode(int(layer), list(rect),
                              [int(x) - half, int(y) - half])
         self.ui46c.append(e)
         self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} [+0xC]={life} @({x},{y}) rect={rect}")
@@ -1879,6 +1890,36 @@ class Pages:
                     e.disp.grow(0x20, 0, 0x20, 0)
             self._fx12_place(e)                        # 0x42C0A3 dst=(x-half,y-half)
             self._fx12_visibility(e)                   # 0x42C0BF push 0x10
+            return
+        if e.p.get("kind") in ("arc1", "arc2"):        # 0x42C120 / 0x42C210
+            arc1 = e.p["kind"] == "arc1"
+            spd = e.p["spd"]
+            if arc1:                                   # 0x42C126 dword [+0x30]
+                cnt = e.p.get("cnt", 0) + 1
+                e.p["cnt"] = cnt
+                if cnt > 7:                            # 0x42C12F cmp eax,7 jg
+                    e.p["vy"] = 0                      # 0x42C151
+                elif cnt >= 4:                         # 0x42C134 cmp eax,4 jl
+                    e.p["vy"] -= spd                   # 0x42C13F sub ecx,eax
+                    e.p["vx"] += 0x280                 # 0x42C144 add eax,0x280
+                trail_type = 0x41000017
+            else:                                      # 0x42C216 word [+0x2E]
+                w = e.p.get("w", 0) + 1
+                e.p["w"] = w & 0xFFFF
+                if w > 5:                              # 0x42C21E cmp ax,5 jg
+                    e.p["vy"] = 0
+                elif w >= 2:                           # 0x42C224 cmp ax,2 jl
+                    e.p["vy"] -= spd                   # 0x42C22A movsx word [+0x2C]
+                    e.p["vx"] += 0x300                 # 0x42C236 add eax,0x300
+                cnt = e.p.get("cnt", 0) + 1            # 0x42C253 inc ecx
+                e.p["cnt"] = cnt
+                e.p["blink"] = 1 if cnt >= 0 else 0    # 0x42C25B setns cl
+                trail_type = 0x41000018
+            self.trailq.append({"x": int(e.p["x"]), "y": int(e.p["y"]),
+                                "type": trail_type, "a3": 0})
+            self._fx12_integrate(e)                    # 0x42C194 / 0x42C293
+            self._fx12_place(e)                        # 0x42C1A2 减 0xC / 0x42C29E 减 8
+            self._fx12_visibility(e)                   # push 8
             return
         if e.p.get("kind") == "trail":                 # 0x42BC40（0x12061124）
             self.trailq.append({                       # 0x42BC5C..0x42BC7B
@@ -1951,7 +1992,7 @@ class Pages:
         e.p["x"] = e.p["px"] >> 8                      # [+4] = [+0x24] sar 8
         e.p["y"] = e.p["py"] >> 8
         if e.disp:                                     # 0x42C3DB..0x42C3F7
-            half = e.p["half"]
+            half = e.p.get("m", e.p["half"])
             e.disp.dst[0] = e.p["x"] - half
             e.disp.dst[1] = e.p["y"] - half
 
