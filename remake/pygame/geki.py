@@ -870,6 +870,7 @@ class Pages:
         # 记录 `0x401686`→`0x43A3C0` 会 new 出实体再走 `0x4355E0`（按 type&0xFF000000 分类构造）。
         # 类 0x41 的显示/行为尚未解，故此处先按原序记录，不上屏。
         self.trailq = []
+        self.rng_seed = 0            # `0x5D3E38`：`0x45AD00` 的 LCG 种子，BSS 初值 0
         self.layers = Layers(data)
         self.page = 0
         self.ui52c: list[UiEntity] = []
@@ -1779,8 +1780,18 @@ class Pages:
     FX12_TABLE = {
         # type: (rect(l,t,r,b), kind|None, 速度[+0x2C], 寿命[+0xC], 行为[+0x40])
         # 分支依据 0x42B256 分派比较链（§16.118.10，勘误 A-37）
-        0x12061127: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26, 8),
-        0x12071126: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", None, 0xA, 0x401C26, 8),
+        # 0x42B4D9（0x12061127 / 0x12071126 共用）：32×32、层 1、[+0x2C]=[0x56CC90]（自机 y 快照）、
+        # dust=[+0x30]=(y!=mirror)?0xF:0；rect 由 dust^(x<0) 决定 0x80/0x40 与 0x9F/0x5F 两组；
+        # 行为 0x4022DE→0x42BD00（向 mirror_y 归位的抖动弹体，x≥0x290 才死）
+        0x12061127: ((0x80, 0xE0, 0x9F, 0xFF), "chase", 0, 0x10, 0x4022DE, 0x10),
+        0x12071126: ((0x80, 0xE0, 0x9F, 0xFF), "chase", 0, 0x10, 0x4022DE, 0x10),
+        # 0x42B2DA：16×16、层 1、行为 0x401BDB→0x42BEE0（0x4AD43C 追击：方向向量定长 0x100 累加、
+        # 速度上限 0xA00、奇数帧 0x41000016 拖尾、0x4021E9(8) 出屏即死）
+        0x12041129: ((0x100, 0xE0, 0x10F, 0xEF), "homing", 0, 0xC, 0x401BDB, 8),
+        # 0x42B30E：rect 由 [+0x20] 符号二选一 (0x120/0x100,0xC0..0xCF)、16×16、层 1、
+        # [+0x30]=(a3==0)；a3!=0 → 随机方向 0x800；a3==0 → 预演 n=0xF-(帧&0xF) 帧 vy 衰减定 y；
+        # 行为 0x40144C→0x42BDF0（x≥0x288 才死）
+        0x12061128: ((0x100, 0xC0, 0x10F, 0xCF), "drop", 0, 0xA, 0x40144C, 8),
         0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", 0x200, 0xA, 0x401C26, 8),
         0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "burst", 0x100, 0xA, 0x401C26, 8),
         0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26, 8),
@@ -1836,10 +1847,40 @@ class Pages:
         e.p["half"] = int(half)
         e.p["m"] = int(m)
         e.p["life"] = int(life)
+        if kind == "chase":                       # 0x42B4E3..0x42B552
+            e.p["mir"] = self.mirror_y()          # [+0x2C]
+            e.p["dust"] = 0xF if e.p["y"] != e.p["mir"] else 0   # [+0x30]
+            flag = 1 if ((e.p["dust"] != 0) != (int(x) < 0)) else 0
+            l0, r0 = (0x40, 0x5F) if flag else (0x80, 0x9F)
+            e.p["rect"] = [l0, 0xE0, r0, 0xFF]
+        elif kind == "drop":                      # 0x42B31C..0x42B3F9
+            e.p["dust"] = 1 if int(a3) == 0 else 0   # [+0x30]=(a3==0)
+            if e.p["dust"] == 0:
+                e.p["blink"] = 0                  # [+0x10]=0
+                vx_l, vy_l = [self._rng() - 0x7FFF], [self._rng() - 0x7FFF]
+                if self._vset(vx_l, vy_l, 0x800):  # 0x40105A(ebp,edi,0x800)
+                    e.p["vx"], e.p["vy"] = vx_l[0], vy_l[0]
+            else:
+                e.p["py"] = 0                     # 0x42B368 [+0x28]=0
+                n = 0xF - (self.frames & 0xF)     # 0x42B36B..0x42B379
+                e.p["cnt2"] = n                   # [+0x2C]=n（循环计数，出口为 0）
+                while n != 0:                     # 0x42B380
+                    if e.p["py"] != 0:            # 0x42B385 cmp edx,ebx
+                        e.p["vy"] += self._magic_neg26(e.p["py"])   # 0x42B389/0x42B3A0
+                    e.p["py"] += e.p["vy"]        # 0x42B3A2 add eax,ecx
+                    n -= 1                        # 0x42B3AA dec [+0x2C]
+                    e.p["cnt2"] = n
+                e.p["y"] = self.mirror_y() + (e.p["py"] >> 8)   # 0x42B3B0..0x42B3BD
+            e.p["rect"] = ([0x120, 0xC0, 0x12F, 0xCF] if e.p["vy"] >= 0
+                           else [0x100, 0xC0, 0x10F, 0xCF])  # 0x42B3D0..0x42B400
+        else:
+            e.p["rect"] = list(rect)
+        rect = e.p["rect"]
         # 0x42B7D4/0x42B7D8 的减数：各支自己写（16×16 → 8、32×32 → 0x10），
         # 但 0x42B683 支走 0x42B73E ⇒ 32×32 也减 8，故不能用 rect 宽度推
+        # 0x42B30E 支在 ctor 尾部之前改写 [+8]（0x42B3B0），故 dst 必须用改写后的 y
         e.disp = DisplayNode(int(layer), list(rect),
-                             [int(x) - half, int(y) - half])
+                             [int(e.p["x"]) - half, int(e.p["y"]) - half])
         self.ui46c.append(e)
         self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} [+0xC]={life} @({x},{y}) rect={rect}")
         return e
@@ -1860,6 +1901,20 @@ class Pages:
             return False
         return True
 
+    def _rng(self) -> int:
+        """`0x401393`→`0x45AD00`：`seed = seed*0x19660D + 0x3C6EF35F & 0x7FFFFFFF`，
+        调用点再 `and eax,0xffff`，故返回 seed & 0xFFFF。"""
+        self.rng_seed = (self.rng_seed * 0x19660D + 0x3C6EF35F) & 0x7FFFFFFF
+        return self.rng_seed & 0xFFFF
+
+    @staticmethod
+    def _magic_neg26(y: int) -> int:
+        """`0x42B389 imul 0xB13B13B1 / sar 3 / shr 31 修正`：约等于 y * (−1/26) 的有符号乘。"""
+        prod = y * -1321528399
+        d = (prod >> 32) >> 3
+        d += (prod & 0xFFFFFFFF) >> 31
+        return d
+
     @staticmethod
     def _vset(a: list, b: list, ln: int) -> bool:
         """`0x40105A`→`0x45AC70`：把 (a[0],b[0]) 定长到 ln；分量为 0 → 返回 False。"""
@@ -1876,6 +1931,68 @@ class Pages:
 
         方向 = pos − target（`0x42C362 sub edi,ecx`），故为爆散而非追踪（勘误 A-36）。
         """
+        if e.p.get("kind") == "homing":                # 0x42BEE0
+            tx, ty = int(self.inp.x), int(self.inp.y)  # 0x4021EE(0x4AD43C,&self,&out)
+            dx, dy = [tx - e.p["x"]], [ty - e.p["y"]]  # 0x42BF15/0x42BF23
+            if self._vset(dx, dy, 0x100):              # 0x42BF38
+                e.p["vx"] += dx[0]                     # 0x42BF51
+                e.p["vy"] += dy[0]                     # 0x42BF64
+                vx_l, vy_l = [e.p["vx"]], [e.p["vy"]]
+                if self._vset(vx_l, vy_l, 0xA00):      # 0x42BF67 限速
+                    e.p["vx"], e.p["vy"] = vx_l[0], vy_l[0]
+            self._fx12_integrate(e)                    # 0x42BF71
+            self._fx12_place(e)                        # 0x42BF84 dst=(x-8,y-8)
+            if self.frames & 1:                        # 0x42BF95 test al,1
+                self.trailq.append({"x": e.p["x"], "y": e.p["y"],
+                                    "type": 0x41000016, "a3": 0})
+            self._fx12_visibility(e)                   # 0x42BFD8 push 8
+            return
+        if e.p.get("kind") == "drop":                  # 0x42BDF0
+            if e.p.get("dust"):                         # 0x42BDF6 test eax,eax
+                n = e.p["dust"] + 1                     # 0x42BDFA inc eax
+                e.p["dust"] = n
+                e.p["blink"] = 1 if n > 3 else 0        # 0x42BE01 setg al
+                self._fx12_integrate(e)                 # 0x42BE07
+            else:
+                d = self._magic_neg26(e.p["py"])        # 0x42BE15 对 py 做衰减
+                e.p["vy"] += d                          # 0x42BE2B
+                self._fx12_integrate(e)                 # 0x42BE30
+                e.p["y"] = self.mirror_y() + (e.p["py"] >> 8)   # 0x42BE42
+            if e.disp:                                  # 0x42BE4D test byte,0x1F
+                if e.disp.rect[0] & 0x1F:
+                    e.disp.grow(-0x10, 0, -0x10, 0)
+                else:
+                    e.disp.grow(0x10, 0, 0x10, 0)
+            self._fx12_place(e)                         # 0x42BE77 dst=(x-8,y-8)
+            # 0x42BE8B/0x42BE92：退出条件 = x >= 0x288（648）或 [+0x18]==0，
+            # 不调 0x4021E9（本支的死亡判据与屏幕可见性无关）
+            if e.p["x"] >= 0x288 or not e.p.get("vis", 1):
+                e.alive = False
+            return
+        if e.p.get("kind") == "chase":                 # 0x42BD00
+            ecx = e.p["y"] - e.p["mir"]                 # 0x42BD09
+            if ecx != 0:                                # 0x42BD0B je
+                mul = -3 if e.p["dust"] != 0 else -0x10  # 0x42BD17 and 0xD / add -0x10
+                ecx *= mul                              # 0x42BD1A imul
+            n = e.p["dust"]                             # 0x42BD1D
+            if n:
+                n -= 1                                  # 0x42BD24 dec
+                e.p["dust"] = n
+                if n == 0:                              # 0x42BD2A jne
+                    e.p["dust"] = 0xF                    # 0x42BD32
+                    v = e.p["vy"]                       # 0x42BD39 cdq/sub/sar：向零截断
+                    e.p["vy"] += v // 2 if v >= 0 else -((-v) // 2)   # 0x42BD41
+            e.p["vy"] += ecx                            # 0x42BD4B
+            self._fx12_integrate(e)                     # 0x42BD4E
+            if e.disp:                                  # 0x42BD5B test byte,0x3F
+                if e.disp.rect[0] & 0x3F:
+                    e.disp.grow(-0x20, 0, -0x20, 0)
+                else:
+                    e.disp.grow(0x20, 0, 0x20, 0)
+            self._fx12_place(e)                         # 0x42BD85 dst=(x-0x10,y-0x10)
+            if e.p["x"] >= 0x290 or not e.p.get("vis", 1):   # 0x42BD99 / 0x42BDA0
+                e.alive = False
+            return
         if e.p.get("kind") == "pulse":                 # 0x42C050
             v = e.p["vx"] - (e.p["vx"] & 0xFFFFFFFF)   # 占位，下面用 vy 语义
             d = e.p["vy"]
