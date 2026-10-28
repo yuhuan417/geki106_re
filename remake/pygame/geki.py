@@ -309,6 +309,32 @@ class Layers:
         b.buf[py:py + h, px:px + w] = a.buf[y0:y0 + h, x0:x0 + w]
         b.dirty = True
 
+    def copy_key(self, src: int, dst: int, rect, pt, key: int = 0) -> None:
+        """0x44D060 + 色键（页2 的 0x43F230 用：层4 图集 8×8 单元 → 层5/6）。
+
+        DDraw 侧 flags=0x10，层色键由 0x44CE60 设为 0（§16.92.2）；这里把 ==key 的像素跳过。
+        """
+        a, b = self.tab.get(src), self.tab.get(dst)
+        if a is None or b is None:
+            return
+        x0, y0 = max(0, int(rect[0])), max(0, int(rect[1]))
+        x1, y1 = min(a.w, int(rect[2])), min(a.h, int(rect[3]))
+        w, h = x1 - x0, y1 - y0
+        px, py = int(pt[0]), int(pt[1])
+        if w <= 0 or h <= 0 or px >= b.w or py >= b.h:
+            return
+        # 目标端裁剪（BltFast 的语义：超出部分直接丢）
+        sx0, sy0 = max(0, -px), max(0, -py)
+        w = min(w - sx0, b.w - max(0, px))
+        h = min(h - sy0, b.h - max(0, py))
+        if w <= 0 or h <= 0:
+            return
+        src_px = a.buf[y0 + sy0:y0 + sy0 + h, x0 + sx0:x0 + sx0 + w]
+        m = src_px != (key & 0xFF)
+        dst_px = b.buf[max(0, py):max(0, py) + h, max(0, px):max(0, px) + w]
+        np.copyto(dst_px, src_px, where=m)
+        b.dirty = True
+
     def snapshot(self, n: int, canvas: "Canvas") -> None:
         """0x44D190：BltFast(层n ← 主表面, srcRect=(0,0,640,480), 无键)。"""
         lay = self.tab.get(n)
@@ -370,6 +396,20 @@ class P2Stream:
             recs.append((7 + (b8 & 3), (r[4], r[5], r[6], r[7]), (dl, dt, dr, db)))
         self.frames += 1
         return recs
+
+
+# ------------------------------------------------------- 页2 尾部表（§16.93，栈上表已抽出）
+# ⑫ 4CC 精灵表：0x440B3A..0x440CCB 建于 [esp+0x64]，8 字节 {i16 t, i16 a, i16 b, i16 c}
+#    si 继承值 = 0x78（0x44016F）、di = 0x6B8（0x440B35）
+P2_PANELS = [
+    (1376, 0, 0, 0x00), (1376, -656, 0, 0x00), (1376, 1205, 120, 0x10),
+    (1548, -16, -4, 0x01), (1548, 640, -4, 0x01), (1548, -16, -500, 0x01),
+    (1548, 640, -500, 0x01), (1548, -805, 754, 0x11),
+    (1720, 0, -12, 0x02), (1720, 0, 484, 0x02), (1720, 200, -514, 0x12),
+]
+# ⑬ 计时器校正表：0x440D3F..0x440DD7 建于 [esp+0x28]，8 字节 {i16 t1, i16 t2, u32 ms}
+P2_RESYNC = [(0x3B2, 0x404, 0x4127), (0x50A, 0x55E, 0x5715), (0x7BA, 0x80C, 0x828F),
+             (0xA6A, 0xABE, 0xAE4B), (0xCC4, 0xD18, 0xD472), (0x10CC, 0x10F4, 0x11310)]
 
 
 # ---------------------------------------------------------------------------- 文字
@@ -708,6 +748,8 @@ class Pages:
         self.data = data
         self.pal = palette
         self.p2_stream: P2Stream | None = None
+        self.p2_glyph: dict[int, bytes] = {}      # ⑩⑪ 字形条资源 80/81/82
+        self.p2_text_on = True                    # 0x4AB5B0 的 flag 0x400（文字表示）
         self.keys = KeyMgr()                       # 0x4AB5B0
         self.sky_color = -1
         # 色带引擎（0x4CD484 / 0x4561D0 push、0x4562A0 draw、0x456270+0x4560C0 advance）
@@ -934,6 +976,15 @@ class Pages:
         armed = (not CHANGEDISPLAY) or OPMOVIE
         if armed and p.exists():
             self.p2_stream = P2Stream(p)
+        # ⑩⑪ 的字形条数据（§16.93.4）：资源 80/81/82 = 列式列表（60×124 / 92×124 / 92×80）
+        #   层4 图集由 ① 的层装载表 (-358, 层4, 资源 0xB4) 装好（0x44BE10）
+        self.p2_glyph = {}
+        for rid in (80, 81, 82):
+            q = REMAKE / "pygame" / "assets" / f"p2_glyph_{rid}.bin"
+            if q.exists():
+                self.p2_glyph[rid] = q.read_bytes()
+        # 0x4AB5B0 的 flag 0x400 = 文字表示（键码 0x23 切换，§16.93.7），默认开
+        self.p2_text_on = True
         self.spawn(self.ui52c, int(p2["spawn_type"]))
         self.timer.set_period(int(p2["timer_period"]))    # 0x452D94 SetPeriod(0x3E=62)
         self.log(f"page2.enter（记录流={'开' if self.p2_stream else '关'}）")
@@ -956,7 +1007,9 @@ class Pages:
         self.begin_frame()
         # 0x4562A0：色带（栈式，只铺带子，不整屏清！—— mosaic 像素靠这个保留下来）
         self.band_draw()
-        # 0x445A30：0x6F000008 时间轴（层装载 / 快照拷贝 / 记录流）
+        # 0x43A350：4CC 行为遍（页2 的 4F 飞入面板在这里动；0x458F80 的第一道）
+        self.tick_ui(self.ui46c)
+        # 0x445A30：0x6F000008 时间轴（层装载 / 快照拷贝 / 记录流 / 字形条 / 面板生成）
         self.tick_ui(self.ui52c)
         self.draw()                                 # 4CC/4FC 显示表（页2 无节点）
         self.band_advance()                         # 0x456270 帧末推进色带
@@ -1227,6 +1280,8 @@ class Pages:
                 self._open_timeline(e)
             elif e.beh == "title_timeline":
                 self._title_timeline(e)
+            elif e.beh == "p2_panel":
+                self._p2_panel(e)
             elif e.beh == "opmovie":
                 self._opmovie(e)
             elif e.beh == "phase_driver":
@@ -1664,6 +1719,121 @@ class Pages:
             d.active = False
 
     # 0x43F560（页2 时间轴）
+    # ------------------------------------------------------------ 页2 字形条/面板
+    def _p2_glyph(self, a: int, b: int, attr: int, layer: int) -> None:
+        """0x43F230(ent, a, b, attr, layer)：层4（16×16 图集）的 8×8 单元 → 层 layer 的 (a*8,b*8)。
+
+        0x43F233 `0x45B030(0x4AB5B0,0x400)`：flag 未置位时 attr 强制 0xB4（隐藏文字）；
+        0x43F24B..0x43F282：单元 = {(attr&0x0F)<<4, attr&0xF0, +8, +8}；
+        0x43F286 / 0x43F29D：`a&1` 源单元右移一格、`b&1` 下移一格；最后 0x44D060(mgr,layer,&pos,4,&cell)。
+        """
+        if not self.p2_text_on:
+            attr = 0xB4
+        l = (attr & 0x0F) << 4
+        tp = attr & 0xF0
+        cell = [l, tp, l + 8, tp + 8]
+        if a & 1:
+            cell[0] += 8; cell[2] += 8
+        if b & 1:
+            cell[1] += 8; cell[3] += 8
+        self.layers.copy_key(4, layer, cell, (a * 8, b * 8), key=0)
+
+    def _p2_glyph_strips(self, t: int) -> None:
+        """⑩⑪ 六个段（§16.93.4 / §16.93.8）。
+
+        资源 80/81/82 是"列式列表"：步长 = 每列字节数（0x7C/0x7C/0x50），循环变量 x 是资源内
+        字节偏移而不是像素坐标。
+        """
+        g = self.p2_glyph
+        if not g:
+            return
+        # ⑩a 0x440679：t∈[0x35C,0x3AC) 偶数帧；A=t-0x35C；60 列、基点 0x29、层5
+        if 0x35C <= t < 0x3AC and not (t & 1):
+            A = t - 0x35C
+            for k in range(60):                     # 0x1D10 / 0x7C = 60 列
+                self._p2_glyph(A, k, g[80][0x29 + A + 0x7C * k], 5)
+        # ⑩b 0x4406E0：t∈[0x560,0x600) 偶数帧；A=(t-0x560)//2；基点 0xF7E、层6
+        if 0x560 <= t < 0x600 and not (t & 1):
+            A = (t - 0x560) // 2
+            for k in range(60):
+                self._p2_glyph(A, k, g[81][0xF7E + A + 0x7C * k], 6)
+        # ⑩c 0x440750：t∈[0x60C,0x6AC) 偶数帧；A=(t-0x60C)//2；x: 0xA0→0x1360 步 0x50、层5
+        if 0x60C <= t < 0x6AC and not (t & 1):
+            A = (t - 0x60C) // 2
+            x = 0xA0
+            while x < 0x1360:
+                self._p2_glyph(A, x // 0x50, g[82][A + x], 5)
+                x += 0x50
+        # ⑪a 0x4407C4：t∈[0x560,0x60C)、(t-0x560)%4==0；窗口每 4 帧左移 1 列
+        if 0x560 <= t < 0x60C and (t - 0x560) % 4 == 0:
+            k = (t - 0x560) // 4
+            X2 = 0x52 - k
+            off = (0x50 - k) - 0x27
+            for i in range(60):                     # edi = 0x3C（0x43FF97 的残留值）
+                self._p2_glyph(i, X2, g[80][off], 5)
+                off += 0x7C
+        # ⑪b 0x44086E：t∈[0x60C,0x6B8) 且 (t-4)%8==0；k=(t-0x60C)//11、limit=0x3E-2k
+        if 0x60C <= t < 0x6B8 and (t - 4) % 8 == 0:
+            d = t - 0x60C
+            k = d // 11                             # 0x2E8BA2E9 魔数 = 除以 11
+            P = (d >> 2) & ~1                       # 0x4408A7
+            limit = 0x3E - 2 * k
+            off = 0
+            for i in range(max(0, limit)):
+                self._p2_glyph(P, i, g[81][0xED8 + off + P], 6)
+                off += 0x7C
+        # ⑪c 0x440A95：t∈[0x6B8,0x764) 且 (t-0x6B8)%11==0；两行、每行 0x50 字
+        if 0x6B8 <= t < 0x764 and (t - 0x6B8) % 11 == 0:
+            row = ((t - 0x6B8) // 11) * 2
+            band = row * 80 + 0x12C0               # 0x440AE0: (row*5+0x12C)*16
+            for _ in range(2):
+                for i in range(0x50):
+                    idx = band + i + (row + 2)      # 0x440B02: [base + i + [esp0+0x24]]
+                    if 0 <= idx < len(g[82]):
+                        self._p2_glyph(row, i, g[82][idx], 5)
+                row += 1
+                band += 0x50
+
+    def _p2_panel_node(self, c: int) -> DisplayNode:
+        """0x436E6C：层 = (c&0x10) ? (c&3)+7 : (c&1)+5；源矩形 0xF0×0xF0 或 0x290×0x1F0。"""
+        if c & 0x10:
+            return DisplayNode((c & 3) + 7, [0, 0, 0xF0, 0xF0], [0, 0])
+        return DisplayNode((c & 1) + 5, [0, 0, 0x290, 0x1F0], [0, 0])
+
+    def _p2_panel(self, e: UiEntity) -> None:
+        """0x439D30（0x4F00000A 行为）：1/4 像素定点、按 c&3 定初速、小图先减速后反向、寿命 0xAC。"""
+        c = e.aux
+        p = e.p
+        if not p.get("init"):
+            p["init"] = True
+            vx, vy = {0: (-268, 0), 1: (268, -201), 2: (0, 201)}.get(c & 3, (0, 0))
+            if not (c & 0x10):                      # 大图（656×496）慢速
+                if vx:
+                    vx = 8 if vx > 0 else -8
+                if vy:
+                    vy = 6 if vy > 0 else -6
+            p["vx"], p["vy"] = vx, vy
+        vx, vy = p["vx"], p["vy"]
+        pos = p["pos"]
+        pos[0] += vx
+        pos[1] += vy
+        if c & 0x10:                                # 只对 240×240 小图做变速
+            if e.t <= 0x15:                         # 0x439DD0..0x439DF9：向零减速
+                vx += -0xC if vx >= 0 else 0xC
+                vy += -9 if vy >= 0 else 9
+            elif e.t >= 0x96:                       # 0x439E03..0x439E2D：远离零加速
+                vx += 0xC if vx >= 0 else -0xC
+                vy += 0xC if vy >= 0 else -0xC
+            p["vx"], p["vy"] = vx, vy
+        d = e.disp
+        if d is not None:
+            d.dst = [pos[0] >> 2, pos[1] >> 2]      # 0x439E36/0x439E39 sar 2
+        e.t += 1
+        if e.t >= 0xAC:                             # 0x439E5A
+            e.alive = False
+            if d is not None:
+                d.active = False
+
     def _title_timeline(self, e: UiEntity) -> None:
         """0x43F560：页2 标题时间轴（计时器从 -420 起，62Hz）。
 
@@ -1786,6 +1956,44 @@ class Pages:
                 for i in range(5):
                     self.canvas.blit(lay6.buf, (0, i * 32, 544, i * 32 + 32),
                                      (48, 128 + i * 48), key=0)
+
+        # ⑨ 0x440663：t == -0x158 → 0x44F600(0x4AB514, 0xF, 0) 开始播 BGM（复刻版无音频）
+        if t == -0x158:
+            self.log(f"page2 t={t} BGM（0x44F600(0x4AB514,0xF,0)）")
+
+        # ⑩⑪ 字形条（0x440679/0x4406E0/0x440750/0x4407C4/0x44086E/0x440A95）
+        self._p2_glyph_strips(t)
+
+        # ⑫ 4CC 精灵表（0x440B3A..0x440D3D）：命中即生成 0x4F00000A 入 4CC 队列
+        for (tt, pa, pb, pc) in P2_PANELS:
+            if t == tt:
+                e2 = self.spawn(self.ui46c, 0x4F00000A, pa, pb)
+                e2.beh = "p2_panel"
+                e2.aux = pc
+                e2.p = {"vx": 0, "vy": 0, "init": False, "pos": [pa * 4, pb * 4]}
+                e2.disp = self._p2_panel_node(pc)
+                self.log(f"page2 t={t} 4F 面板 a={pa} b={pb} c=0x{pc:02X} 层{e2.disp.layer}")
+
+        # ⑬ 计时器校正表（0x440D3F..0x440E07）：t 落入窗口 ⇒ 把 [ent+0x1C] 拉到 t2
+        for (t1, t2, ms) in P2_RESYNC:
+            if t1 <= t <= t2:
+                # 0x440DF2：`ms >= [0x4AB570+0x20]` 时写 t2-1（差 1 帧）；复刻版定时器不记该计数，
+                # 取"帧门已跟上"分支 → t2，并在日志里注明分支。
+                # 本行为在开头就 e.t += 1（等价于原作结尾的 [ent+0x1C]=t+1），
+                # 所以这里要写 t2+1 才能让下一帧从 t2+1 继续（写 t2 会卡在窗口里死循环）。
+                e.t = int(t2) + 1
+                self.log(f"page2 t={t} 计时器校正 → {t2}（ms=0x{ms:X}）")
+                break
+
+        # ⑭ 0x440E09：t == 0 → 0x45A630(0x4AB570, 0) 帧门基准清零（复刻版定时器无该计数，只记日志）
+        if t == 0:
+            self.log(f"page2 t={t} 帧门基准清零（0x45A630(0x4AB570,0)）")
+
+        # ⑮ 0x440E19：t == 0x10F7 → flags |= 0x10000（去页3；正常流程 t=4300 已被 ⑤ 抢先）
+        if t == 0x10F7:
+            self.flags.set(FLAG_CLICK)
+            self.log(f"page2 t={t} flags=0x{self.flags.bits:X}（0x440E19）")
+
 
     def present(self) -> None:
         """0x44D740 的调色板部分：`frame=++[0xC90]`，仅偶数帧且 [0xC8C]!=0 时执行。
