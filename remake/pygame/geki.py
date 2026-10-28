@@ -1547,6 +1547,8 @@ class Pages:
                 self._psel_blink(e)
             elif e.beh == "portrait":
                 self._portrait(e)
+            elif e.beh == "fx12":
+                self._fx12(e)
             elif e.beh == "kanji_actor":
                 self._kanji_actor(e)
             elif e.beh == "psel_hint":
@@ -1760,8 +1762,104 @@ class Pages:
         """
         if ty == 0x0A:
             return self._actor_0A(x, y, a3)
+        if (ty & 0xFF000000) == 0x12000000:      # 0x12 特效族（0x42D7C0 分派）
+            return self.fx12_spawn(ty, x, y, a3)
         self.log(f"actor spawn ({x},{y}) type=0x{ty:X} a3=0x{a3:X} → 未实现（§10.4 的其它类型）")
         return None
+
+    # ---- 0x12 特效族（§16.118.10）---------------------------------------
+    #  (层=1 bm_cm32, 源矩形 l,t,r,b, 行为, 速度上限 [+0x2C])
+    FX12_TABLE = {
+        0x12061127: ((0xA0, 0xC0, 0xAF, 0xCF), "track", None),
+        0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "track", 0x200),
+        0x120C112E: ((0x100, 0xE0, 0x10F, 0xEF), "track", 0x100),
+        0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "track", 0x180),
+        0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0),
+    }
+
+    def fx12_spawn(self, ty: int, x: int, y: int, a3: int = 0) -> "UiEntity | None":
+        """ctor `0x42B210`（§16.118.10）：层恒 1、rect 按类型、dst=(x-半宽,y-半高)。
+
+        `[+0x1C]=(short)rec[0xC]`(初速 8.8)、`[+0x20]=(short)rec[0xE]`、
+        `[+0x24]=rec[0]<<8`、`[+0x28]=rec[4]<<8`（初位置 8.8）、`[+0x2C]`=速度上限。
+        """
+        row = self.FX12_TABLE.get(ty & 0xFFFFFFFF)
+        if row is None:
+            self.log(f"0x12 特效 type=0x{ty:X} @({x},{y}) → 该支行为/矩形未定案，不生成")
+            return None
+        rect, kind, speed = row
+        e = UiEntity(type_word=ty, a3=int(a3))
+        e.beh = "fx12"
+        e.p["kind"] = kind
+        e.p["vx"] = (a3 >> 16) & 0xFFFF
+        e.p["vx"] = e.p["vx"] - 0x10000 if e.p["vx"] & 0x8000 else e.p["vx"]
+        e.p["vy"] = a3 & 0xFFFF
+        e.p["vy"] = e.p["vy"] - 0x10000 if e.p["vy"] & 0x8000 else e.p["vy"]
+        e.p["px"] = int(x) << 8                       # [+0x24]
+        e.p["py"] = int(y) << 8                       # [+0x28]
+        e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
+        e.p["spd"] = int(speed)
+        half = ((rect[2] - rect[0]) >> 1)             # 0x42B7D8：减半宽/半高
+        e.disp = DisplayNode(1, list(rect),
+                             [int(x) - half, int(y) - half])
+        self.ui46c.append(e)
+        self.log(f"0x12 特效 0x{ty:X} kind={kind} @({x},{y}) rect={rect}")
+        return e
+
+    @staticmethod
+    def _vset(a: list, b: list, ln: int) -> bool:
+        """`0x40105A`→`0x45AC70`：把 (a[0],b[0]) 定长到 ln；分量为 0 → 返回 False。"""
+        x, y = float(a[0]), float(b[0])
+        d = (x * x + y * y) ** 0.5
+        if d == 0.0:
+            return False
+        a[0] = int(x / d * ln)
+        b[0] = int(y / d * ln)
+        return True
+
+    def _fx12(self, e: UiEntity) -> None:
+        """行为 `0x42C320`（track，三型）/ `0x42C050`（pulse，`0x120F112A`）。"""
+        if e.p.get("kind") == "pulse":                 # 0x42C050
+            v = e.p["vx"] - (e.p["vx"] & 0xFFFFFFFF)   # 占位，下面用 vy 语义
+            d = e.p["vy"]
+            if abs(d) > 0x100:                         # 0x42C05D cmp eax,0x100
+                d += 0x100 if d <= 0 else -0x100       # 0x42C064..0x42C078
+                e.p["vy"] = d
+            self._fx12_integrate(e)                    # 0x42C07D
+            if e.disp:
+                if e.disp.rect[0] & 0x3F:              # 0x42C08A test byte [eax],0x3F
+                    e.disp.grow(-0x20, 0, -0x20, 0)
+                else:
+                    e.disp.grow(0x20, 0, 0x20, 0)
+            return
+        # ---- track：0x42C320 ----
+        tx = self.inp.x                                # 0x4021EE(0x4AD43C,&out1,&out2)：页13 取虚拟指针
+        ty = self.inp.y
+        dx = [e.p["x"] - int(tx)]                      # 0x42C362 sub edi,ecx
+        dy = [e.p["y"] - int(ty)]
+        spd = e.p["spd"] or 0
+        if self._vset(dx, dy, spd):                    # 0x42C37C
+            if (e.type_word & 0xFFFFFFFF) == 0x120A112F:   # 0x42C388 三倍速
+                dx[0] *= 3
+                dy[0] *= 3
+            e.p["vx"] += dx[0]                         # 0x42C3B7
+            e.p["vy"] += dy[0]
+            vx = [e.p["vx"]]
+            vy = [e.p["vy"]]
+            if self._vset(vx, vy, spd << 3):           # 0x42C3CC 钳到 [+0x2C]*8
+                e.p["vx"], e.p["vy"] = vx[0], vy[0]
+        self._fx12_integrate(e)                        # 0x42C3D4
+
+    def _fx12_integrate(self, e: UiEntity) -> None:
+        """`0x40173A`→`0x42B980`：8.8 位置 += 速度，像素 = 位置>>8；再写 dst。"""
+        e.p["px"] += e.p["vx"]                         # [+0x24] += [+0x1C]
+        e.p["py"] += e.p["vy"]
+        e.p["x"] = e.p["px"] >> 8                      # [+4] = [+0x24] sar 8
+        e.p["y"] = e.p["py"] >> 8
+        if e.disp:                                     # 0x42C3DB..0x42C3F7
+            half = (e.disp.rect[2] - e.disp.rect[0]) >> 1
+            e.disp.dst[0] = e.p["x"] - half
+            e.disp.dst[1] = e.p["y"] - half
 
     def _actor_0A(self, x: int, y: int, a3: int) -> UiEntity:
         """ctor `0x446117`（type 0x0A）：选中机体的大字（48×48）。
