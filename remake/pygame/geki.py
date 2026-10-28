@@ -831,6 +831,37 @@ class UiEntity:
 
 
 # ---------------------------------------------------------------------------- 页机
+# ---- 查表三角函数（0x45A7E0 生成 / 0x45AAF0 正弦 / 0x45ABB0 余弦）----------
+_TRIG_STEP = 3.1416 / 1800.0            # [0x4993A8]
+_TRIG_AMP = 255.0                       # [0x499398]
+_TRIG_N = 0x384                         # 每象限 900，一整圈 3600
+# `0x463F30` = fistp 截断（fnstcw 后 or ah,0xC 置截断模式）⇒ 生成时向零取整
+_SIN_TAB = [int(math.sin(j * _TRIG_STEP) * _TRIG_AMP) for j in range(_TRIG_N)]
+_COS_TAB = [int(math.cos(j * _TRIG_STEP) * _TRIG_AMP) for j in range(_TRIG_N)]
+
+
+def _trig(tab, v: int) -> int:
+    """`0x45AAF0` / `0x45ABB0`：|v|%0x384 取余、|v|/0x384&3 选象限，取值后再定符号。"""
+    v = int(v)
+    a = abs(v)
+    q = (a // _TRIG_N) & 3
+    r = a % _TRIG_N
+    if tab is _SIN_TAB:
+        out = (tab[r], tab[_TRIG_N - 1 - r], -tab[r], -tab[_TRIG_N - 1 - r])[q]
+        return -out if v < 0 else out
+    return (tab[r], -tab[_TRIG_N - 1 - r], -tab[r], tab[_TRIG_N - 1 - r])[q]
+
+
+def fsin(v: int) -> int:
+    """`0x401A50` → `0x45AAF0`。"""
+    return _trig(_SIN_TAB, v)
+
+
+def fcos(v: int) -> int:
+    """`0x40159B` → `0x45ABB0`。"""
+    return _trig(_COS_TAB, v)
+
+
 class Pages:
     """0x459360 页机 + 页1/2/3（页4 由原 main.py 的 game 逻辑接手）。"""
 
@@ -2256,7 +2287,17 @@ class Pages:
                     recs = [(0x120D112B, 0x78, a3)]    # 0x448607
             else:                                      # 0x44862F：t%0xA==0，四发（a3 = ~a3 交替）
                 if t % 0xA == 0:                       # 0x448631 mov esi,0xA / idiv
-                    self.log("actor 0x0A 槽3 中段 0x44862F 需 0x45AAF0/0x45ABB0 三角表（运行时生成，未读）")
+                    def _pair(n: int) -> int:          # 0x448641..0x44866F / 0x4486D2..0x448706
+                        c = fcos(n) & 0xFFFFFFFF       # 0x40159B → 0x45ABB0
+                        q = fsin(n) & 0xFFFFFFFF       # 0x401A50 → 0x45AAF0
+                        return (((q << 0x13) & 0xFFFF0000) |
+                                ((c << 3) & 0xFFFF)) & 0xFFFFFFFF
+                    a3a = _pair(t * 20)                # ecx=t*5<<2
+                    a3b = _pair(t * 40)                # [ebp+0x1C]*5<<3
+                    recs = [(0x120C112E, 0x78, a3a),
+                            (0x120C112E, 0x78, ~a3a & 0xFFFFFFFF),   # 0x4486C1 not edx
+                            (0x120C112E, 0x78, a3b),
+                            (0x120C112E, 0x78, ~a3b & 0xFFFFFFFF)]   # 0x448723 not ecx
         elif t >= 0x5A:                                # 0x44843F 的两个出口都在 0x44873E
             self.log(f"actor 0x0A t={t} 走 0x44873E（未读）")
         for ty, yy, a3 in recs:
