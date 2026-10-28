@@ -529,7 +529,7 @@ WM_DESTROY→0x458640、WM_ACTIVATE→0x4586E0、**0x46A→0x401B04→0x459360**
   while (App[0x2BC] != 0):
       清 0x4AB5CC/0x4AB5C0
       handler = table[map[App[0x2BC]]]        // map 0x459618 / table 0x4595E4
-      handler(App)                            // 页 4/11 → 0x4593C2
+      handler(App)                            // 页3/10 → 0x4593C2
 ```
 | 页3 handler | 作用（已核） |
 |---|---|
@@ -662,6 +662,7 @@ WIN11 ddraw 模拟层对该操作支持不完整 → 调色板步骤失败。
 0x4593EF 页0: if (0x451E00()) { if (0x451F80()) while (0x451F80()); } 0x452010()
 0x45941C 页1: if (0x452A00()) { if (0x452EB0()) while (0x452EB0()); } 0x452F80()
 0x459449 页2: if (0x4520A0()) { if (0x452220()) while (0x452220()); } 0x4522A0()
+0x4593C2 页3/页10: if (0x4505B0()) { if (0x451110()) while (0x451110()); } 0x451C50()
 ```
 即 `enter()` 一次 → `step()` 循环到返回 0 → `finish()`；返回 0 表示"本页结束"，
 页机随后按 `App[0x2BC]` 重新分发（页号不变则原地重进）。
