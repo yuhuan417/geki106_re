@@ -1879,6 +1879,7 @@ class Pages:
         # 0x42B7D4/0x42B7D8 的减数：各支自己写（16×16 → 8、32×32 → 0x10），
         # 但 0x42B683 支走 0x42B73E ⇒ 32×32 也减 8，故不能用 rect 宽度推
         # 0x42B30E 支在 ctor 尾部之前改写 [+8]（0x42B3B0），故 dst 必须用改写后的 y
+        e.p["beh40"] = beh                     # [+0x40] 行为指针（判分支用）
         e.disp = DisplayNode(int(layer), list(rect),
                              [int(e.p["x"]) - half, int(e.p["y"]) - half])
         self.ui46c.append(e)
@@ -1993,8 +1994,22 @@ class Pages:
             if e.p["x"] >= 0x290 or not e.p.get("vis", 1):   # 0x42BD99 / 0x42BDA0
                 e.alive = False
             return
+        if e.p.get("kind") == "pulse" and e.p.get("beh40") == 0x401BAE:
+            # 行为 `0x42B9C0`（0x120B1121 / 0x12091122）：只有 vy 一条轴的衰减脉动
+            d = e.p["vy"]                              # 0x42B9C7
+            if abs(d) > 0x100:                         # 0x42B9D1 jle
+                e.p["vy"] = d + (0x100 if d <= 0 else -0x100)   # 0x42B9D8..0x42B9EC
+            self._fx12_integrate(e)                    # 0x42B9F1
+            if e.disp:                                 # 0x42B9F6 add eax,4
+                if e.disp.rect[0] != 0:                # 0x42B9FE cmp dword,0（整 dword，无掩码）
+                    e.disp.grow(-0x20, 0, -0x20, 0)
+                else:
+                    e.disp.grow(0x20, 0, 0x20, 0)
+            self._fx12_place(e, 0x10)                  # 0x42BA20 sub 0x10
+            # 0x42BA39：`[+0x2C]`（外部对象指针）非 0 才继续做命中判定与 0x41000004 投放；
+            # ctor `0x42B683` 把它写成 0，故页13 的两支只脉动、不自尽、不投放。
+            return
         if e.p.get("kind") == "pulse":                 # 0x42C050
-            v = e.p["vx"] - (e.p["vx"] & 0xFFFFFFFF)   # 占位，下面用 vy 语义
             d = e.p["vy"]
             if abs(d) > 0x100:                         # 0x42C05D cmp eax,0x100
                 d += 0x100 if d <= 0 else -0x100       # 0x42C064..0x42C078
@@ -2087,10 +2102,14 @@ class Pages:
         """`[0x56CC90]`：自机 y 镜像（页13 无自机 ⇒ 0）。"""
         return int(self.mirror["y"])
 
-    def _fx12_place(self, e: UiEntity) -> None:
-        """`0x42C0A3`/`0x42BBD1`/`0x42BA2A`：dst = (x−half, y−half)。"""
+    def _fx12_place(self, e: UiEntity, off: "int | None" = None) -> None:
+        """`0x42C0A3`/`0x42BBD1`/`0x42BA2A`：dst = (x−off, y−off)，off 默认 = ctor 减数。
+
+        dst 偏移与可见性半径是两个独立量：`0x42B576`（0x12061127/0x12071126）与
+        `0x42BA20`（0x120B1121/0x12091122）都在 −0x10 处落 dst，而半宽分别是 0x10 与 8。
+        """
         if e.disp:
-            h = e.p["half"]
+            h = e.p["half"] if off is None else off
             e.disp.dst[0] = e.p["x"] - h
             e.disp.dst[1] = e.p["y"] - h
 
@@ -2193,12 +2212,30 @@ class Pages:
             e.alive = False
 
     def _kanji_slot_effect(self, e: UiEntity, slot: int, t: int) -> None:
-        """`0x448277 jmp [slot*4 + 0x448A30]` = `{0x44827E, 0x4482DA, 0x448356, 0x4483AC}`
-        （t<0x5A 的效果段）。目前只有槽0 读到：每 6 帧生成 `0x120B1121` @(0xB0,0x78) a3=0xE00。"""
-        if slot == 0 and t % 6 == 0:                   # 0x44827E..0x44828A
-            self.actor_spawn(0xB0, 0x78, 0x120B1121, 0xE00)
-        elif slot in (1, 2, 3) and t == 0:
-            self.log(f"actor 0x0A 槽{slot} 效果段（0x4482DA/0x448356/0x4483AC）未读")
+        """`0x448277 jmp [slot*4 + 0x448A30]` = `{0x44827E, 0x4482DA, 0x448356, 0x4483AC}`。
+
+        t<0x5A 的效果段，四支都先 `idiv` 取 `t % N`，余数非 0 直接跳公共尾 `0x44898B`；
+        命中则 `0x4023C4(dst, x=0xB0, y=0x78, type, a3)` 造 5-dword 记录，`0x40100F(0x4AD46C)`
+        入弹队列（`0x40100F`→`0x430290`，节点 ctor `0x401DCA`→`0x42D780`）。
+        槽1/槽3 各投**两发**：先投一发，再把记录第 4 个 dword（a3）改写成另一值投第二发。
+        """
+        recs = []
+        if slot == 0:                                  # 0x44827E：t%6==0
+            if t % 6 == 0:                             # 0x448280..0x44828A
+                recs = [(0x120B1121, 0xE00)]
+        elif slot == 1:                                # 0x4482DA：t%6==0，两发
+            if t % 6 == 0:                             # 0x4482DC..0x4482E6
+                recs = [(0x12071126, 0xF4000A00),
+                        (0x12071126, 0x0C000A00)]      # 0x44833C 改写 a3 后再投
+        elif slot == 2:                                # 0x448356：t%5==0
+            if t % 5 == 0:                             # 0x448358..0x448362
+                recs = [(0x120F112A, 0xF00)]
+        else:                                          # 0x4483AC：t%7==0，两发
+            if t % 7 == 0:                             # 0x4483AE..0x4483B8
+                recs = [(0x120E112D, 0xFA000A64),
+                        (0x120E112D, 0x06000A64)]      # 0x4483FB 第二发
+        for ty, a3 in recs:
+            self.actor_spawn(0xB0, 0x78, ty, a3)
 
     def _psel(self, e: UiEntity) -> None:
         """0x43EDB0：页13 选择画面总控（7 态机）。
