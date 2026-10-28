@@ -906,7 +906,8 @@ class Pages:
         self.page = 0
         self.ui52c: list[UiEntity] = []
         self.ui4fc: list[UiEntity] = []
-        self.ui46c: list[UiEntity] = []
+        self.ui46c: list[UiEntity] = []          # 0x4AD46C（0x12 特效）
+        self.actorq: list[UiEntity] = []         # 0x4AD40C（演员；页13 = 0x0A 汉字）
         self.screen_fill = -1
         self.bar_color = 0xD9          # 0x42000004 色块条用的索引（ctor 里由 desc 决定，暂取亮色）
         self.trace: list[str] = []
@@ -1320,6 +1321,7 @@ class Pages:
         self.p13_tiles = None
         self.p13_mono = False
         self.posq = []
+        self.actorq = []
         self.wipe4f = []
         if "1" in self.data.get("palettes", {}):
             self.pal = np.array(self.data["palettes"]["1"], dtype=np.uint8)
@@ -1363,11 +1365,17 @@ class Pages:
         self.p13_frames += 1                            # 0x454776 [0x56CCA8]++
         self.band_draw()                                # 0x454786 0x4562A0
         # 0x454794 0x43C060(ctx,0x4AD46C,0x4AD43C)：本复刻还没有自机/敌弹实体，跳过碰撞
-        self.tick_ui(self.ui4fc)                        # 0x458E70：4FC 行为+绘制
-        self.tick_ui(self.ui52c)                        #   52C（淡入/淡出、缩略图）
-        self.tick_ui(self.ui46c)                        #   4CC（演员）
+        # 0x458E70 的泵队列顺序（逐项）：0x4AD55C(未用) → **0x4AD40C 演员** → **0x4AD46C 特效**
+        # → **0x4AD43C 位置** → 0x4AD49C(未用) → **0x4AD4CC 擦切/尾迹** → **0x4AD4FC** → **0x4AD52C**
+        # → 0x4CD484(未用)。顺序不能改：同一帧内先 tick 的队列生成的实体，
+        # 会被排在它后面的队列当帧 tick 到。
+        self.tick_ui(self.actorq)                       #   4AD40C（0x0A 汉字演员）
+        self.tick_ui(self.ui46c)                        #   4AD46C（0x12 特效）
         self._tick_posq()                               #   4AD43C（0x2300001A 位置对象）
-        self._tick_wipe4f()                             #   4AD4CC（0x4F000009 擦切）
+        self._tick_wipe4f()                             #   4AD4CC（0x4F000009 擦切/尾迹）
+        self.tick_ui(self.ui4fc)                        #   4AD4FC
+        self.tick_ui(self.ui52c)                        #   4AD52C（淡入淡出、0x6F000006 七态机）
+        self.actorq = [e for e in self.actorq if e.alive]
         self.ui46c = [e for e in self.ui46c if e.alive]
         self.ui4fc = [e for e in self.ui4fc if e.alive]
         self.ui52c = [e for e in self.ui52c if e.alive]
@@ -2239,7 +2247,7 @@ class Pages:
         n = e.p["slot"]
         e.disp = DisplayNode(0, [0, 0x30 * n, 0x2F, 0x30 * n + 0x2F],
                              [int(x) - 0x18, int(y) - 0x18])
-        self.ui46c.append(e)
+        self.actorq.append(e)                     # 0x4AD40C 演员队列（不是 0x4AD46C）
         self.log(f"actor 0x0A slot={n} dst=({x-0x18},{y-0x18}) rect={e.disp.rect}")
         return e
 
@@ -3188,7 +3196,8 @@ class Pages:
                 if ww > 0 and hh > 0:
                     c.buf[dy:dy + hh, dx:dx + ww] = self.p13_portrait_arr[t:t + hh, l:l + ww]
         if DRAW_DISPLAY_NODES:
-            self._render_queue(c, self.ui46c)
+            self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
+            self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）
         # ⑧ 静态文字页（0x44D010）：0x445A30 的 52C 遍在 4CC 渲染之后 ⇒ 盖在面板之上
         for (lay, src, dst) in self.p2_blits:
             lt = self.layers.tab.get(int(lay))
