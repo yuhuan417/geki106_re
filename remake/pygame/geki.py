@@ -2249,8 +2249,14 @@ class Pages:
                             (0x12061127, 0x78, 0x0A000A00),  # 0x448572 只改 a3
                             (0x12061127, 0x88, 0x0A0008E0),  # 0x448585 y+=0x10 + a3
                             (0x12061127, 0x68, 0xF60008E0)]  # 0x4485A7 y-=0x20 + a3
-            else:
-                self.log(f"actor 0x0A 槽{slot} 中段（0x4485D3/0x44862F）未读")
+            elif slot == 2:                            # 0x4485D3：t%3==0，一发（借槽1 的入队尾 0x4485BE）
+                if t % 3 == 0:                         # 0x4485D5 mov ecx,3 / idiv
+                    v = self._rng() & 0x1FFF           # 0x4485E5 and eax,0x1FFF
+                    a3 = (((v - 0xFFF) & 0xFFFF) << 16) | 0x0400   # 0x4485F6..0x448603
+                    recs = [(0x120D112B, 0x78, a3)]    # 0x448607
+            else:                                      # 0x44862F：t%0xA==0，四发（a3 = ~a3 交替）
+                if t % 0xA == 0:                       # 0x448631 mov esi,0xA / idiv
+                    self.log("actor 0x0A 槽3 中段 0x44862F 需 0x45AAF0/0x45ABB0 三角表（运行时生成，未读）")
         elif t >= 0x5A:                                # 0x44843F 的两个出口都在 0x44873E
             self.log(f"actor 0x0A t={t} 走 0x44873E（未读）")
         for ty, yy, a3 in recs:
