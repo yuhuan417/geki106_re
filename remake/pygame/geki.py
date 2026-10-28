@@ -1910,6 +1910,11 @@ class Pages:
                 if vb >= 0x8000: vb -= 0x10000
                 vc = int(fc) & 0xFF
                 if vc >= 0x80: vc -= 0x100
+                # `a=+255 且 b<0` 的那条（t=256 (255→-255,-4)）：字面照抄会把画面先"洗白"
+                # 再渐黑，实测原版是直接渐黑（玩家反馈：渐入前出现"很亮很完整的一屏"再变黑）。
+                # 所以这一条改为**从当前亮度起步**，其余条目仍严格按 [0x1C]=a 跳变。
+                if va == 255 and vb < 0:
+                    va = int(self.fade_a)
                 e2 = self.spawn(self.ui52c, 0x61000005)
                 e2.beh = "flash"
                 e2.aux = va          # [0x1C]
@@ -1984,6 +1989,7 @@ class Pages:
         for (t0, t1, lay, dx, dy, sl, st, sr, sb) in P2_PAGES:
             if t0 <= t <= t1:
                 self.p2_blits.append((lay, (sl, st, sr, sb), (dx, dy)))
+
 
         # ⑨ 0x440663：t == -0x158 → 0x44F600(0x4AB514, 0xF, 0) 开始播 BGM（复刻版无音频）
         if t == -0x158:
