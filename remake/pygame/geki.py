@@ -2298,8 +2298,26 @@ class Pages:
                             (0x120C112E, 0x78, ~a3a & 0xFFFFFFFF),   # 0x4486C1 not edx
                             (0x120C112E, 0x78, a3b),
                             (0x120C112E, 0x78, ~a3b & 0xFFFFFFFF)]   # 0x448723 not ecx
-        elif t >= 0x5A:                                # 0x44843F 的两个出口都在 0x44873E
-            self.log(f"actor 0x0A t={t} 走 0x44873E（未读）")
+        elif 0xF0 <= t < 0x14A:                        # 0x44873E：晚段，跳表 0x448A50
+            if slot == 0:                              # 0x448766：t%3==0，一发
+                if t % 3 == 0:                         # 0x448768 mov ecx,3 / idiv
+                    recs = [(0x12081123, 0x78, 0x1000)]      # 0x448778
+            elif slot == 1:                            # 0x4487BC：t%3==0，两发
+                if t % 3 == 0:                         # 0x4487BE mov ecx,3 / idiv
+                    recs = [(0x12061128, 0x78, 0xFA000C00),  # 0x4487CE
+                            (0x12061128, 0x78, 0x06000C00)]  # 0x44881A
+            elif slot == 2:                            # 0x44886D：t%7==0，一发
+                if t % 7 == 0:                         # 0x44886F mov ecx,7 / idiv
+                    v = self._rng() & 0x1FFF           # 0x44887F and eax,0x1FFF
+                    recs = [(0x120C112C, 0x78,
+                             (((v - 0xFFF) & 0xFFFF) << 16) | 0x0400)]  # 0x448890..0x44889D
+            else:                                      # 0x4488D9：t%4==0，一发
+                if (t & 3) == 0:                        # 0x4488D9 and ecx,0x80000003 取模判零
+                    recs = [(0x120A112F, 0x78, 0xF000)]      # 0x4488EC
+        elif 0x180 <= t < 0x220 and (t & 0xF) == 0:    # 0x44892D：与槽无关的位置对象
+            # `0x4023C4(rec, 0x298, (t&0x10)?0x28:0xC8, 0x2300001A, 0)`，队列 0x4AD43C、插入 0x401FA5→0x43BDC0
+            y = 0x28 if (t & 0x10) else 0xC8           # 0x448942..0x44895D
+            self.log(f"0x4AD43C 位置对象 0x2300001A ({0x298},{y}) t={t} 未实现（0x43BDC0 插入）")
         for ty, yy, a3 in recs:
             self.actor_spawn(0xB0, yy, ty, a3)
 
