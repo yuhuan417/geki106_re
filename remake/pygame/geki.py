@@ -2030,12 +2030,15 @@ class Pages:
         执行后 [0xC8C]=0（一次性）。窗口模式下随后 Blt(primary ← screen)。
         """
         self.pal_frame = (self.pal_frame + 1) & 0xFFFFFFFF
+        # 0x44D740：偶数帧且 [0xC8C] 置位时才按 0x44B790 重算调色板并**清位**。
+        # 位清掉**不等于**还原成原始调色板——画面必须停在上次算出的结果上（原码没有"还原"分支）。
+        # 早前这里多写了一条 `else: pal_now = pal`，导致每次脉冲实体死亡后画面立刻弹回原亮度：
+        # 渐出到黑 → 弹回正常（静态页又出现）→ 下一条脉冲再跳到黑（黑屏一闪），
+        # 正是"渐入前/渐出后还有静态显示 + 两次黑屏闪烁"的根因。
         if not (self.pal_frame & 1) and self.pal_flags:
             if self.pal_flags & 1:
                 self.pal_now = fade_palette(self.pal, self.fade_a, self.fade_b)
             self.pal_flags = 0
-        elif not (self.pal_frame & 1) and not self.pal_flags:
-            self.pal_now = self.pal
         # ±255 的整屏填充在 0x44D740 里，而 0x44D740 是**帧首**（0x458CB0）调的，
         # 所以放在 present() 里会盖掉本帧的绘制 ⇒ 移到 begin_frame()。
 
