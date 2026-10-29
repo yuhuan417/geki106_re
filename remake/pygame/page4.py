@@ -5488,8 +5488,12 @@ class Page4Mixin:
             #     按线性读法应为 0，但层0 = `bmex\bm_ora.ggd`（384×496 汉字图集），
             #     (0x80,0x50) 处正是"撃"字 —— 与"层=0"矛盾，说明 esi 的来源还没追对。
             #   · 记入 §15；在追到 esi 之前 active=False，不画。
+            # 层号 = 0：节点 [+0]（`0x45A252 mov edx,[esi]` → `0x44D010(0x4AA7B0,layer,&dst,&src)`）。
+            # 依据：开场脚本 res_45（OpngStream）的 op 0x0B 把 **层0 ← id 7 = bmcm\bm_cm48.ggd**
+            # （240×528 自机图集），层1 ← id 8 = bm_cm32；`0x454950` 先塞 bm_ora/bm_orb 只是预载，
+            # 脚本 t=0 就覆盖掉了。⇒ (0x80,0x50,0x9F,0x6F) 在 bm_cm48 里就是自机精灵。
             e.node = DNode(0, 0x80, 0x50)
-            e.node.active = False                             # TODO §15：层号未定
+            e.node.active = True
             e.node.rect = (0x80, 0x50, 0x9F, 0x6F)        # 0x45A750 填的 4 个 word
             e.node.dst = (x + 0x40, y)
             e.node.active = True
