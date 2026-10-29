@@ -24,14 +24,20 @@ AMP = 255.0                       # 0x499398
 ISQRT_NUM = 4096.0                # 0x499388
 ATAN_SCALE = 572.9564553093966    # 0x499378
 
-i = np.arange(900, dtype=np.float64)
-ang = i * STEP
-sin900 = np.trunc(np.sin(ang) * AMP).astype(np.uint8)
-cos900 = np.trunc(np.cos(ang) * AMP).astype(np.uint8)
+# 0x45A7E7 的循环：esi 从 0x383 递减，判据 (esi + 0x383) >= 0
+#   ⇒ esi ∈ [-899, 899]，写 [esi + 0x5B3E37] / [esi + 0x5D41BF]
+#   ⇒ 每张表 1799 字节，以 0x383(899) 为**中心**（中心 = 角度 0），字节值 = trunc(sin/cos(esi*0.1°)*255)
+off = np.arange(-899, 900, dtype=np.int64)
+ang = off.astype(np.float64) * STEP
+sin_t = np.trunc(np.sin(ang) * AMP).astype(np.int64) & 0xFF
+cos_t = np.trunc(np.cos(ang) * AMP).astype(np.int64) & 0xFF
+sin1800 = sin_t.astype(np.uint8)
+cos1800 = cos_t.astype(np.uint8)
 
-# 0x45A82E: i = 0xFFFF 起递减，4096/sqrt(i) 存 word
-src = np.arange(0xFFFF, 0xFFFF - 900, -1, dtype=np.float64)
-isqrt900 = np.trunc(ISQRT_NUM / np.sqrt(src)).astype(np.uint16)
+# 0x45A82E: i = 0xFFFF 起递减到 1，4096/sqrt(i) 存 word；
+#   esi 从 0x5B3AB2 每次 -2 直到 >= 0x593AB4 ⇒ (0x5B3AB2-0x593AB4)/2+1 = 65535 项
+src = np.arange(0xFFFF, 0, -1, dtype=np.float64)
+isqrt65536 = np.trunc(ISQRT_NUM / np.sqrt(src)).astype(np.uint16)
 
 # 0x45A863: 内层 j=0xFF..0，fpatan(atan2(外层 i, 内层 j))*scale → word
 aa, bb = np.meshgrid(np.arange(256, dtype=np.float64),
@@ -40,11 +46,14 @@ atan_raw = np.trunc(np.arctan2(aa, bb) * ATAN_SCALE).astype(np.int64)
 atan = (atan_raw & 0xFFFF).astype(np.uint16)
 
 out = HERE / "p4_tables.npz"
-np.savez_compressed(out, sin900=sin900, cos900=cos900,
-                    isqrt900=isqrt900, atan256=atan)
+np.savez_compressed(out, sin1800=sin1800, cos1800=cos1800,
+                    isqrt65536=isqrt65536, atan256=atan)
 print(f"写出 {out}")
-print("  sin900[0,225,450,675,899] =", [int(sin900[k]) for k in (0, 225, 450, 675, 899)])
-print("  cos900[0,225,450,675,899] =", [int(cos900[k]) for k in (0, 225, 450, 675, 899)])
-print("  isqrt900[0,1,2,899] =", [int(isqrt900[k]) for k in (0, 1, 2, 899)])
+print("  sin1800 中心(899)=%d  +225=%d  +450=%d  +899=%d  端点0(i=-899)=%d" % (
+    int(sin1800[899]), int(sin1800[899 + 225]), int(sin1800[899 + 450]),
+    int(sin1800[899 + 899]), int(sin1800[0])))
+print("  cos1800 中心(899)=%d  +225=%d  +450=%d" % (
+    int(cos1800[899]), int(cos1800[899 + 225]), int(cos1800[899 + 450])))
+print("  isqrt65536[0(i=0xFFFF),65534(i=1)] =", int(isqrt65536[0]), int(isqrt65536[65534]))
 print("  atan256[0,0] atan256[0xFF,0] atan256[1,0] =",
       int(atan[0, 0]), int(atan[0xFF, 0]), int(atan[1, 0]))
