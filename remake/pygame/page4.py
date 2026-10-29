@@ -152,7 +152,10 @@ class ScriptVM:
         if op == 0xE:                                            # 0x4603E9 注释
             self.out[0xE].append(body.split(b"\0")[0])
         elif 1 <= op <= 5:                                       # 0x46044F/3AD/411/490/4D1
-            self.out[op].append(tuple(int.from_bytes(body[i:i + 4], "little") for i in (0, 4, 8, 0xC)))
+            rec = tuple(int.from_bytes(body[i:i + 4], "little") for i in (0, 4, 8, 0xC))
+            self.out[op].append(rec)
+            if self.owner is not None:
+                self.owner.p4_vm_entity(op, rec)
         elif op == 0x6:                                          # 0x460554 立即触发
             self.out[6].append((int.from_bytes(body[0:4], "little"), body[4:0x54],
                                 int.from_bytes(body[0x54:0x58], "little")))
@@ -185,6 +188,77 @@ class ScriptVM:
             self.out[0xD].append(v)
             if self.owner is not None:
                 self.owner.p4_set_level(v)
+
+
+# ---------------------------------------------------------------------------
+# 实体（0x5C 字节通用对象，vtable 0x49874c）
+# ---------------------------------------------------------------------------
+# `0x40D940`（0x23 族子 ctor，`ret 4`）：`eax = type - 0x23000001`，`cmp eax,0x19` →
+# `jmp [eax*4 + 0x40DE98]`（26 项）。每项就是"写 `[ent+0x40]` 行为指针 + 若干字段"。
+ENT23_INIT = {
+    0x23000001: {"beh": 0x401C44, "imm": {0x1C: 0}},
+    0x23000002: {"beh": 0x401FF0, "imm": {0x24: -0x10, 0x28: 0, 0x2C: 0}, "d_to": 0x1C,
+                 "d20": True},                      # 0x40D985..0x40D9B8
+    0x23000003: {"beh": 0x401B1D, "imm": {0x20: -4, 0x24: 0}, "d_to": 0x1C},
+    0x23000004: {"beh": 0x40118B, "imm": {0x1C: 0, 0x20: -0x1E}, "d_to": 0x24},
+    0x23000005: {"beh": 0x401BD1, "imm": {0x1C: 0, 0x20: 0, 0x24: 0, 0x28: 0}, "d_to": 0x2C},
+    0x23000006: {"beh": 0x401BD1, "imm": {}},
+    0x23000007: {"beh": 0x402180, "imm": {0x20: 0}, "d_to": 0x1C},
+    0x23000008: {"beh": 0x401528, "imm": {0x1C: 0, 0x20: -8}},
+    0x23000009: {"beh": 0x4015AA, "imm": {}},
+    0x2300000A: {"beh": 0x401181, "imm": {}},
+    0x2300000D: {"beh": 0x40210D, "imm": {}},
+    0x23000012: {"beh": 0x4015B4, "imm": {}},
+    0x23000013: {"beh": 0x40231A, "imm": {}},
+    0x23000015: {"beh": 0x4017EE, "imm": {}},
+    0x23000016: {"beh": 0x401D48, "imm": {}},
+    0x23000017: {"beh": 0x401951, "imm": {}},
+    0x23000018: {"beh": 0x4013BB, "imm": {}},
+    0x23000019: {"beh": 0x401B31, "imm": {}},
+    0x2300001A: {"beh": 0x40242D, "imm": {}},
+}
+
+
+class Ent:
+    """0x5C 字节实体；`[+0x34]` 存活字节、`[+0x40]` 行为指针、`[+0x14]` 类型。"""
+
+    SZ = 0x5C
+
+    def __init__(self, a: int, b: int, typ: int, d: int):
+        self.m = bytearray(self.SZ)
+        self.d32(0x00, 0x49874C)          # 0x43045E vtable（0x43A82C 再改成 0x49874c）
+        self.d32(0x04, a)                 # 0x430475 payload[0]
+        self.d32(0x08, b)                 # 0x43047A payload[4]
+        self.d32(0x14, typ)               # 0x430480 payload[8]
+        self.d32(0x3C, 0)                 # 0x43046A payload[0x10]（栈残留，这里取 0）
+        self.d32(0x38, 0)                 # 0x43048F 0x4020D1(...)
+        self.m[0x34] = 1                  # 0x430486 存活
+        self.d32(0x40, 0)
+        self.beh = 0
+        if (typ & 0x2F000000) == 0x23000000:      # 0x40D940 0x23 族
+            info = ENT23_INIT.get(typ)
+            if info is not None:
+                self.beh = info["beh"]
+                self.d32(0x40, self.beh)
+                for off, val in info["imm"].items():
+                    self.d32(off, val & 0xFFFFFFFF)
+                if "d_to" in info:
+                    self.d32(info["d_to"], d & 0xFFFFFFFF)
+                if info.get("d20"):       # 0x40D98E：`[+0x20] = (b<=0xF0) ? -1 : 1`
+                    self.d32(0x20, 0xFFFFFFFF if b <= 0xF0 else 1)
+
+    def d32(self, off: int, val: int) -> None:
+        self.m[off:off + 4] = int(val & 0xFFFFFFFF).to_bytes(4, "little")
+
+    def g32(self, off: int) -> int:
+        return int.from_bytes(self.m[off:off + 4], "little")
+
+    def s32(self, off: int) -> int:
+        v = self.g32(off)
+        return v - 0x100000000 if v & 0x80000000 else v
+
+    def __repr__(self) -> str:
+        return f"<Ent 0x{self.g32(0x14):08X} beh=0x{self.beh:06X} a={self.g32(4)} b={self.g32(8)} d={self.g32(0x1C)}>"
 
 class Page4Mixin:
     # ---- 0x4505B0 参数块 -----------------------------------------------
@@ -514,6 +588,9 @@ class Page4Mixin:
         self.p4_ui49c: list = []
         self.p4_emit = []             # 0x4AD55C 发射器 12 通道
         self.p4_seq = None            # 0x4CD484 序列引擎
+        self.p4_q43c: list = []       # 0x4AD43C 主实体队列（所有实体类型共用）
+        self.p4_n43c = 0
+        self.p4_other: dict[int, list] = {}   # op1/3/4/5 的记录（ctor 未实现）
         # 0x56CC4C 脚本流状态机 + 资源表（0x45DDA0/0x45DDE0）
         from pathlib import Path
         bank = ScriptBank(Path(__file__).resolve().parent.parent.parent / "resource_dec.bin")
@@ -672,6 +749,20 @@ class Page4Mixin:
     def vm_restart(self, arg: int) -> None:
         """`0x4602D0(0x56CC4C, 9)`：命令 0 的另一条路 => 进链 9（[60]）。"""
         self.vm.load_chain(arg)
+
+    def p4_vm_entity(self, op: int, rec: tuple) -> None:
+        """op1..op5 → 五个队列原语（`0x448FF0`/`0x43BDC0`/`0x43A3C0`/`0x44B140`/`0x445AA0`）。
+
+        `0x43BDC0` 的挂链方式（`0x43BE14`/`0x43BE4C`）：`[queue+0x28]` 为空 → 头，否则挂
+        `[queue+0x2C]` 尾 ⇒ **尾插**。实体内存 0x5C 字节，ctor `0x43A7F0`。
+        其它四族的 ctor（`0x4355E0`/`0x449150`/`0x43D430`/`0x448FF0`）尚未实现，只登记。
+        """
+        a, b, c, d = rec
+        if op == 2:
+            self.p4_q43c.append(Ent(a, b, c, d))       # 0x43BDC0 → 0x43A7F0
+            self.p4_n43c += 1
+        else:
+            self.p4_other.setdefault(op, []).append(rec)
 
     def p4_load_layers(self, res: list[int]) -> None:
         """op 0x0B → `0x460600`：`0x44CEE0` 清层，再 14 层 `0x44C640(i,res[i])`+`0x44CE60(i,0)`，

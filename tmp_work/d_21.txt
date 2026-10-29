@@ -1,0 +1,74 @@
+===== 0x43aeb0-0x43af60 len=0xb0 (176)
+0x43aeb0  sub      esp, 0x28
+0x43aeb3  push     ebx
+0x43aeb4  mov      ebx, ecx
+0x43aeb6  mov      eax, dword ptr [ebx + 8]
+0x43aeb9  cmp      eax, 0xf0
+0x43aebe  mov      eax, dword ptr [ebx + 0x20]
+0x43aec1  jge      0x43aec6
+0x43aec3  inc      eax
+0x43aec4  jmp      0x43aec7
+0x43aec6  dec      eax
+0x43aec7  mov      edx, dword ptr [ebx + 0x1c]
+0x43aeca  mov      ecx, dword ptr [ebx + 4]
+0x43aecd  add      edx, eax
+0x43aecf  mov      dword ptr [ebx + 0x20], eax
+0x43aed2  mov      eax, edx
+0x43aed4  dec      ecx
+0x43aed5  add      eax, 0x10
+0x43aed8  mov      dword ptr [ebx + 4], ecx
+0x43aedb  sar      eax, 5
+0x43aede  mov      dword ptr [ebx + 8], eax
+0x43aee1  add      eax, -0x18
+0x43aee4  add      ecx, -0x18
+0x43aee7  push     eax
+0x43aee8  push     ecx
+0x43aee9  mov      dword ptr [ebx + 0x1c], edx
+0x43aeec  call     0x401753
+0x43aef1  mov      ecx, dword ptr [ebx + 0x38]
+0x43aef4  add      esp, 8
+0x43aef7  mov      dword ptr [ecx + 0x14], eax
+0x43aefa  mov      dword ptr [ecx + 0x18], edx
+0x43aefd  mov      eax, dword ptr [ebx + 0x18]
+0x43af00  test     eax, eax
+0x43af02  jne      0x43af46
+0x43af04  mov      edx, dword ptr [ebx + 0x24]
+0x43af07  mov      eax, dword ptr [ebx + 8]
+0x43af0a  mov      ecx, dword ptr [ebx + 4]
+0x43af0d  push     esi
+0x43af0e  push     edi
+0x43af0f  push     0
+0x43af11  push     edx
+0x43af12  push     eax
+0x43af13  lea      edx, [esp + 0x2c]
+0x43af17  push     ecx
+0x43af18  push     edx
+0x43af19  call     0x4023c4
+0x43af1e  mov      ecx, 5
+0x43af23  mov      esi, eax
+0x43af25  lea      edi, [esp + 0x20]
+0x43af29  add      esp, 0x14
+0x43af2c  rep movsddword ptr es:[edi], dword ptr [esi]
+0x43af2e  lea      eax, [esp + 0xc]
+0x43af32  mov      ecx, 0x4ad49c
+0x43af37  push     eax
+0x43af38  call     0x401861
+0x43af3d  mov      eax, dword ptr [ebx + 0x18]
+0x43af40  pop      edi
+0x43af41  test     eax, eax
+0x43af43  pop      esi
+0x43af44  je       0x43af56
+0x43af46  cmp      dword ptr [ebx + 4], -0x18
+0x43af4a  jle      0x43af56
+0x43af4c  mov      eax, 1
+0x43af51  pop      ebx
+0x43af52  add      esp, 0x28
+0x43af55  ret      
+0x43af56  xor      eax, eax
+0x43af58  pop      ebx
+0x43af59  add      esp, 0x28
+0x43af5c  ret      
+0x43af5d  nop      
+0x43af5e  nop      
+0x43af5f  nop      
+
