@@ -2636,7 +2636,7 @@ class Page4Mixin:
     # ---- 0x451110 -------------------------------------------------------
     def p4_step(self) -> bool:
         if os.environ.get("P4_DIAG") and self.p4_frames % 120 == 0:
-            print(f"[p4diag] f={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)} "
+            print(f"[p4diag] f={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)}  lay={getattr(self.layers.tab.get(0),'bind_id',None)},{getattr(self.layers.tab.get(1),'bind_id',None)},{getattr(self.layers.tab.get(2),'bind_id',None)}"
                   f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
                   f"ent0={[(hex(e.g32(0x14)), e.node.layer, e.node.rect) for e in self.p4_q43c[:3] if e.node]} "
                   f"actor={[(hex(x.g32(0x14)), x.s32(0x04), x.s32(0x08)) for x in self.actorq]} "
