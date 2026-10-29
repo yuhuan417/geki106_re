@@ -5407,6 +5407,64 @@ class Page4Mixin:
                     self.keys.bits = (_kb & ~0x70000) | (4 << 16)   # 0x443FCA 0x45B0E0
         return True
 
+    def p4_454950_init(self) -> None:
+        """`0x454950`：页面机 `0x45952C` 调用的**阶段初始化**（在 `0x4505B0` 之后）。
+
+        ```
+        0x454953 [0x56CCA8] = 0                            帧计数复位
+        0x454961 0x45AFC0(0x4AB5B8, 0x1FC0000) → eax
+        0x454972 eax = eax*4 - 0xC8                        v1
+        0x45497F 0x45AFC0(0x4AB5B8, 0xFE000000) → eax
+        0x454989 eax = eax*4 - 0xC8                        v2
+        0x454998 0x44CDF0(0x4AA7B0, 1, v2, v1)             调色板参数（4 参，thunk 0x4010C3）
+        0x4549A1 0x44C640(0x4AA7B0, 0, 0xF0) → al          层0 ← 资源 0xF0（240）
+        0x4549B6 0x44C640(0x4AA7B0, 1, 0xF1) → al          层1 ← 资源 0xF1（241）
+        0x4549CB 0x44CE60(0x4AA7B0, 0, 0) → al             层0 色键 0
+        0x4549DD 0x44CE60(0x4AA7B0, 1, 0) → al             层1 色键 0
+                 任一 al == 0 → 0x45AF30(0x4AB5C0, 2)      退页
+        0x4549FB 0x44E620(0x4AB454, 0x17, 0, 0, 0)         指针预设（[+0x14]=0,[+0x18]=0）
+        0x454A0D 0x44EDA0(0x4AB454, 0)                     Poll
+        0x454A19 0x450140(0x4AB4B0, 0xB, 0x15) → al        波形槽 0x0B ← 资源 0x15
+        0x454A2B 0x450140(0x4AB4B0, 0,   0x2A) → al        波形槽 0x00 ← 资源 0x2A
+        0x454A3D 0x450140(0x4AB4B0, 1,   0x2B) → al        波形槽 0x01 ← 资源 0x2B
+                 任一 al == 0 → 0x45AF30(0x4AB5C0, 8)
+        0x454A5B 0x458D60(esi, 0, 0, 0, 0)                 子系统 Reset
+        0x454A6A 0x430400(&rec, 0, 0, 0x6B000001, 0)        开场状态机实体
+        0x454A99 0x40201D(0x4AD52C, &rec)                 进 ui52c
+        ```
+
+        thunk 全表：`0x4019C9`→`0x45AFC0`（位读）、`0x4010C3`→`0x44CDF0`（调色板）、
+        `0x4012DF`→`0x44C640`（层装载）、`0x4012F3`→`0x44CE60`（色键）、
+        `0x4019B0`→`0x44E620`（指针预设）、`0x401113`→`0x44EDA0`（Poll）、
+        `0x40127B`→`0x450140`（波形槽）。
+
+        ⚠ 本方法**尚未接进帧循环**：`0x44CDF0` 那 4 参调色板语义（v1/v2 = `*4-0xC8`）
+        还没定，接了会把调色板设错。层 0/1 的资源 id 0xF0/0xF1 也还没核对到具体文件名。
+        """
+        self.p4_frames = 0                                  # 0x454953
+        cfg = getattr(self, "p4_cfg", None)
+        _bits = cfg.bits if cfg is not None and hasattr(cfg, "bits") else 0
+        _v1 = ((_bits >> 17) & 0x1F) * 4 - 0xC8 if _bits else None    # 0x1FC0000（5 位）
+        _v2 = ((_bits >> 25) & 0x7F) * 4 - 0xC8 if _bits else None    # 0xFE000000（7 位）
+        if _v1 is not None:
+            self.p4_44cdf0_palette(1, _v2, _v1)              # 0x454998（语义待定，见 docstring）
+        _ok = True
+        _ok = self.p4_layer_load(0, 0xF0) and _ok            # 0x4549A1
+        _ok = self.p4_layer_load(1, 0xF1) and _ok            # 0x4549B6
+        _ok = self.p4_layer_colorkey(0, 0) and _ok           # 0x4549CB
+        _ok = self.p4_layer_colorkey(1, 0) and _ok           # 0x4549DD
+        if not _ok:
+            self.flags.set(2)                                # 0x4549EF 0x45AF30(0x4AB5C0,2)
+        self.p4_ptr_preset(0x17, 0, 0, 0)                    # 0x4549FB
+        self.p4_ptr_poll(0)                                  # 0x454A0D
+        _snd = True
+        _snd = self.p4_wave_slot(0x0B, 0x15) and _snd        # 0x454A19
+        _snd = self.p4_wave_slot(0x00, 0x2A) and _snd        # 0x454A2B
+        _snd = self.p4_wave_slot(0x01, 0x2B) and _snd        # 0x454A3D
+        if not _snd:
+            self.flags.set(8)                                # 0x454A4F 0x45AF30(0x4AB5C0,8)
+        self.p4_subsys_reset(0, 0, 0, 0)                     # 0x454A5B 0x458D60
+
     def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,
                      beh: int | None = None):
         """把字节模型 `Ent` 放进**任意**队列（`0x448FF0` 这类"进队列"入口的统一写法）。

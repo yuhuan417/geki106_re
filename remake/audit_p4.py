@@ -1870,6 +1870,20 @@ def main():
           "否则 `[+0x1C]=0xEF` 重试；`[+0x1C]` 高 4 位状态 / 低 28 位计数",
           page4.P4_44408C == [0, 1, 1, 1, 1, 1, 1, 1, 2, 3]
           and page4.P4_BEH.get(0x4435C0) is not None, "")
+    _i95 = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x454950 - ib:0x454AB0 - ib], 0x454950)}
+    check("0x454950 阶段初始化：帧计数复位 → 两个 `*4-0xC8` 调色板参数 → 层0/1 ← 资源 0xF0/0xF1 "
+          "+ 色键0（失败置退页位 2）→ 指针预设 0x17 + Poll → 波形槽 0x0B/0x00/0x01 ← 0x15/0x2A/0x2B"
+          "（失败置位 8）→ 0x458D60 Reset → 生成 0x6B000001 进 ui52c",
+          _i95.get(0x454953) == ("mov", "dword ptr [0x56cca8], 0")
+          and _i95.get(0x454972) == ("lea", "eax, [eax*4 - 0xc8]")
+          and _i95.get(0x454998) == ("call", "0x4010c3")
+          and _i95.get(0x4549A1) == ("push", "0xf0")
+          and _i95.get(0x454A19) == ("push", "0x15")
+          and _i95.get(0x454A2B) == ("push", "0x2a")
+          and _i95.get(0x454A3D) == ("push", "0x2b")
+          and _i95.get(0x454A6C) == ("push", "0x6b000001")
+          and callable(getattr(page4.Page4Mixin, "p4_454950_init", None)), "")
     _ctor = {i.address: (i.mnemonic, i.op_str)
              for i in _mdk.disasm(img[0x43D785 - ib:0x43D7A8 - ib], 0x43D785)}
     _free = {i.address: (i.mnemonic, i.op_str)
