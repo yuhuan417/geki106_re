@@ -1450,6 +1450,35 @@ def main():
     _t7[4] = 3                                              # sel=3 → k=3+4=7
     _st.pack_into("<I", _t7, 0x740 + 7 * 0x54, 0x9ABC)
     _c7v3 = _c7.p4_45c740(2)
+    from geki import Record as _Rec
+    class _PS(_Z):
+        def __init__(self):
+            super().__init__()
+            class _I: pass
+            self.inp = _I()
+            self.inp.rec = _Rec()
+        def p4_ptr(self):
+            return (0x140, 0x100)
+    _ps = _PS()
+    class _Nd:
+        dst = None
+    _pe = page4.Ent(0x100, 0x100, 0x1, 0)
+    _pe.d32(0x18, 1)
+    _pe.node = _Nd()
+    _ra = page4._beh_type1_follow(_ps, _pe)
+    _dstA = _pe.node.dst
+    _ps.inp.rec.b1 = True
+    _pe.d32(0x04, 0x100)
+    _pe.d32(0x08, 0x100)
+    _pe.node.dst = None
+    _rb = page4._beh_type1_follow(_ps, _pe)
+    check("0x4466F0（自机行为 A）：b1==0 且 r1==0 时按 (d+3)>>2 逼近指针；"
+          "b1!=0 且 r1==0 时**不移动**；显示节点摆到 (x-0x18, y-0x18)；返回 [e+0x18]!=0",
+          _ra is True and _dstA == (0x110 - 0x18, 0x100 - 0x18)
+          and _rb is True and _pe.g32(0x04) == 0x100, "")
+    check("0x4466F0 的输入字节是 rec.b1(0x4AB595) / rec.r1(0x4AB599)，不是位域",
+          img[0x4466FE - ib:0x446703 - ib] == bytes([0xA0, 0x95, 0xB5, 0x4A, 0x00])
+          and img[0x446705 - ib:0x44670A - ib] == bytes([0xA0, 0x99, 0xB5, 0x4A, 0x00]), "")
     check("0x45C740：索引 = byte[this+4] + idx*2，记录 0x54 字节，"
           "byte[this+5] 选基址 +8 或 +0x740；返回记录首 dword",
           _c7v1 == 0x1234 and _c7v2 == 0x5678 and _c7v3 == 0x9ABC, "")

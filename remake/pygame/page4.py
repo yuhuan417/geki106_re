@@ -1313,26 +1313,48 @@ def _beh_type1_follow_b(self, e) -> bool:
 
 
 def _beh_type1_follow(self, e) -> bool:
-    """`0x4466F0`（type 1 行为 A）：以 1/4 步进逼近自机指针位置。"""
+    """`0x4466F0`（type 1 行为 A）：`b1`/`r1` 两个输入字节决定「跟随」还是「调用 0x446470」。
+
+    ```
+    0x4466F3 if (!0x446600(e)) return false
+    0x4466FE al = byte[0x4AB595]   ; = rec.b1（按钮1 按住）
+    0x446705 al = byte[0x4AB599]   ; = rec.r1（按钮1 释放沿）
+    0x44670A b1 != 0 → 0x446747：若 r1 == 0 → 0x446756（不移动），否则 0x44674B
+    0x44670C b1 == 0：r1 != 0 → 0x44674B，否则 0x446710（插值）
+    0x44674B 0x446470(e, 0, 1)
+    ── 0x446710 插值 ──
+    0x446710 dx = [0x4AB59C] - [e+4] ; dy = [0x4AB5A0] - [e+8]
+    0x446726 if (dx >= 0) dx += 3 ; dx >>= 2（sar）
+    0x446732 同 dy
+    ── 0x446756 共用尾 ──
+    0x446756 0x45A690(x, y) → [0x56CC8C] = eax, [0x56CC90] = edx
+    0x44676E 0x45A690(x - 0x18, y - 0x18) → 显示节点 [+0x14]/[+0x18]
+    0x44678F return [e+0x18] != 0
+    ```
+    """
     if not p4_446600(self, e):
         return False
-    b1 = (self.inp.rec.key >> 1) & 1 if hasattr(self.inp.rec, "key") else 0
-    b5 = 0
+    b1 = bool(getattr(self.inp.rec, "b1", 0))               # 0x4466FE byte[0x4AB595]
+    r1 = bool(getattr(self.inp.rec, "r1", 0))               # 0x446705 byte[0x4AB599]
     if b1:
-        if b5:
-            p4_446470(self, e, 0, 1)
-    elif not b5:
+        if r1:                                              # 0x446747 test al,al / jne 落 0x44674B
+            p4_446470(self, e, 0, 1)                        # 0x446751
+    elif r1:                                                # 0x44670C jne 0x44674B
+        p4_446470(self, e, 0, 1)                            # 0x446751
+    else:                                                   # 0x446710
         px, py = self.p4_ptr()
         dx = px - e.s32(0x04)
         dy = py - e.s32(0x08)
-        dx = (dx + 3) >> 2 if dx >= 0 else dx >> 2      # 0x446726
-        dy = (dy + 3) >> 2 if dy >= 0 else dy >> 2      # 0x446732
+        dx = (dx + 3) >> 2 if dx >= 0 else dx >> 2          # 0x446726/0x44672D
+        dy = (dy + 3) >> 2 if dy >= 0 else dy >> 2          # 0x446732/0x44673C
         e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)
         e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
-    self.p4_player_pos = (e.s32(0x04), e.s32(0x08))
+    nx, ny = p4_45A690(e.s32(0x04), e.s32(0x08))            # 0x44675E（恒等）
+    self.p4_player_pos = (nx, ny)                           # 0x56CC8C / 0x56CC90
+    ox, oy = p4_45A690(nx - 0x18, ny - 0x18)                # 0x44677C
     if e.node is not None:
-        e.node.dst = (e.s32(0x04), e.s32(0x08))
-    return True
+        e.node.dst = (ox, oy)                               # 0x446787
+    return e.g32(0x18) != 0                                 # 0x44678F
 
 
 def _beh_447410(self, e) -> bool:
