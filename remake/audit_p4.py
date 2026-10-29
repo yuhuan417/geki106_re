@@ -1305,6 +1305,25 @@ def main():
     check("0x460E00 十次一循环：>= 0xA 或 == -1 转 0x45F690",
           img[0x460E03 - ib:0x460E0B - ib] == bytes([0x83, 0xF8, 0x0A, 0x7D, 0x0C, 0x83, 0xF8, 0xFF]), "")
 
+    class _Stub:
+        def __init__(self):
+            self.calls = []
+        def _p4_q(self, n):
+            return n
+        def spawn(self, q, t, x, y, extra=None):
+            self.calls.append((t, x, y, extra))
+    _st = _Stub()
+    page4.Page4Mixin.p4_45e4a0(_st, 7, 100, 50)
+    _v7 = list(_st.calls)
+    _st = _Stub()
+    page4.Page4Mixin.p4_45e4a0(_st, 1000, 100, 50)
+    _v1000 = list(_st.calls)
+    check("0x45E4A0 数字渲染：v=7 → 首位数 6 @x-0xC 与 cnt 位 10 @x+0xC；v=1000 → 位数 0 与分组 13",
+          _v7 == [(0x4100000C, 88, 50, 6), (0x4100000C, 112, 50, 10)]
+          and _v1000 == [(0x4100000C, 88, 50, 0), (0x4100000C, 112, 50, 13)], "")
+    check("0x45E4A0 的三条发射路径都进 0x4AD4CC（0x45E552 / 0x45E5A0）",
+          img[0x45E552 - ib:0x45E557 - ib] == bytes([0xB9, 0xCC, 0xD4, 0x4A, 0x00])
+          and img[0x45E5A0 - ib:0x45E5A5 - ib] == bytes([0xB9, 0xCC, 0xD4, 0x4A, 0x00]), "")
     check("0x45AFF0 与 0x45B030 只差最后一条：neg eax(0x45B001) vs inc eax(0x45B041) ⇒ 语义相反",
           img[0x45AFFD - ib:0x45B003 - ib] == bytes([0xF7, 0xD8, 0x1B, 0xC0, 0xF7, 0xD8])
           and img[0x45B03D - ib:0x45B042 - ib] == bytes([0xF7, 0xD8, 0x1B, 0xC0, 0x40])

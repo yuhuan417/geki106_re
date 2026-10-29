@@ -2877,7 +2877,7 @@ class Page4Mixin:
         e = (n * 200) & 0xFFFFFFFF                              # 0x45F604..0x45F612
         self.p4_stat[0x4CD4A0 + 0x14] = (self.p4_stat.get(0x4CD4A0 + 0x14, 0) + e) & 0xFFFFFFFF
         self.p4_stat[0x4CD4A0 + 0x04] = (self.p4_stat.get(0x4CD4A0 + 0x04, 0) + e) & 0xFFFFFFFF
-        # 0x45F62C 0x45E4A0(mgr, e, y, x)：把数值渲染成数字实体 —— 未实现（§15）
+        self.p4_45e4a0(e, x, y)                                 # 0x45F62C 0x45E4A0(mgr, e, x, y)
         self.p4_stat[0x4CD4A0 + 0xE1] = 1                       # 0x45F631
 
     def p4_45f690(self, x: int, y: int) -> None:
@@ -2900,6 +2900,57 @@ class Page4Mixin:
             self.p4_45f690(x, y)                                # 0x460E23
         else:
             self.p4_stat[0x4CD4A0 + 0x30] = eax + 1             # 0x460E0D
+
+    def p4_45e4a0(self, value: int, x: int, y: int) -> None:
+        """`0x45E4A0(mgr, value, x, y)`：把数值渲染成至多 3 个数字实体（type `0x4100000C`）。
+
+        实参顺序由 `0x45F627..0x45F62C` 的三条 `push` 定：`push y` / `push x` / `push eax(=200n)`，
+        最后压的是 arg1 ⇒ `(mgr, value, x, y)`；函数内 `[esp+0x4C]` = arg2 = **x**、
+        `[esp+0x50]` = arg3 = **y**。
+
+        ```
+        0x45E4AA if (value >= 10) 反复 idiv 10 取余（只留最后一次 = 首位数），[esp+0x18] 复用同一槽
+        0x45E4D2 if (cnt > 3) { groups = cnt >> 2 ; cnt -= groups*4 }     ; 每 4 位进一组
+        0x45E4E8 if (q == 1 && cnt != 0) q = 0                            ; 首位数 1 被丢弃
+        0x45E4F3 bx = x + 0xC
+        0x45E4FC if (q) bx -= 0xC ; 0x45E503 if (cnt) bx -= 0xC ; 0x45E50E if (groups) bx -= 0xC
+        0x45E513 q       ? spawn(0x4100000C, bx, y, q-1)         → 0x4AD4CC
+        0x45E55F cnt     ? spawn(0x4100000C, bx+=0x18, y, cnt+9) → 0x4AD4CC
+        0x45E5AD groups  ? spawn(0x4100000C, bx+=0x18, y, groups+0xC)
+        ```
+        """
+        q = value & 0xFFFFFFFF
+        cnt = 1
+        groups = 0
+        if q >= 0xA:                                        # 0x45E4AA
+            while True:
+                d = abs(q) // 10
+                if q < 0:
+                    d = -d
+                q = d                                       # 0x45E4C0 idiv（商向零）
+                cnt += 1                                    # 0x45E4C8
+                if q < 0xA:                                 # 0x45E4C9
+                    break
+        if cnt > 3:                                         # 0x45E4D2
+            groups = cnt >> 2                               # 0x45E4D9
+            cnt -= groups * 4                               # 0x45E4E4
+        if q == 1 and cnt != 0:                             # 0x45E4E8
+            q = 0                                           # 0x45E4F1
+        bx = x + 0xC                                        # 0x45E4F9
+        if q:
+            bx -= 0xC                                       # 0x45E4FE
+        if cnt:
+            bx -= 0xC                                       # 0x45E505
+        if groups:
+            bx -= 0xC                                       # 0x45E510
+        if q:                                               # 0x45E513
+            self.spawn(self._p4_q("ui4cc"), 0x4100000C, bx, y, q - 1)
+            bx += 0x18                                      # 0x45E5AA
+        if cnt:                                             # 0x45E55F
+            self.spawn(self._p4_q("ui4cc"), 0x4100000C, bx, y, cnt + 9)
+            bx += 0x18
+        if groups:                                          # 0x45E5AD
+            self.spawn(self._p4_q("ui4cc"), 0x4100000C, bx, y, groups + 0xC)
 
     # ---- `0x43CCC0` 子弹→目标的命中处置（§16.208）----
     def p4_43ccc0(self, b, tgt) -> None:
