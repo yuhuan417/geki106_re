@@ -2335,8 +2335,8 @@ class Page4Mixin:
         self.band_draw()                          # S16 0x451457 0x4562A0
         if self.p4_collide() is not None:          # 0x4017FD → 0x43BF60（vtable 初始化，无副作用）
             self.p4_collide_pair(self._p4_q("ui40c"), self.p4_q43c)   # 0x451480 0x43BFD0(0x4AD40C,0x4AD43C)
-            self.p4_collide_pair(self._p4_q("ui46c"), self.p4_q43c)   # 0x451493 0x43C060(0x4AD46C,0x4AD43C)
-            self.p4_collide_pair(self._p4_q("ui40c"), self._p4_q("ui49c"))  # 0x4514A6 0x43C0F0(0x4AD40C,0x4AD49C)
+            self.p4_43c060(self._p4_q("ui46c"), self.p4_q43c)         # 0x451493 0x43C060(0x4AD46C,0x4AD43C)
+            self.p4_43c0f0(self._p4_q("ui49c"), self._p4_q("ui40c"))  # 0x4514A6 0x43C0F0(0x4AD49C,0x4AD40C)
         self.p4_bg_update()                       # S21 第一条 0x458E75 → 0x457BD0
         self.p4_dispatch()                        # S21 0x4514AD 0x458E70
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
@@ -2962,6 +2962,32 @@ class Page4Mixin:
         if b.g32(0x18) != 0:                                    # 0x43D0BF
             return
         b.d32(0x10, 0)                                          # 0x43D0C6 byte
+
+    def p4_43c060(self, qa, qb) -> int:
+        """`0x43C060(a, b)`：与 `0x43BFD0` 同形，但有两处不同（**不是同一个函数**）。
+
+        ```
+        0x43C075 0x45B030(0x56CCB8, 2)          ; 注意是 0x45B030，不是 0x45AFF0
+        0x43C083 jne 0x43C08D                   ; 非 0 时**不整体跳过**，只跳过下面的类型过滤
+        0x43C085 eax = [esi+0x14] ; test ah,0x80 ; je 跳过该 esi
+        ```
+
+        ⇒ 当 `0x56CCB8` 的 bit2 为 0 时，只处理**类型带 0x8000 位**的实体。
+        """
+        hits = 0
+        fast = bool(self.p4_stat.get(0x56CCB8, 0) & 0x4)        # 0x43C075
+        for e in list(qa):
+            if not e.g32(0x10):                                 # 0x43C094
+                continue
+            if not fast and not (e.g32(0x14) & 0x8000):         # 0x43C085 test ah,0x80
+                continue
+            for t in list(qb):
+                if not t.g32(0x10):
+                    continue
+                if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):   # 0x43C0A9
+                    self.p4_hit_cb(t, e)                        # 0x43C0B2
+                    hits += 1
+        return hits
 
     def p4_43c0f0(self, qa, qb) -> int:
         """`0x43C0F0(a, b)`：与 `0x43BFD0` 同形，但命中回调是 `0x43CCC0`（`0x43C135`）。"""
