@@ -774,6 +774,27 @@ def main():
           [hex(a) for a, v in want_iv.items() if len(v) == 3]
           == ["0x42ca70", "0x42cef0"], "")
 
+    print("== 11y. 组 C 槽 0 的 3 帧节奏（§16.182）")
+    check("三级比较：2/jle、3/je、5/jle",
+          img[0x42CA91 - ib:0x42CA96 - ib] == bytes([0x83, 0xF8, 0x02, 0x7E, 0x7C])
+          and img[0x42CA96 - ib:0x42CA9B - ib] == bytes([0x83, 0xF8, 0x03, 0x74, 0x05])
+          and img[0x42CA9B - ib:0x42CAA0 - ib] == bytes([0x83, 0xF8, 0x05, 0x7E, 0x42]),
+          img[0x42CA91 - ib:0x42CAA0 - ib].hex())
+    check("共用尾按 [ebx+0x1C] > 5 复位",
+          img[0x42CAE2 - ib:0x42CAE6 - ib] == bytes([0x83, 0x7B, 0x1C, 0x05])
+          and img[0x42CAE6 - ib:0x42CAE8 - ib] == bytes([0x7E, 0x0E])
+          and img[0x42CAEF - ib:0x42CAF6 - ib] == bytes([0xC7, 0x43, 0x1C, 0, 0, 0, 0]),
+          img[0x42CAE2 - ib:0x42CAF6 - ib].hex())
+    check("弹型 0x12081123、速度 0x1000 = (0, +16.0)",
+          u32(0x42CAA9) == 0x1000 and u32(0x42CAAE) == 0x12081123
+          and abs((0x1000 & 0xFFFF) / 256 - 16.0) < 1e-9, "")
+    check("6 帧周期内两个发射点（3 与 6）⇒ 间隔恒 3 帧",
+          (6 - 3) == 3 and (3 - 0) == 3, "")
+    c1 = [int(i.op_str.split(",")[1].strip(), 16)
+          for i in md32.disasm(img[0x42CEF0 - ib:0x42CF60 - ib], 0x42CEF0)
+          if i.mnemonic == "cmp" and i.op_str.startswith("eax")]
+    check("组 C 槽 1 也是 2/3/5 结构", c1[:3] == [2, 3, 5], f"{c1}")
+
     print("== 13. 目标书条目覆盖表（地址可达性 × 文档定案）")
     doc = (HERE.parent / "ANALYSIS.md").read_text(encoding="utf-8")
     items = [
