@@ -1432,6 +1432,66 @@ def _beh_23000003(self, e) -> bool:
 # `0x40E2F0`：243 项字节表（x-0xF0 索引 → case 选择子，`0x40E2E0` 为 4 项跳表）
 ENT23_SW03 = [0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
 
+# ---- 特殊类 `0x42C4D0` 的 12 项行为（§16.176 / §16.180 / §16.181 / §16.182）----
+# 键 = 行为地址；值 = (间隔阈值, ((弹型, 速度, x 偏移), ...), 节奏模式)
+#   节奏模式 "single"   ：[+0x1C] > 阈值即发，发后清零（每 阈值+1 帧一发）
+#   节奏模式 "cadence3" ：帧 3 发、帧 6 发并清零（相邻间隔恒 3 帧，§16.182）
+# 只登记**速度已从 exe 读出**的 8 个槽；0x42D150/0x42D4A0/0x42D260/0x42D6A0
+# 的速度来源未定案（不压大常数），故不登记 —— 未登记即"未实现"。
+P4_SPAWN_SLOTS = {
+    0x42C810: (5, ((0x120B1121, 0x00000E00, 0x10),), "single"),
+    0x42CC50: (5, ((0x12071126, 0xF4000A00, 0x10),
+                   (0x12071126, 0x0C000A00, 0x10)), "single"),
+    0x42D070: (4, ((0x120F112A, 0x00000F00, 0x10),), "single"),
+    0x42D370: (6, ((0x120E112D, 0xFA000A64, 0x10),
+                   (0x120E112D, 0x06000A64, 0x10)), "single"),
+    0x42C8F0: (7, ((0x12091122, 0x04280D00, 0x10),), "single"),
+    0x42CD70: (5, ((0x12061127, 0xF6000A00, 0x10),
+                   (0x12061127, 0x0A000A00, 0x10),
+                   (0x12061127, 0x0A0008E0, 0x10),
+                   (0x12061127, 0xF60008E0, 0x10)), "single"),
+    0x42CA70: (5, ((0x12081123, 0x00001000, 0x10),), "cadence3"),
+    0x42CEF0: (5, ((0x12061128, 0xFA000C00, 0x10),
+                   (0x12061128, 0x06000C00, 0x10)), "cadence3"),
+}
+
+
+def _p4_slot_behaviour(spec):
+    """生成一个槽行为（12 项表共用骨架，§16.181）。"""
+    thr, shots, mode = spec
+
+    def beh(self, e) -> bool:
+        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)          # 0x42CA7D 帧计数
+        t = e.s32(0x1C)
+        owner = e.p.get("owner")                             # 0x42CA7A ebp=[+0x20]
+        if self.p4_btn_attack() and owner is not None:       # 0x42CA81 byte[0x4AB594]
+            if mode == "cadence3":
+                # 0x42CA91 cmp 2/jle → 0x42CB12（连 SE 都不播）
+                if t > 2:
+                    if t == 3 or t > 5:                      # 0x42CA96 je / 0x42CA9B jle
+                        for tw, vel, dx in shots:
+                            self.p4_fire_slot(owner, tw, vel, dx)
+                    if t > 5:                                # 0x42CAE2 共用尾
+                        self.p4_42C600(e)                    # 0x42CAEA
+                        e.d32(0x1C, 0)                       # 0x42CAEF
+                    self.p4_slot_se()                        # 0x42CAF6 玩家声像
+            else:
+                if t > thr:                                  # 0x42D08D cmp 阈值/jle
+                    for tw, vel, dx in shots:
+                        self.p4_fire_slot(owner, tw, vel, dx)
+                    self.p4_42C600(e)                        # 0x42C874 / 0x42CD03
+                    e.d32(0x1C, 0)                           # 0x42C879 / 0x42D0D2
+                    self.p4_slot_se()                        # 0x42C880 / 0x42D0D9
+        # 0x42C89E 存活判定：byte[ebp+0x34] 与 [ent+0x18] 同时非零
+        return bool(owner is not None and owner.s32(0x34) != 0 and e.g32(0x18) != 0)
+
+    return beh
+
+
+for _a, _spec in P4_SPAWN_SLOTS.items():
+    globals()[f"_beh_p4slot_{_a:06X}"] = _p4_slot_behaviour(_spec)
+
+
 P4_BEH: dict[int, object] = {
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
@@ -1444,6 +1504,7 @@ P4_BEH: dict[int, object] = {
     0x4466F0: _beh_type1_follow,
     0x4467D0: _beh_type1_follow_b,
     0x40E230: _beh_23000003,
+    **{a: globals()[f"_beh_p4slot_{a:06X}"] for a in P4_SPAWN_SLOTS},
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
 
@@ -2409,6 +2470,25 @@ class Page4Mixin:
             l, t, r, b = nd.rect
             dx, dy = nd.dst
             c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+
+    # ---- 特殊类槽行为用到的三个助手（§16.180/§16.181）------------------
+    def p4_fire_slot(self, owner, type_word: int, vel: int, dx: int) -> None:
+        """`0x430400` 造记录 + `0x430290` 入 `0x4AD46C`：从**发射者子对象**位置发弹。
+
+        `0x42C83A` 记录 =(速度, 弹型, y=[owner+8], x=[owner+4]+dx)；
+        记录 +0xC 是速度字段（§16.180 由"槽 0 该位为 0xE00、槽 1 改成镜像值"实证）。
+        """
+        self.spawn(self._p4_q("ui46c"), type_word,
+                   owner.s32(0x04) + dx, owner.s32(0x08), vel)
+
+    def p4_slot_se(self) -> None:
+        """`0x42C880`：声像量 = `([0x56CC8C] - 0x140) << 4`，音效号 0。"""
+        pos = getattr(self, "p4_player_pos", (0x140, 0))
+        self.p4_se_pan(0, ((int(pos[0]) - 0x140) << 4) & 0xFFFFFFFF)
+
+    def p4_42C600(self, e) -> None:
+        """`0x42C600`（`0x401776` 蹦床）：发射后动作，函数体未定案 —— 只登记调用。"""
+        e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)
 
     def p4_43B070(self, e, arg: int) -> None:
         """`0x43B070`：朝 `[0x56CC8C]/[0x56CC90]` 生成一枚实体进 **0x4AD49C** 队列

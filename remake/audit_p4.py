@@ -795,6 +795,79 @@ def main():
           if i.mnemonic == "cmp" and i.op_str.startswith("eax")]
     check("组 C 槽 1 也是 2/3/5 结构", c1[:3] == [2, 3, 5], f"{c1}")
 
+    print("== 11z. 复刻侧 P4_SPAWN_SLOTS 与 exe 对账（§16.176/§16.181）")
+    import page4 as _p4
+    slots = _p4.P4_SPAWN_SLOTS
+    check("复刻侧登记了 8 个槽（其余 4 槽速度来源未定案，不登记）",
+          len(slots) == 8, f"{len(slots)}")
+    all12 = [0x42C810, 0x42CC50, 0x42D070, 0x42D370, 0x42C8F0, 0x42CD70,
+             0x42D150, 0x42D4A0, 0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0]
+    all12.sort()
+
+    def fn_end(a):
+        """函数尾 = 首个 `ret`(0xC3) 之后出现的 `int3`(0xCC) 填充。"""
+        i = a - ib
+        seen_ret = False
+        while i < 0x497432 - ib:
+            b = img[i]
+            if b == 0xC3:
+                seen_ret = True
+            elif seen_ret and b == 0xCC:
+                return i + ib
+            i += 1
+        return 0x42D780
+
+    def records(addr):
+        """取出该函数里每次 0x430400 调用前的两个立即数 (vel, type)。"""
+        out = []
+        prev = []
+        for i in md32.disasm(img[addr - ib:fn_end(addr) - ib], addr):
+            if i.mnemonic == "call":
+                tgt = thunk(i.address + 5 + int.from_bytes(
+                    img[i.address + 1 - ib:i.address + 5 - ib], "little", signed=True))
+                if tgt == 0x430400:
+                    imms = [int(x.op_str, 16) for x in prev
+                            if x.mnemonic == "push" and x.op_str.startswith("0x")]
+                    if len(imms) >= 2:
+                        out.append((imms[-2], imms[-1]))
+                prev = []
+            else:
+                prev.append(i)
+        return out
+
+    def overwrites(addr):
+        """记录被就地改写时的速度立即数（`C7 44 24 1C imm32`）。"""
+        out = []
+        i = addr - ib
+        end = fn_end(addr) - ib
+        pat = bytes([0xC7, 0x44, 0x24, 0x1C])
+        while i < end - 7:
+            if img[i:i + 4] == pat:
+                out.append(int.from_bytes(img[i + 4:i + 8], "little"))
+            i += 1
+        return out
+
+    bad = {}
+    for addr, (thr, shots, mode) in slots.items():
+        rec = records(addr)
+        for extra in overwrites(addr):
+            rec.append((extra, rec[0][1] if rec else 0))
+        want = [(vel, tw) for tw, vel, dx in shots]
+        if rec != want:
+            bad[hex(addr)] = f"{[(hex(v), hex(t)) for v, t in rec]} != {[(hex(v), hex(t)) for v, t in want]}"
+        if mode == "single":
+            cmps = [int(i.op_str.split(",")[1].strip(), 16)
+                    for i in md32.disasm(img[addr - ib:fn_end(addr) - ib], addr)
+                    if i.mnemonic == "cmp" and i.op_str.startswith("eax")]
+            if cmps and cmps[0] != thr:
+                bad.setdefault(hex(addr), []).append(f"thr {thr} != {cmps[0]}")
+    check("8 个槽的弹型/速度/阈值与 exe 逐项一致", not bad, f"{bad}")
+    check("每槽登记的行为都已进 P4_BEH", all(a in _p4.P4_BEH for a in slots),
+          f"{[hex(a) for a in slots if a not in _p4.P4_BEH]}")
+    check("cadence3 只用于组 C 槽 0/1",
+          sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
+          == ["0x42ca70", "0x42cef0"], "")
+
     print("== 13. 目标书条目覆盖表（地址可达性 × 文档定案）")
     doc = (HERE.parent / "ANALYSIS.md").read_text(encoding="utf-8")
     items = [
