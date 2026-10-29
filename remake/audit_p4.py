@@ -1563,6 +1563,26 @@ def main():
     _jt = [int.from_bytes(img[0x4606D4 - ib + i * 4:0x4606D8 - ib + i * 4], "little")
            for i in range(15)]
     _ac = page4.Page4Mixin.p4_457380_acc
+    _map = {0: None, 6: 3, 10: 4, 16: 5, 24: 6, 32: 7,
+            48: 8, 72: 9, 108: 10, 160: 11, 240: 12}
+    _ok = True
+    for _k, _code in _map.items():
+        _idx = img[0x457938 - ib + _k]                    # 字节索引表
+        _tgt = int.from_bytes(img[0x457908 - ib + _idx * 4:0x45790C - ib + _idx * 4], "little")
+        _exp_t = [0x4577EC, 0x4577F5, 0x457800, 0x45780B, 0x457816, 0x457821,
+                  0x45782C, 0x457837, 0x457842, 0x45784D, 0x457858, 0x457861]
+        if _code is None:
+            _ok = _ok and _idx == 0 and _tgt == 0x4577EC
+        else:
+            _ok = _ok and _tgt == _exp_t[_idx]
+            _ok = _ok and int.from_bytes(
+                img[_tgt - ib + 5:_tgt - ib + 6], "little") == _code   # mov [reg],imm8 的立即数字节
+    check("0x457938 字节索引表 + 0x457908 十二项跳表：kind ∈ {0,6,10,16,24,32,48,72,108,160,240} "
+          "→ 图块码 {—,3..12}；其余与 >0xF0 一律走 0x457861 兜底",
+          _ok
+          and all(img[0x457938 - ib + k] == 11 for k in range(0xF1)
+                  if k not in _map)
+          and img[0x4577DD - ib:0x4577DD - ib + 4] == bytes([0x33, 0xC9, 0x8A, 0x88]), "")
     check("0x457750：+8 是参数区指针（[+0x38]=params[14] 步进）、+0xC 是位置、"
           "+4 是格子表（表项 3 dword、kind 在 +8）；抖动按 kind 缩放 >>6",
           img[0x457757 - ib:0x457757 - ib + 6] == bytes([0x8B, 0x46, 0x08, 0x8B, 0x7E, 0x0C])
