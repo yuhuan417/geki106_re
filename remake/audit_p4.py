@@ -896,6 +896,19 @@ def main():
           img[0x42D4D5 - ib:0x42D4D8 - ib] == bytes([0xC1, 0xE0, 0x03])
           and (25 * 8) == 200, img[0x42D4D5 - ib:0x42D4D8 - ib].hex())
 
+    def has_disp(lo_a, hi_a, val):
+        """函数区间内是否出现 `[esi+val]` 的 disp32。"""
+        return val.to_bytes(4, "little") in img[lo_a - ib:hi_a - ib]
+
+    check("0x45AAF0 读 sin 表 0x5B3AB4、0x45ABB0 读 cos 表 0x5D3E3C",
+          has_disp(0x45AAF0, 0x45AB70, 0x5B3AB4)
+          and has_disp(0x45ABB0, 0x45AC30, 0x5D3E3C), "")
+    check("0x45ABB0 的镜像中心是 cos 表端 0x5D41BF",
+          has_disp(0x45ABB0, 0x45AC30, 0x5D41BF), "")
+    check("生成器把 fsin 写 0x5B3E37、fcos 写 0x5D41BF",
+          has_disp(0x45A7E0, 0x45A830, 0x5B3E37)
+          and has_disp(0x45A7E0, 0x45A830, 0x5D41BF), "")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
