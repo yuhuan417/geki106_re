@@ -980,6 +980,15 @@ def main():
               0x4020BD: 0x447640, 0x4023B5: 0x446E20, 0x401E3D: 0x446950,
               0x402199: 0x446BD0}
 
+    def _find_imm(v: int):
+        """扫全镜像里某个 imm32 的所有出现地址。"""
+        pat = v.to_bytes(4, "little")
+        out, i = [], img.find(pat)
+        while i != -1:
+            out.append(i + ib)
+            i = img.find(pat, i + 1)
+        return out
+
     def _deep(a):
         t = thunk(a)                      # thunk() 已是"指令地址 → rel32 目标"
         n = 0
@@ -1069,6 +1078,21 @@ def main():
           img[0x4474F0 - ib:0x447503 - ib].count(bytes([0x83, 0xEA, 0x40])) == 0
           or (b"\x6a\x0c" in img[0x4474FD - ib:0x44750A - ib]
               and b"\x6a\x0c" in img[0x447596 - ib:0x4475A1 - ib]), "")
+
+    # ---- 勘误 A-57：自机类型 0x0B000001 ----
+    check("0x43C190 的立即数是 0x0AFFFFFB（⇒ 自机类型 0x0B000001）",
+          img[0x43C190 - ib:0x43C195 - ib] == bytes([0x2D, 0xFB, 0xFF, 0xFF, 0x0A]),
+          img[0x43C190 - ib:0x43C195 - ib].hex())
+    check("0x0B000001 在二进制里只出现两处（0x44372C / 0x448DBB）",
+          [hex(h) for h in _find_imm(0x0B000001)] == ["0x44372c", "0x448dbb"],
+          f"{[hex(h) for h in _find_imm(0x0B000001)]}")
+    check("0x10000001 不是自机（出现在 0x43F7D8/0x43FE59/0x440054/0x49CE45）",
+          [hex(h) for h in _find_imm(0x10000001)]
+          == ["0x43f7d8", "0x43fe59", "0x440054", "0x49ce45"],
+          f"{[hex(h) for h in _find_imm(0x10000001)]}")
+    check("复刻侧 p4_hit_cb 用 0x0B000001 判自机被弹（源码级）",
+          "0x0B000001" in open("remake/pygame/page4.py", encoding="utf-8").read()
+          and "t == 0x10000001" not in open("remake/pygame/page4.py", encoding="utf-8").read(), "")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
