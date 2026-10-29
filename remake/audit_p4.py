@@ -1604,6 +1604,27 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _sq = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x460E40 - ib:0x460E64 - ib], 0x460E40)}
+    _o = _Z()
+    _o.p4_stat[0x4CD590 + 0x3C] = 5
+    _o.p4_stat[0x4CD590 + 0x40] = 0
+    _o.sequence_start()
+    _ok1 = (_o.p4_stat[0x4CD590 + 0x30] == 6 and _o.p4_stat[0x4CD590 + 0x3C] == 4
+            and _o.p4_stat[0x4CD590 + 0x40] == 1 and _o.p4_stat[0x4CD590 + 0x44] == 1
+            and _o.sequence_started())
+    _o.p4_stat[0x4CD590 + 0x2C] = 0x1000
+    _o.sequence_start()
+    _ok2 = _o.p4_stat[0x1000 + 0x1C] == 1
+    check("0x460E40(0x4CD590) 启动序列：读 +0x3C 旧值 → [+0x30]=6 → [+0x3C]=旧值-1 → "
+          "+0x40/0x44 各 +1 → byte[[+0x2C]+0x1C]=1；0x460EE0 getter 读 +0x40",
+          _sq.get(0x460E40) == ("mov", "eax, dword ptr [ecx + 0x3c]")
+          and _sq.get(0x460E43) == ("mov", "dword ptr [ecx + 0x30], 6")
+          and _sq.get(0x460E4B) == ("mov", "dword ptr [ecx + 0x3c], eax")
+          and _sq.get(0x460E52) == ("mov", "dword ptr [ecx + 0x40], eax")
+          and _sq.get(0x460E59) == ("mov", "dword ptr [ecx + 0x44], eax")
+          and _sq.get(0x460E5F) == ("mov", "byte ptr [eax + 0x1c], 1")
+          and _ok1 and _ok2, "")
     _t5 = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x445E47 - ib:0x445ECE - ib], 0x445E47)}
     check("0x445E47 type-5 ctor：a3 的落点是 **0x445EBF** `mov [ebx+0x1C],eax`"

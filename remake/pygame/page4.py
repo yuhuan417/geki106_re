@@ -5556,12 +5556,40 @@ class Page4Mixin:
         self.p4_stat[0x4CD4A0 + 0x24] = level
 
     def sequence_started(self) -> bool:
-        """0x460EE0(0x4CD590)：序列是否已启动。"""
-        return False
+        """`0x460EE0(0x4CD590)`：`eax = [+0x40]`（getter，原样返回）。
+
+        同族的存取器（`0x460E80/EA0/EC0/EE0` = `+0x34/+0x30/+0x3C/+0x40` 的 getter）
+        说明 `0x4CD590` 是一组 32 位计数字段，本函数只读 `+0x40`。
+        """
+        return self.p4_stat.get(0x4CD590 + 0x40, 0) != 0
 
     def sequence_start(self) -> None:
-        """0x460E40(0x4CD590)：启动序列。"""
-        return
+        """`0x460E40(0x4CD590)`：启动序列。
+
+        ```
+        0x460E40 eax = [+0x3C]
+        0x460E43 [+0x30] = 6
+        0x460E4A eax-- ; 0x460E4B [+0x3C] = eax
+        0x460E4E eax = [+0x40] ; inc ; [+0x40] = eax
+        0x460E55 eax = [+0x44] ; inc ; [+0x44] = eax
+        0x460E5C eax = [+0x2C]                    ; ★ 实体指针
+        0x460E5F byte[eax+0x1C] = 1                ; 把它帧计数置 1（与 0x460D55 置 0 相对）
+        0x460E63 ret
+        ```
+
+        注意顺序：**先读 `+0x3C`，再写 `+0x30`，最后写 `+0x3C`**（读的是旧值，减 1 后写回）。
+        `+0x2C` 的写入点仍未定位（§16.281），故这里为 0 时跳过那句 `byte[..]=1`。
+        """
+        s3c = self.p4_stat.get(0x4CD590 + 0x3C, 0)
+        self.p4_stat[0x4CD590 + 0x30] = 6
+        self.p4_stat[0x4CD590 + 0x3C] = (s3c - 1) & 0xFFFFFFFF
+        self.p4_stat[0x4CD590 + 0x40] = ((self.p4_stat.get(0x4CD590 + 0x40, 0) + 1)
+                                         & 0xFFFFFFFF)
+        self.p4_stat[0x4CD590 + 0x44] = ((self.p4_stat.get(0x4CD590 + 0x44, 0) + 1)
+                                         & 0xFFFFFFFF)
+        p2c = self.p4_stat.get(0x4CD590 + 0x2C, 0)
+        if p2c:
+            self.p4_stat[p2c + 0x1C] = 1
 
     def stage_globals_begin(self) -> None:
         """0x45F5C0(0x4CD4A0)。"""
