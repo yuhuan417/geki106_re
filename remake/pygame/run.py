@@ -22,6 +22,7 @@ import numpy as np  # noqa: E402
 import pygame  # noqa: E402
 
 import geki  # noqa: E402
+import audio as audio_mod  # noqa: E402
 
 # 原作分辨率固定 640x480，不允许缩放/resize
 WINDOW_SIZE = (geki.W, geki.H)
@@ -52,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--debug-hud", action="store_true", help="叠加调试信息（非原作内容）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
+    ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
+    ap.add_argument("--audio-driver", default="", help="强制 SDL 音频驱动（pulseaudio / alsa / dummy）")
     args = ap.parse_args(argv)
 
     if args.video:
@@ -62,9 +65,12 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("SDL_VIDEO_HIGHDPI_DISABLED", "1")
     # WSLg 下窗口有时会被摆到屏幕外/异常的坐标上（表现为"窗口没弹出来"但 active=True）
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", "80,80")
-    # 复刻版没有音频：把音频子系统钉成 dummy，并**不用 pygame.init()**（它会连带初始化
-    # mixer，在没有声卡的 WSLg/容器里会卡住或长时间探测 ALSA，表现为"启动就卡"）。
-    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    # 音频：mixer 由 audio.Audio 显式初始化（实测 6ms，不会卡启动；**不用 pygame.init()**，
+    # 它会连带初始化 mixer）。无头/静音跑钉 dummy，窗口模式走 WSLg 的 PulseAudio。
+    if args.headless or args.mute:
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    elif args.audio_driver:
+        os.environ["SDL_AUDIODRIVER"] = args.audio_driver
     pygame.display.init()
     pygame.font.init()
     pygame.display.set_caption("撃破伝 v1.06 — 640x480 (pages 1-3, 13)")
@@ -107,7 +113,9 @@ def main(argv: list[str] | None = None) -> int:
     inp.kbd_move = not bool(args.no_kbd_menu)   # 真机默认：方向键一按一档
     timer = geki.Timer()
     flags = geki.Flags()
-    pages = geki.Pages(data, palette, text, canvas, inp, timer, flags)
+    aud = audio_mod.Audio(enabled=not args.mute)
+    print(f"[audio] {aud.reason}", flush=True)
+    pages = geki.Pages(data, palette, text, canvas, inp, timer, flags, aud)
     pages.start(args.page)
 
     out_dir = Path(args.out)
@@ -221,6 +229,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[end] page={pages.page} frame={frame} flags=0x{flags.bits:X}")
     for line in pages.trace:
         print("[trace]", line)
+    aud.close()
     pygame.quit()
     return 0
 

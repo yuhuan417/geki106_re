@@ -89,7 +89,8 @@ MENU_EXIT_FLAGS = (0x2000000, 0x40000, 0x80000, 0x100000,
                    0x20000, 0x20000, 0x20000, 0x20000)
 
 
-# 页13 的 20 个流程脚本（槽 ← 脚本 id；0x454405..0x45458B 逐条，§16.110）
+# 页13 的 20 个波形槽装载（0x450140(mgr, 槽, wave id)；0x454405..0x45458B 逐条，§16.110）
+# 槽 0..0x13 ← wave 21..40（resource.rom 的 SE 区），是这一关的打击音色库
 P13_SCRIPTS = ((0, 0x27), (1, 0x28), (2, 0x1C), (3, 0x1C), (4, 0x16), (5, 0x1E),
                (6, 0x22), (7, 0x23), (8, 0x20), (9, 0x21), (10, 0x1D), (11, 0x15),
                (12, 0x1B), (13, 0x17), (14, 0x26), (15, 0x25), (16, 0x19),
@@ -866,8 +867,10 @@ class Pages:
     """0x459360 页机 + 页1/2/3（页4 由原 main.py 的 game 逻辑接手）。"""
 
     def __init__(self, data: dict, palette: np.ndarray, text: TextRenderer,
-                 canvas: Canvas, inp: Input, timer: Timer, flags: Flags):
+                 canvas: Canvas, inp: Input, timer: Timer, flags: Flags,
+                 audio=None):
         self.data = data
+        self.audio = audio                          # audio.Audio（None ⇒ 静音，仅记日志）
         self.pal = palette
         self.p2_stream: P2Stream | None = None
         self.p2_glyph: dict[int, bytes] = {}      # ⑩⑪ 字形条资源 80/81/82
@@ -1166,8 +1169,9 @@ class Pages:
     def page2_finish(self) -> None:
         # 0x452F80：0x44FDD0(MIDI) → 0x45A510(计时器) → 0x44D200(0xB4)+present ×2
         #          → 0x44CEE0 → 0x45B070 → 0x100/0x200→页0、0x10000→页3、else→页0xFF
-        # 0x452F83 0x44FDD0(0x4AB514) = 停 DirectMusic（复刻版无音频，仅记日志）
+        # 0x452F83 0x44FDD0(0x4AB514) = 停 DirectMusic
         # 0x452FA7 0x44D200(0xB4) → 0x458CB0(present) → 0x44D200(0xB4) → 0x458CB0(present)
+        self.midi_stop()
         self.log("page2.finish：停 MIDI（0x44FDD0）+ 两次整屏黑 + present")
         self.timer.kill()
         self.canvas.fill(0xB4)
@@ -1209,7 +1213,7 @@ class Pages:
         self.inp.set_pos(0, 0)
         # 0x45212C：0x44EDA0(0x4AB454, 0)         输入模式 0
         self.inp.set_mode(0)
-        # 0x452138：0x450140(0x4AB4B0, 1, 0x24)   声音/影片条目（DSound，0x4A4860=" DSBuffer!"）
+        # 0x452138：0x450140(0x4AB4B0, 1, 0x24)   槽1 ← wave #36（se_36）= 菜单旋律音色
         if not self.sound_bind(1, 0x24):
             self.flags.set(8)                       # 0x45214A：0x45AF30(8)
         # 0x452156：0x458D60(page, 0,0,0,0) 场景重置
@@ -1225,11 +1229,34 @@ class Pages:
         self.enter_ok = self.flags.is_empty()
         self.log(f"page3.enter（层13←bm_mn / bm_pald / 0x5F000005 / SetPeriod0）ok={self.enter_ok}")
 
-    # 0x450140(0x4AB4B0, kind, id)：声音/影片条目（DSound + " DSBuffer!"/"Could not open wave file!"）
+    # 0x450140(mgr, slot, res)：把 wave #res 装进槽 slot（槽指针数组 mgr+8+slot*4）
+    def load_wave(self, slot: int, ident: int) -> bool:
+        """`0x450140(0x4AB4B0, slot, res)`。失败打印 "Could not open wave file!"（0x4A4860）。
+
+        这是**波形装载**（页3 是槽1 ← wave #0x24；页13 是槽0..0x13 ← 0x27/0x28/…），
+        源文件是 resource.rom #21..44 的裸 s16 PCM（已解成 extracted/wave/se_XX.wav）。
+        """
+        if self.audio is None:
+            self.log(f"0x450140 load_wave(slot={slot}, id=0x{ident:X}) → 静音模式")
+            return True
+        ok = self.audio.load_wave(slot, ident)
+        self.log(f"0x450140 load_wave(slot={slot}, id=0x{ident:X}) ok={ok}")
+        return ok
+
+    # 兼容旧名（页3 进场沿用 sound_bind 这个名字）
     def sound_bind(self, kind: int, ident: int) -> bool:
-        """原件走 DirectSound 缓冲；pygame 版页1-3 不复刻音频，仅记录并返回成功。"""
-        self.log(f"0x450140 sound_bind(kind={kind}, id=0x{ident:X}) → 跳过（无音频子系统）")
-        return True
+        return self.load_wave(kind, ident)
+
+    # 0x450440(0x4AB4B0, 0)：播槽1 的下一个旋律音（频率表 0x498FEC）
+    def melody_step(self) -> None:
+        if self.audio is not None and self.audio.melody_step():
+            self.log(f"0x450440 melody step idx={self.audio.melody_idx}")
+
+    # 0x44FDD0(0x4AB514)：停 BGM
+    def midi_stop(self) -> None:
+        if self.audio is not None:
+            self.audio.bgm_stop()
+        self.log("0x44FDD0 MIDI stop")
 
     # 0x458D60(page, 0,0,0,0)：场景重置
     def scene_reset(self) -> None:
@@ -1312,7 +1339,7 @@ class Pages:
 
         顺序：`[0x56CCA8]=0` → `0x44CDF0(mgr,1,对比,亮度,-255)` → 5 层 + 建层5
         → 6 个色键 → `0x44E620(mgr,3,0,0)` 预设3 + 指针(0,0) + `0x44EDA0(mgr,0)`
-        → 20 个流程脚本（槽0..0x13）→ `0x458D60` 场景重置 → `0x44F600(0x4AB514,1,7)`
+        → 20 个波形槽装载（槽0..0x13 ← wave 21..40）→ `0x458D60` 场景重置 → `0x44F600(0x4AB514,1,7)`
         → `0x45EF10(0x4CD4A0,1)` 关卡号=1 → 生成 `0x6F000006` 入 0x4AD52C
         → `0x45A490(0x4AB570,0)` SetPeriod(0) → 返回 `0x45AFF0(0x4AB5C0,0)`。
         """
@@ -1394,6 +1421,7 @@ class Pages:
             `0x10000` → 写 `[0x4AB5C8]=0x20000`，`bit0(0x4AB5B0)`(=鍛錬) ? 页12 : 页4
             其它 → 0xFF
         """
+        self.midi_stop()                                # 0x4540A8 0x44FDD0(0x4AB514)
         self.timer.kill()                               # 0x454843/0x45484D
         self.canvas.fill(0xB4); self.present()          # 0x454867..0x454878
         self.canvas.fill(0xB4); self.present()          # 0x45487D..0x45488E
@@ -1411,18 +1439,27 @@ class Pages:
         self.log(f"page13.finish flags=0x{self.flags.bits:X} → page {self.page}"
                  f"（theatre=0x{self.theatre:X}）")
 
-    # ---- 页13 用到的三条外部调用（音频/脚本 VM 未移植，按原返回约定记账）------
+    # ---- 页13 用到的两条外部调用（脚本 VM 未移植，音频已接上）----------------
     def flow_script_load(self, slot: int, ident: int) -> bool:
-        """0x450140(0x4AB4B0, slot, id)：把流程脚本装进槽。流程 VM（0x450FE0）
-        只在页4 的 step 里 tick（唯一 caller 0x451327），页13 只是**预装载**。"""
+        """`0x450140(0x4AB4B0, slot, id)` = **波形装载**（槽数组 `mgr+8+slot*4`）。
+
+        旧文档曾把它当作"流程脚本槽"，但 0x450140 的实体是 0x401b0e 读 wave、
+        vtable+0x2c/+0x4c 做 DirectSound Lock/Unlock（失败串 0x4A4860
+        "Could not open wave file!"）；页13 的 20 项 = 槽 0..0x13 ← wave 21..40。
+        流程 VM（0x450FE0）只在页4 step 里 tick（唯一 caller 0x451327）。
+        """
         self.p13_scripts = getattr(self, "p13_scripts", {})
         self.p13_scripts[int(slot)] = int(ident)
-        return True
+        return self.load_wave(slot, ident)
 
     def midi_play(self, ident: int) -> bool:
-        """0x44F600(0x4AB514, loop=1, id)：BGM。pygame 版无音频子系统。"""
-        self.log(f"0x44F600 MIDI play id={ident}（无音频子系统，跳过）")
-        return True
+        """0x44F600(0x4AB514, loop=1, id)：BGM #id（资源 rom#1..20）。"""
+        if self.audio is None:
+            self.log(f"0x44F600 MIDI play id={ident}（静音模式）")
+            return True
+        ok = self.audio.bgm(ident, loop=True)
+        self.log(f"0x44F600 MIDI play id={ident} ok={ok}")
+        return ok
 
     # ---- 键命令 0x458FD0 --------------------------------------------------
     def key_command(self, key: int) -> None:
@@ -2777,6 +2814,7 @@ class Pages:
                     e.aux = 0
                     e.p["sel"] = sel
                     self._menu_fade_out()
+                    self.melody_step()                    # 0x425743 push 0 → 0x450440(0)
                 else:
                     # 0x4256DB..0x425729：候选为 0（「遊戲開始」）时按下确认 **不是确定**，
                     # 而是切到左列（rows 4..7）并把指针挪到对应带：
@@ -2797,8 +2835,9 @@ class Pages:
                     e.a3 = 3
                     e.p["sel"] = 0
                     self._menu_fade_out()
-            # 0x42578D：选中项变化 → 停音 + 计数清零
+            # 0x42578D：选中项变化 → 0x450440(0) 播一个旋律音 + 计数清零
             if e.a4 != sel:
+                self.melody_step()                        # 0x425796 push 0 → 0x450440(0)
                 e.aux = 0
         elif st0 == 4:
             # 0x4257AE：退出。列位（bit2）命中时把选中项的低 2 位写回键位 1/2，
@@ -3171,9 +3210,9 @@ class Pages:
                 self.p2_blits.append((lay, (sl, st, sr, sb), (dx, dy)))
 
 
-        # ⑨ 0x440663：t == -0x158 → 0x44F600(0x4AB514, 0xF, 0) 开始播 BGM（复刻版无音频）
+        # ⑨ 0x440663：t == -0x158 → 0x44F600(0x4AB514, 0xF, 0) 开始播 BGM
         if t == -0x158:
-            self.log(f"page2 t={t} BGM（0x44F600(0x4AB514,0xF,0)）")
+            self.midi_play(0xF)
 
         # ⑩⑪ 字形条（0x440679/0x4406E0/0x440750/0x4407C4/0x44086E/0x440A95）
         self._p2_glyph_strips(t)
