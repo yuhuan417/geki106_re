@@ -4718,6 +4718,9 @@ class Page4Mixin:
         """op06 `0x457C00`（立即触发）/ op07 `0x457C40`（只改参数）。
         `ch >= 0xC` ⇒ 对 12 个槽广播；block 是记录的 20 个 dword（记录 +8 起）。"""
         vals = [int.from_bytes(block[4 * i:4 * i + 4], "little", signed=True) for i in range(20)]
+        import os as _os
+        if _os.environ.get("P4_TRACE_BG"):
+            self.p4_trace_bg = True
         if getattr(self, "p4_trace_bg", False):
             print(f"[bgrec] op{op} ch={ch} count={vals[10]} flags=0x{flags:X} rep={rep}", flush=True)
         targets = range(12) if ch >= 12 else [ch]
@@ -4729,6 +4732,10 @@ class Page4Mixin:
                 slot.active = 1                          # +0x2A90
                 slot.params = list(vals)                 # 0x456D50 直拷 20 dword
                 self._bg_dispatch(slot)                  # 0x456EB0
+                if getattr(self, "p4_trace_bg", False):
+                    _b = slot.bands[0] if getattr(slot, "bands", None) else None
+                    print(f"[bgslot] op{op} i={i} nbands={len(getattr(slot,'bands',[]) or [])} "
+                          f"first={(_b.layer, _b.kind, _b.visible, _b.src, _b.dst) if _b else None}", flush=True)
             else:                                        # 0x457330
                 if not slot.active:
                     continue
