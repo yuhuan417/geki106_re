@@ -1604,6 +1604,16 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _t5 = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x445E47 - ib:0x445ECE - ib], 0x445E47)}
+    check("0x445E47 type-5 ctor：a3 的落点是 **0x445EBF** `mov [ebx+0x1C],eax`"
+          "（0x445EBC 只是 `mov eax,[ebp+0xC]` 的取值），随后 `[ebx+0x20]=0` 并 jmp 0x446237",
+          _t5.get(0x445EBC) == ("mov", "eax, dword ptr [ebp + 0xc]")
+          and _t5.get(0x445EBF) == ("mov", "dword ptr [ebx + 0x1c], eax")
+          and _t5.get(0x445EC2) == ("mov", "dword ptr [ebx + 0x20], 0")
+          and _t5.get(0x445EC9) == ("jmp", "0x446237")
+          and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
+                                     0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
     _ph = page4.Page4Mixin.p4_43c344_player_hit
     _phd = {i.address: (i.mnemonic, i.op_str)
             for i in _mdk.disasm(img[0x43C344 - ib:0x43C3A6 - ib], 0x43C344)}

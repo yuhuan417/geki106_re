@@ -3781,7 +3781,8 @@ class Page4Mixin:
         0x445EAA op = 0x45AFC0(0x4AB5B0, 0xC000)
         0x445EB5 idx = edx + op
         0x445EB9 [e+0x40] = 表[idx]
-        0x445EBC [e+0x1C] = [rec+0xC]             ; 记录第 4 个 dword
+        0x445EBC eax = [ebp+0xC] (= rec[3] = a3)  ; 记录第 4 个 dword
+        0x445EBF [e+0x1C] = eax                   ; ★ a3 落点就在这里
         0x445EC2 [e+0x20] = 0
         ```
         """
@@ -3791,7 +3792,7 @@ class Page4Mixin:
         idx = (edx + op) & 0xF                                 # 0x445EB5
         e.d32(0x40, P4_TYPE5_BEH[idx % len(P4_TYPE5_BEH)])     # 0x445EB9
         a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
-        e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x445EBC
+        e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x445EBF（load 在 0x445EBC）
         e.d32(0x20, 0)                                         # 0x445EC2
 
     def p4_44601e(self, e, rec=None) -> None:
