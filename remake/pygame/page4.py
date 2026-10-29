@@ -5011,6 +5011,31 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_446c50_capture(e1: int):
+        """`0x446C50`：**btn2（`0x4AB597`，Z/B/右键那一档）**按下时生成捕获/波纹实体。
+
+        ```
+        0x446C50 al = byte[0x4AB597]      ; e1 = 第二个扩展键字节
+        0x446C58 test al,al ; 0x446C61 je 0x446CB0   ; 没按 → 跳过
+        0x446C5E ebp = [ebx+0x1C]                    ; 子状态/帧计数指针
+        0x446C63..0x430400(&rec, [ebp+4], [ebp+8], 0x10008041, a3=ebp)
+        0x446C97 0x430290(0x4AD46C, &rec)            ; 生成到 ui46c
+        0x446CA2 0x446470(e, 1, 1)                   ; 变换操作器
+        0x446CA8 [ebx+0x20] = 1
+        ```
+
+        要点：
+        - 实体类型 **`0x10008041`**（高位 `0x10` 家族，与 `0x0B`/`0x1B` 弹幕族都不同）；
+        - 第 5 个实参是 **`ebp`（指针）**，再次印证 §16.270「`0x430400` 的 a3 原样存 dword」；
+        - 进 **ui46c**（`0x4AD46C`），不是自弹用的 ui43c。
+
+        返回 `(type, queue_flag)`：`queue_flag=True` 表示要进 ui46c。
+        """
+        if not e1:
+            return None
+        return (0x10008041, True)
+
+    @staticmethod
     def p4_self_respawn_rec():
         """`0x443729..0x443767`：自机复活——清空 ui4cc 后在 **(200,200)** 生成 `0x0B000001`（a3=3）。
 

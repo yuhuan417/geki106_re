@@ -1604,6 +1604,16 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _cap = page4.Page4Mixin.p4_446c50_capture
+    _cp = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x446C50 - ib:0x446CB0 - ib], 0x446C50)}
+    check("0x446C50 btn2(0x4AB597) 生成捕获实体 0x10008041 到 ui46c（a3=[e+0x1C] 指针）+ 0x446470(e,1,1) + [e+0x20]=1",
+          _cap(0) is None and _cap(1) == (0x10008041, True)
+          and _cp.get(0x446C50) == ("mov", "al, byte ptr [0x4ab597]")
+          and _cp.get(0x446C6C) == ("push", "0x10008041")
+          and _cp.get(0x446C91) == ("mov", "ecx, 0x4ad46c")
+          and _cp.get(0x446CA2) == ("call", "0x401aa5")
+          and _cp.get(0x446CA8) == ("mov", "dword ptr [ebx + 0x20], 1"), "")
     _ct20 = {i.address: (i.mnemonic, i.op_str)
              for i in _mdk.disasm(img[0x445F56 - ib:0x445F68 - ib], 0x445F56)}
     _src = open(page4.__file__, encoding="utf-8").read()
