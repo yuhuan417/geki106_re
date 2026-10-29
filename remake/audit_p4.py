@@ -1604,6 +1604,20 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _c41 = page4.Page4Mixin.p4_10008041_ctor
+    _c41d = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x42DABC - ib:0x42DB60 - ib], 0x42DABC)}
+    check("0x10008041（捕获/波纹）构造：半径 0x30、alive=1、a3→[+0x24]；"
+          "行为表 8 项，索引 = op + (bit2 ? 4 : 0)（neg/sbb/and 4 链，盯 CF）",
+          _c41(0, 0, 7) == (0x401285, 0x30, 1, 7)
+          and _c41(0, 1, 7) == (0x4013E8, 0x30, 1, 7)
+          and _c41(3, 0, 9) == (0x401866, 0x30, 1, 9)
+          and _c41(3, 1, 9) == (0x401EB5, 0x30, 1, 9)
+          and _c41d.get(0x42DB11) == ("sbb", "ebx, ebx")
+          and _c41d.get(0x42DB18) == ("and", "ebx, 4")
+          and _c41d.get(0x42DB3D) == ("mov", "dword ptr [esi + 0xc], 0x30")
+          and _c41d.get(0x42DB44) == ("mov", "byte ptr [esi + 0x10], 1")
+          and _c41d.get(0x42DB5B) == ("mov", "dword ptr [esi + 0x24], eax"), "")
     _cap = page4.Page4Mixin.p4_446c50_capture
     _cp = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x446C50 - ib:0x446CB0 - ib], 0x446C50)}

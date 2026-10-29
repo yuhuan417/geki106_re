@@ -5010,6 +5010,38 @@ class Page4Mixin:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
+    P4_CAP_BEH = (0x401285, 0x402338, 0x402153, 0x401866,
+                  0x4013E8, 0x401E51, 0x401CF3, 0x401EB5)
+
+    @staticmethod
+    def p4_10008041_ctor(op: int, bit2: int, a3: int):
+        """`0x42DABC`：捕获/波纹实体 **`0x10008041`** 的构造分支（ui46c 的 `0x42D780` 内）。
+
+        ```
+        0x42DABC push 2 ; 0x42DB03 0x45AFF0(0x4AB5B0, 2) → al
+        0x42DB0A push 0xC000 ; 0x42DB1B 0x45AFC0(0x4AB5B0, 0xC000) → op（0..3）
+        0x42DB0F neg bl ; 0x42DB11 sbb ebx,ebx ; 0x42DB18 and ebx,4
+                ⇒ al!=0（bit2 置位）时 ebx=4，否则 ebx=0
+        0x42DB23 eax = op + ebx                     ; 索引 ∈ 0..7
+        0x42DB2D eax = [esp + eax*4 + 0x10]         ; 8 项行为表
+        0x42DB3A [e+0x40] = eax                     ; 行为指针
+        0x42DB3D [e+0xC]  = 0x30                    ; 半径 0x30
+        0x42DB44 byte[e+0x10] = 1                   ; 构造即活
+        0x42DB4E eax = rec[0xC] ; 0x42DB5B [e+0x24] = a3
+        ```
+
+        行为表 = `(0x401285, 0x402338, 0x402153, 0x401866,
+                   0x4013E8, 0x401E51, 0x401CF3, 0x401EB5)`。
+
+        ★ 索引方向：**bit2 置位 → 取表 [4..7]**，未置位 → 取 [0..3]。
+        （`neg` 置 CF 当且仅当操作数非 0，`sbb ebx,ebx` 得 -CF，再 `and 4` ⇒ 0 或 4；
+         与 §16.272 同一类 `neg/sbb` 惯用法，必须盯 CF 而不是盯数值。）
+
+        返回 `(行为指针, 半径, alive, a3)`；`a3` 落在 **`+0x24`**（不是 `+0x20`）。
+        """
+        idx = (op & 3) + (4 if bit2 else 0)
+        return (Page4Mixin.P4_CAP_BEH[idx], 0x30, 1, a3)
+
     @staticmethod
     def p4_446c50_capture(e1: int):
         """`0x446C50`：**btn2（`0x4AB597`，Z/B/右键那一档）**按下时生成捕获/波纹实体。
