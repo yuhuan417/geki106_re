@@ -634,6 +634,50 @@ class P4Replay:
         self.flag = 0            # [this+0x9E378]
         self.count = 0           # [this+0x9E380]
 
+    def record(self, frame: bytearray) -> None:
+        """`0x45D1D0(this, frame)`：把一帧写进三数组并把该帧缓存到 `[this+0x9E370]`。
+
+        帧结构（由 `0x45D1D0` 的读取点定案，无歧义）：
+
+        ```
+        0x45D1DB 暂存 dword[frame+0x10] → 临时记录 +0（dx）
+        0x45D1DE 暂存 dword[frame+0x14] → 临时记录 +4（dy）
+        0x45D1E5 暂存 byte [frame+0]    → 临时记录 +8（btn0）
+        0x45D1EB 暂存 byte [frame+1]    → 临时记录 +9（btn1）
+        0x45D204 0x401893 → 0x45CEA0(this, pos, 临时记录)   ; 打包
+        0x45D21D 临时记录（14 字节）复制到 [this+0x9E370..]  ; 末帧缓存
+        0x45D217 count = [this+0x9E380]
+        ```
+        """
+        tmp = bytearray(16)
+        tmp[0:4] = bytes(frame[0x10:0x14])
+        tmp[4:8] = bytes(frame[0x14:0x18])
+        tmp[8] = frame[0]
+        tmp[9] = frame[1]
+        self.pack(tmp)
+        self.last = tmp                              # [this+0x9E370]
+        self.count += 1                              # [this+0x9E380]
+
+    def play(self, frame: bytearray) -> None:
+        """`0x45D2B0(this, frame)`：从三数组解出一帧填入 frame。
+
+        ```
+        0x45D2C7 0x401104 → 0x45CF20(this, pos, 临时记录)   ; 解包
+        0x45D2DC [frame+0x10] = 临时记录 +0（dx）
+        0x45D2DF [frame+0x14] = 临时记录 +4（dy）
+        0x45D2E2 byte[frame] = 临时记录 +8（btn0）
+        0x45D2E4 byte[frame+1] = 临时记录 +9（btn1）
+        0x45D2E7 byte[frame+2] = ([this+0x9E378] == 0) & btn0
+        ```
+        """
+        tmp = bytearray(16)
+        self.unpack(tmp)
+        frame[0x10:0x14] = tmp[0:4]
+        frame[0x14:0x18] = tmp[4:8]
+        frame[0] = tmp[8]
+        frame[1] = tmp[9]
+        frame[2] = ((1 if self.flag == 0 else 0) & tmp[8]) & 0xFF
+
     def pack(self, rec: bytearray) -> None:      # 0x45CEA0，rec 为 ≥10 字节记录
         bits = (((rec[9] & 1) << 1) | (rec[8] & 1))
         bits = (bits << 10) | (int.from_bytes(rec[4:8], "little") & 0x3FF)
