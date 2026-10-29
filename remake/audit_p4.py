@@ -341,6 +341,27 @@ def main():
           and img[0x445CAF - ib] == 0x3D and u32(0x445CB0) == 0x1000000,
           img[0x445CA7 - ib:0x445CB4 - ib].hex())
 
+    print("== 11i. 生成器的类型→行为表（§16.165）")
+    hits = []
+    i0 = 0x445C00 - ib
+    while i0 < 0x446320 - ib - 7:
+        if img[i0] == 0xC7 and img[i0 + 1] == 0x43 and img[i0 + 2] == 0x40:
+            hits.append((i0 + ib, int.from_bytes(img[i0 + 3:i0 + 7], "little")))
+        i0 += 1
+    got = {a: thunk(v) for a, v in hits}
+    want = {0x445CE7: 0x447640, 0x44601E: 0x447410, 0x44605E: 0x448C70,
+            0x446121: 0x448230, 0x446227: 0x447F90}
+    check("五处 [ebx+0x40] 赋值点与真实行为函数", got == want,
+          f"{ {hex(k): hex(v) for k, v in got.items()} }")
+    check("玩家实体类型 0x0B000001 = 10 + 0x0AFFFFF7",
+          10 + 0x0AFFFFF7 == 0x0B000001, "")
+    check("0x44604E 的 sub 立即数确为 0x0AFFFFF7",
+          img[0x44604E - ib:0x446053 - ib] == bytes([0x2D, 0xF7, 0xFF, 0xFF, 0x0A]),
+          img[0x44604E - ib:0x446053 - ib].hex())
+    check("0x446065 给玩家实体半径 0x10",
+          u32(0x446068) == 0x10 and img[0x446065 - ib:0x446069 - ib]
+          == bytes([0xC7, 0x43, 0x0C, 0x10]), img[0x446065 - ib:0x44606C - ib].hex())
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
