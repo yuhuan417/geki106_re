@@ -450,7 +450,7 @@ class Page4Mixin:
     def p4_enter(self) -> None:
         """阶段进场。返回语义同 `0x45AFF0(0x4AB5C0,0)`（旗标是否为空）。"""
         self.p4_frames = 0                        # [0x56CCA8]
-        self.p4_fast = True                       # 0x450D98 `[App+0x2C4] = 1`
+        self.p4_speed = 1                         # 0x450D98 `[App+0x2C4] = 1`（1=常速，8=快进，0=4×泵）
         self.p4_intro_gate = False                # [0x56CCB4]（只有 0x423B7B 置 1）
         b = self.p4_block()                       # 0x4505F5..0x450A25
 
@@ -491,10 +491,12 @@ class Page4Mixin:
         self.vm_init_script(self._p4_dword(b, 0x0E))   # 0x401D84 → 0x4602D0(0x56CC4C,?)
         self.sysf.clear()                         # 0x450D7D 0x45AF10(0x56CC84,0)
         self.vm_step_frame()                      # 0x450D88 0x402149 → 0x460350
-        self.p4_fast = True                       # 0x450D98
+        self.p4_speed = 1                         # 0x450D98 `[App+0x2C4] = 1`
         if not self.timer.set_period(0):          # 0x450DA2 0x401CA3 → 0x45A490
             self.flags.set(0x40)                  # 0x450DAB
         self.log("page4.enter（0x4505B0）：参数块 → 0x401EB0 回放头 → 0x458D60 → 21 音效槽 → VM")
+        print(f"[p4enter] flags=0x{self.flags.bits:X} vm_queue={self.vm.queue[:4]} "
+              f"intro_gate={self.p4_intro_gate}", flush=True)
 
     def p4_write_state(self, b: bytearray) -> None:
         """`0x450A3D..0x450A83`：参数块 → 状态字四个位段。
@@ -560,9 +562,10 @@ class Page4Mixin:
     def p4_step(self) -> bool:
         """页4 每帧（S1..S25）。返回 `0x45AFF0(0x4AB5C0,0)`：旗标空 ⇒ 继续。"""
         skip = False
-        if self.p4_fast and self.p4_skip_mod():   # S1-S2 0x45112B/0x451135 0x462D71
-            skip = True
-        n = 1 if self.p4_fast else 4              # S3 0x451156 neg/sbb/and al,0xFD/add 4
+        # S1-S2（0x45112B `eax=[App+0x2C4]`；`je 0x451156` 时走"常速"）：只有 [App+0x2C4]!=0
+        # 才做 `0x462D71([0x56CCA8], speed)` 取余，余数!=0 ⇒ `[esp+7]=0` 且 `jmp 0x451325` 整帧跳过。
+        skip = self.p4_speed != 0 and self.p4_skip_mod()
+        n = 1 if self.p4_speed != 0 else 4        # S3 0x451156 neg/sbb/and al,0xFD/add 4
         self.p4_pump(n)                           # S4 0x45116D
         if skip:                                  # 0x451151 jmp 0x451325：整帧跳过绘制
             self.p4_flow_vm()
@@ -578,6 +581,7 @@ class Page4Mixin:
         self.p4_dispatch()                        # S21 0x4514AD 0x458E70
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
         self.band_advance()                       # 0x456270（0x458EF0 内尾调）
+        self._p4_dbg()
         if self.p4_intro_gate:                    # S23 0x4514C3
             while self.p4_intro_frame():
                 pass
@@ -598,8 +602,7 @@ class Page4Mixin:
         if key == 2:                              # 0x451404 → 0x451B10 暂停循环
             self.p4_pause()
         elif key == 5:                            # 0x451423：`[App+0x2C4] = (旧==1 ? 8 : 1)`
-            self.p4_fast_state = 8 if self.p4_fast_state == 1 else 1
-            self.p4_fast = self.p4_fast_state == 8
+            self.p4_speed = 8 if self.p4_speed == 1 else 1
 
     # ---- 0x451630 -------------------------------------------------------
     def p4_intro_frame(self) -> bool:
@@ -668,8 +671,7 @@ class Page4Mixin:
         from geki import Flags
         self.p4_stat: dict[int, int] = {}
         self.p4_frames = 0
-        self.p4_fast = True
-        self.p4_fast_state = 1
+        self.p4_speed = 1
         self.p4_intro_gate = False
         self.p4_skip = 0
         self.sysf2 = Flags()          # 0x4AB5CC
@@ -710,7 +712,7 @@ class Page4Mixin:
     def p4_skip_mod(self) -> bool:
         """0x451135 `0x462D71([0x56CCA8], [App+0x2C4])`：快进时按余数整帧跳过。
         余数非 0 ⇒ `[esp+7]=0` 并 `jmp 0x451325`（跳过绘制段）。"""
-        f = 8 if self.p4_fast_state == 8 else 1
+        f = self.p4_speed
         if f <= 1:
             return False
         return (self.p4_frames % f) != 0
@@ -760,6 +762,25 @@ class Page4Mixin:
         （类型由 `0x43B020` 按族算出，0x23 族 → `0x31000001`）。四个几何子函数未定案，先只登记。"""
         self.p4_other.setdefault(0x4AD49C, []).append(
             (0x31000001, e.s32(0x04), e.s32(0x08), arg))
+
+    def _p4_dbg(self) -> None:
+        import os
+        if not os.environ.get("GEKI_P4_DEBUG"):
+            return
+        k = getattr(self, "_p4_dbg_n", 0)
+        self._p4_dbg_n = k + 1
+        if k % 120:
+            return
+        lay = self.layers.tab.get(2)
+        nz = 0 if lay is None else int((lay.buf != 0).sum())
+        print(f"[p4dbg] f={k} ents={len(self.p4_q43c)} lay2={nz} px "
+              f"fade_a={getattr(self,'fade_a',None)} pal_flags={getattr(self,'pal_flags',None)} "
+              f"intro={getattr(self,'p4_intro_gate',None)} flags=0x{self.flags.bits:X} "
+              f"canvas_nz={int((self.canvas.buf != 0).sum())} "
+              f"pal={self.pal[:3].tolist() if hasattr(self,'pal') else None} "
+              f"ui52c={len(self.ui52c)} out={ {k:len(v) for k,v in self.vm.out.items() if v} } "
+              f"pal_now0={None if getattr(self,'pal_now',None) is None else self.pal_now[:3].tolist()} "
+              f"canvas0={self.canvas.buf[0,:6].tolist()}", flush=True)
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。
@@ -904,6 +925,10 @@ class Page4Mixin:
         if op == 2:
             self.p4_q43c.append(Ent(a, b, c, d))       # 0x43BDC0 → 0x43A7F0
             self.p4_n43c += 1
+        elif op == 5 and c == 0x61000005:
+            # 0x61000005：init 0x42730B（`[+0x1C]=a` 当前、`[+0x20]=b` 目标、`[+0x24]=d` 步进）
+            # 链路 0 的载荷是 (-255, 0, 0x61000005, 16) = 16 帧淡入，正是开场把画面点亮的那条
+            self.spawn_flash(a, b, d)
         else:
             self.p4_other.setdefault(op, []).append(rec)
 
