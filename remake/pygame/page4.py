@@ -3751,6 +3751,27 @@ class Page4Mixin:
         """`0x45AFF0(mgr, mask)`：`word[mgr+4] & mask` 非零则返回 1，否则 0。"""
         return 1 if (self.p4_stat.get(0x4AB5B0 + 4, 0) & mask) else 0
 
+    def p4_435440(self, q, rec: int):
+        """`0x435440(queue, rec)`：**按全局开关过滤**后分配节点（0x48 字节）并挂链。
+
+        ```
+        0x43545D 0x430820(queue, rec)
+        0x435463 al = byte[0x56CCB2]
+        0x43546A if (al == 0) → 0x435490            ; 关：无条件放行
+        0x43546C eax = [rec+8] & 0x3F000000
+        0x435474 if (eax == 0x32000000) → 0x435490
+        0x43547B return 0                            ; 其它类型丢弃
+        0x435490 空闲链表 [queue+0x28]，空则 0x47C7C0(0x48) 分配
+        ```
+
+        返回 `True` = 已入队，`False` = 被过滤丢弃。
+        """
+        if self.p4_stat.get(0x56CCB2, 0) & 0xFF:              # 0x435463
+            if (rec & 0x3F000000) != 0x32000000:              # 0x43546C/0x435474
+                return False                                  # 0x43547B
+        self.p4_stat[("node_used", q)] = self.p4_stat.get(("node_used", q), 0) + 1
+        return True
+
     @staticmethod
     def p4_45a750(out, a: int, b: int, c: int, d: int):
         """`0x45A750(out, a, b, c, d)` = **纯粹的四 dword 打包**：`out = (a, b, c, d)`。

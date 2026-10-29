@@ -1527,6 +1527,16 @@ def main():
     _pn2_e = page4.Ent(0, 0, 0x1, 0)
     _pn2_e.node = _Nd2()
     _pn2.p4_445ece(_pn2_e, (0, 0, 0, 1))
+    check("0x435440 的条件过滤：byte[0x56CCB2] 非零时只放行 (类型 & 0x3F000000)==0x32000000",
+          _Z().p4_435440("ui49c", 0x12061128) is True
+          and _Z({0x56CCB2: 1}).p4_435440("ui49c", 0x12061128) is False
+          and _Z({0x56CCB2: 1}).p4_435440("ui49c", 0x32000005) is True, "")
+    check("0x45F201 的 0x32000005 入队目标是 0x4AD49C（ui49c），"
+          "入队函数是 0x435440（不是 0x43A3C0/0x448FF0）",
+          img[0x45F201 - ib:0x45F201 - ib + 5] == bytes([0xB9, 0x9C, 0xD4, 0x4A, 0x00])
+          and img[0x45F207 - ib] == 0xE8
+          and img[0x45F1DC - ib:0x45F1DC - ib + 5] == bytes([0x68, 0x05, 0x00, 0x00, 0x32])
+          and img[0x45F20C - ib:0x45F20C - ib + 4] == bytes([0xC6, 0x45, 0x2A, 0x00]), "")
     check("0x445ECE 尾段：0x45A750 是四 dword 打包（out=(a,b,c,d)）；"
           "矩形 = (0, op*0x30, 0x2F, op*0x30+0x2F)；dst=(x-0x18,y-0x18)；"
           "frame=0；随后 0x446470(e,0,1)；[0x56CC8C]=rec[0]",
