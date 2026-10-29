@@ -709,6 +709,59 @@ def main():
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
 
+    print("== 13. 目标书条目覆盖表（地址可达性 × 文档定案）")
+    doc = (HERE.parent / "ANALYSIS.md").read_text(encoding="utf-8")
+    items = [
+        (0x4593C2, "页4 handler"),
+        (0x4505B0, "阶段进场"),
+        (0x450A3D, "阶段初始化尾"),
+        (0x451110, "每帧"),
+        (0x451C50, "收尾"),
+        (0x460350, "脚本 VM"),
+        (0x445C00, "实体生成器"),
+        (0x448C70, "玩家行为"),
+        (0x43BFD0, "碰撞组1"),
+        (0x43C060, "碰撞组2"),
+        (0x43C0F0, "碰撞组3"),
+        (0x451630, "进场帧循环"),
+        (0x446450, "行为分发"),
+        (0x457380, "发射器逐帧"),
+        (0x457BD0, "发射器调度"),
+        (0x45EED0, "HUD 绘制"),
+        (0x460A90, "HUD 绘制2"),
+    ]
+
+    # 收集全部 E8/E9 的目标（并把蹦床展开到真实函数），得到"可达集合"
+    reach = set()
+    lo, hi = 0x401000 - ib, 0x497432 - ib
+    i = lo
+    while i < hi - 4:
+        if img[i] in (0xE8, 0xE9):
+            rel = int.from_bytes(img[i + 1:i + 5], "little", signed=True)
+            tgt = i + ib + 5 + rel
+            reach.add(tgt)
+            if 0x401000 <= tgt <= 0x4026FF:
+                reach.add(deep(tgt & 0xFFFFFFFF))
+        i += 1
+
+    def referenced(addr):
+        if addr in reach:
+            return True
+        # 也接受被 imm32 直接引用（跳表项、this 指针）
+        return addr.to_bytes(4, "little") in img[lo:hi]
+
+    missing = []
+    for addr, name in items:
+        ref = referenced(addr)
+        hexs = f"0x{addr:06X}"
+        documented = hexs in doc or hexs.lower() in doc
+        ok = ref and documented
+        if not ok:
+            missing.append((hexs, name, ref, documented))
+        print(f"  {'ok  ' if ok else 'MISS'} {hexs} {name:<12}"
+              f" 可达={ref} 文档={documented}")
+    check(f"目标书 {len(items)} 个入口全部可达且已在文档定案", not missing, f"{missing}")
+
     print()
     if fails:
         print(f"[audit] {len(fails)} 项失败：{fails}")
