@@ -1311,6 +1311,33 @@ def main():
                 self.p4_stat = {0x4CD590 + 0x30: 7, 0x4CD4A0 + 0x08: 50,
                                 0x4CD4A0 + 0x0C: 25, 0x4CD4A0 + 0x10: 200}
         return _S()
+    def _rks(score, th, v):
+        class _R(page4.Page4Mixin):
+            def __init__(self):
+                self.p4_stat = {0x4CD4A0 + 0x04: score, 0x4CD4A0 + 0x34: th,
+                                0x4CD590 + 0x30: v}
+                self.calls = []
+            def _p4_q(self, n):
+                return n
+            def spawn(self, *a):
+                self.calls.append(a)
+        return _R()
+    _a = _rks(10_000_000, 1000, 7)
+    page4.Page4Mixin.p4_45f2fb(_a)
+    _b = _rks(5, 1000, 7)
+    page4.Page4Mixin.p4_45f2fb(_b)
+    _c = _rks(10_000_000, 1000, 0xFFFFFFFF)
+    page4.Page4Mixin.p4_45f2fb(_c)
+    _d = _rks(10_000_001, 0x989680, 10)
+    page4.Page4Mixin.p4_45f2fb(_d)
+    check("0x45F2FB 里程门槛：分数过门槛才推进；五档阈值与加成类型按反汇编",
+          _a.p4_stat[0x4CD4A0 + 0x34] == 0xF4628 and _a.p4_stat[0x56CCB0] == 8
+          and len(_a.calls) == 1 and _a.calls[0][1] == 0x21000001
+          and _a.calls[0][4] == 0x32000003
+          and _b.calls == [] and _b.p4_stat[0x4CD4A0 + 0x34] == 1000
+          and _c.calls[0][4] == 0x32000008
+          and _d.calls[0][4] == 0x32000008
+          and _d.p4_stat[0x4CD4A0 + 0x34] == 0x989680 + 0x1E8480, "")
     check("0x45DFB0 位域拆包：低5位×10^m、两个 nibble、高字",
           img[0x45DFBA - ib:0x45DFBD - ib] == bytes([0x83, 0xE1, 0x1F])
           and img[0x45DFCC - ib:0x45DFD8 - ib] == bytes([0x8B, 0x08, 0x8D, 0x0C, 0x89, 0xD1, 0xE1, 0x4E,

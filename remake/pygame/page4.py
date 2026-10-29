@@ -3034,6 +3034,56 @@ class Page4Mixin:
         o.d16(0x0A + n * 2, 0)                          # 0x460315
         self.p4_4600f0(o)                               # 0x46031C
 
+    def p4_45f2fb(self) -> None:
+        """`0x45EFF0` 的尾段（`0x45F2FB..0x45F3F0`）：**里程门槛递进**。
+
+        分数超过当前门槛时，先按 `0x4CD590[+0x30]` 决定加哪一种加成实体，再把门槛抬到下一档。
+
+        ```
+        0x45F2FB eax = [mgr+0x34]（门槛）; ecx = [mgr+4]（分数）
+        0x45F303 if (分数 <= 门槛) → 0x45F3F0
+        0x45F30B if (门槛 == 0)    → 0x45F3F0
+        0x45F311 word[0x56CCB0] += 8
+        0x45F31E v = 0x460EA0(0x4CD590) = [0x4CD590+0x30]
+        0x45F325 if (v == -1 /*esi*/) → 0x45F368 → 0x32000008
+        0x45F334 if (v >= 0xA)        → 0x45F368 → 0x32000008
+        0x45F336 否则 → 0x430400(rec, 0x298, 0x78, 0x21000001, 0x32000003)
+        0x45F398 0x43BDC0(0x4AD43C, &rec)                 ; 入队
+        0x45F3A2 门槛递进：
+          < 0x989680 (10,000,000)  → += 0xF4240 (1,000,000)
+          < 0x1C9C380 (30,000,000) → += 0x1E8480 (2,000,000)
+          < 0x3938700 (60,000,000) → += 0x2DC6C0 (3,000,000)
+          < 0x5F5E100 (100,000,000)→ += 0x3D0900 (4,000,000)
+          否则                     → = 0
+        0x45F3F0 byte[mgr+0xE1] = 1
+        ```
+        """
+        m = 0x4CD4A0
+        th = self.p4_stat.get(m + 0x34, 0)                               # 0x45F2FB
+        score = self.p4_stat.get(m + 0x04, 0)                            # 0x45F2FE
+        if score <= th or th == 0:                                       # 0x45F303 / 0x45F30B
+            self.p4_stat[m + 0xE1] = 1                                   # 0x45F3F2
+            return
+        self.p4_stat[0x56CCB0] = (self.p4_stat.get(0x56CCB0, 0) + 8) & 0xFFFF   # 0x45F311
+        v = self.p4_stat.get(0x4CD590 + 0x30, 0)                         # 0x45F31E
+        if v == 0xFFFFFFFF or v >= 0xA:                                  # 0x45F325 / 0x45F334
+            typ = 0x32000008                                             # 0x45F368
+        else:
+            typ = 0x32000003                                             # 0x45F336
+        self.spawn(self._p4_q("ui43c"), 0x21000001, 0x298, 0x78, typ)     # 0x45F34C / 0x45F398
+        if th < 0x989680:                                                # 0x45F3A5
+            th += 0xF4240
+        elif th < 0x1C9C380:                                             # 0x45F3B6
+            th += 0x1E8480
+        elif th < 0x3938700:                                             # 0x45F3C7
+            th += 0x2DC6C0
+        elif th < 0x5F5E100:                                             # 0x45F3D8
+            th += 0x3D0900
+        else:
+            th = 0                                                       # 0x45F3E9
+        self.p4_stat[m + 0x34] = th & 0xFFFFFFFF
+        self.p4_stat[m + 0xE1] = 1                                       # 0x45F3F2
+
     def p4_45dfb0(self, v: int) -> dict:
         """`0x45DFB0(out, v)`：把 32 位值拆成 8 字节记录（**无返回值**，只写 `out`）。
 
