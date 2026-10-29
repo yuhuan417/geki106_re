@@ -1604,6 +1604,19 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _step = page4.Page4Mixin.p4_4590_step
+    _dec = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x4590DC - ib:0x4591E6 - ib], 0x4590DC)}
+    check("0x458FD0 的键映射 + 对比/亮度 ±10 无符号回绕（键20/21 对 0xFE000000、键22/23 对 0x1FC0000）",
+          _step(0, 10) == 10 and _step(94, 10) == 0 and _step(4, -10) == 0
+          and _step(99, 0) == 99 and _step(10, -10) == 0
+          and _dec.get(0x4590DC) == ("push", "0xfe000000")
+          and _dec.get(0x4590E1) == ("mov", "ecx, 0x4ab5b8")
+          and _dec.get(0x4590EB) == ("add", "eax, 0xa")
+          and _dec.get(0x45912E) == ("sub", "eax, 0xa")
+          and _dec.get(0x45910D) == ("cmp", "eax, 0x64")
+          and _dec.get(0x459163) == ("mov", "ecx, 0x4ab5b8")
+          and _dec.get(0x45916D) == ("add", "eax, 0xa"), "")
     _d = page4.Page4Mixin.p4_457d20
     _chain = [(i.address, i.mnemonic, i.op_str)
               for i in _mdk.disasm(img[0x457D24 - ib:0x457D3A - ib], 0x457D24)]

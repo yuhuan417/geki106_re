@@ -4997,6 +4997,26 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_4590_step(v: int, delta: int) -> int:
+        """`0x4590DC`/`0x45911F`/`0x45915E`/`0x4591E0`：对比/亮度字段的 ±10 循环步进。
+
+        ```
+        键20 (0x4590DC)：v = 0x45AFC0(0x4AB5B8, 0xFE000000) + 0xA ; 写回
+                          再读一次，cmp eax,0x64 ; jb → 否则写 0
+        键21 (0x45911F)：同上但 sub 0xA
+        键22 (0x45915E)：对 0x1FC0000(亮度) add 0xA，同样 cmp 0x64
+        键23 (0x4591E0)：对 0x1FC0000 sub 0xA
+        ```
+
+        **比较是无符号的**（`jb`，不是 `jl`）：所以反方向减到负数会变成极大值，
+        同样落到「≥ 0x64 ⇒ 写 0」这一支 —— 两个方向共用同一条回绕规则，值域恒为 `0..99`。
+
+        ⇒ `v' = v + delta`；若 `(v+delta) & 0xFFFFFFFF >= 0x64` 则 `v' = 0`。
+        """
+        w = (v + delta) & 0xFFFFFFFF
+        return w if w < 0x64 else 0
+
+    @staticmethod
     def p4_457d20(i: int) -> int:
         """`0x457D20(this, i)`：返回 `&(this + i*0x2A98 + 0x10)` —— 第 i 个槽的 `+0xC` 字段地址。
 
