@@ -607,11 +607,42 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
 _P4TAB = {}
 
 
+def p4_hud_unpack(v: int) -> dict:
+    """`0x45DFB0`：把 `0x4993C4` / 按 kind 表里的 dword 拆成 10 字节结构。
+
+    ```
+    0x45DFB8 [out+0] = v & 0x1F                       ; 尾数（0..31）
+    0x45DFC1 n = (v >> 5) & 7                         ; 十进制指数（0..7）
+    0x45DFCC 循环 n 次： [out+0] *= 10                 ; ⇒ 值 = 尾数 * 10^n
+    0x45DFD9 [out+4] = (v >> 8) & 0xF
+    0x45DFE6 [out+5] = (v >> 12) & 0xF
+    0x45DFF2 word[out+6] = v >> 16
+    ```
+
+    所以这些表项是**打包的十进制参数**（值 = 尾数 × 10^指数），不是字符/文本。
+    早前"低位是字符码 'A'/'B'/'F'"的读法是错的 —— `v & 0xFF` 把 5 位尾数 + 3 位指数
+    混在一起，恰好拼出可打印字符，纯属巧合。
+    """
+    mant = v & 0x1F
+    exp = (v >> 5) & 7
+    val = mant
+    for _ in range(exp):
+        val *= 10
+    return {
+        "value": val,          # [out+0] 尾数 * 10^指数
+        "mant": mant,
+        "exp": exp,
+        "b4": (v >> 8) & 0xF,  # [out+4]
+        "b5": (v >> 12) & 0xF,  # [out+5]
+        "w6": (v >> 16) & 0xFFFF,  # word[out+6]
+    }
+
+
 def p4_hud_keys(self):
     """`0x4993C4` 全局键表（256 个 dword，`build_p4_hudkeys.py` 导出）。
 
-    每项是「高位标志 + 低位字符码」的打包值（低位 0x41='A'、0x4F='O'、0x25='%' …），
-    即 HUD 文本/字形描述表。
+    每项经 `0x45DFB0`（`p4_hud_unpack`）拆成「尾数×10^指数 + 两个 4 位字段 + 一个 16 位字段」，
+    是**打包的十进制参数表**，不是文本/字形表。
     """
     tab = getattr(self, "_p4_hudkeys", None)
     if tab is None:
@@ -641,7 +672,8 @@ def p4_hud_get(self, key: int):
     0x45EFBA  0x401451→0x45E670(h, &out, 1, 0, 0)           ; 写回（待解）
     ```
 
-    本函数只做「选表 + 取第 `key & 0xFF` 项」（0x45EF50 的取值段）。
+    本函数做「选表 + 取第 `key & 0xFF` 项 + 0x45DFB0 拆包」，返回 `p4_hud_unpack` 的字典。
+    0x45EFBA 的写回（`0x45E670`，及 `key & 4` 时跳过）尚未解，故不执行。
     """
     h = getattr(self, "p4_hud", None)
     if h is None:
@@ -651,9 +683,13 @@ def p4_hud_get(self, key: int):
     idx = key & 0xFF
     if (key & 0xFF000000) == 0x21000000:        # 0x45EF73
         tab = p4_hud_keys(self)
-        return None if tab is None else tab[idx]
-    vals = getattr(self, "_p4_hud_kindvals", None)   # 0x45EF94 的按 kind 表
-    return None if not vals else vals[idx]
+        raw = None if tab is None else tab[idx]
+    else:                                        # 0x45EF94
+        vals = getattr(self, "_p4_hud_kindvals", None)
+        raw = None if not vals else vals[idx]
+    if raw is None:
+        return None
+    return p4_hud_unpack(raw)                    # 0x45EF9D → 0x45DFB0
 
 
 def p4_tables():
