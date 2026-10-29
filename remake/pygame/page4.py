@@ -5047,9 +5047,11 @@ class Page4Mixin:
             return False
         import numpy as np
         arr = np.array(pal, dtype=np.uint8)
-        if ct or br:
-            from geki import fade_palette
-            arr = fade_palette(arr, br, ct)          # a=亮度, b=对比
+        # 0x451630 传进来的对比/亮度先**只登记**，不在此处施加：
+        # `0x44CDF0 → 0x44CAA0(mgr, buf, 对比, 亮度, 淡入)` 之后才是 `0x44CCBD → 0x44B790`
+        # 的一次变换，但 `[0x4AB5B8+4]` 的静态初值是 0 ⇒ 一旦在此施加就是 (-200,-200) 的
+        # 极重压暗，与实机可玩画面矛盾。故本函数只记录，等定位该字的写入方后再按原样施加。
+        self.p4_pal_adj = (br, ct)
         self.pal = arr
         self.pal_now = self.pal
         return True

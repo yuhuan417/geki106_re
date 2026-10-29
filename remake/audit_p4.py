@@ -1618,7 +1618,9 @@ def main():
           list(_sig.parameters) == ["self", "ident", "ct", "br"]
           and (_fp(_p, 0, 0) == _p).all()
           and _fp(_p, -200, -200)[0, 0] == 55
-          and page4.Page4Mixin.p4_451630_adjust(0) == (-200, -200), "")
+          and page4.Page4Mixin.p4_451630_adjust(0) == (-200, -200)
+          and "self.p4_pal_adj = (br, ct)" in open(page4.__file__, encoding="utf-8").read()
+          and "只登记" in open(page4.__file__, encoding="utf-8").read(), "")
     _adj = page4.Page4Mixin.p4_451630_adjust
     check("0x451657..0x45168E 阶段首帧的对比/亮度：两个 7 位字段 ×4−200；"
           "亮度取 (w&0x1FC0000)>>18、对比取 (w&0xFE000000)>>25；"
