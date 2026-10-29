@@ -626,6 +626,11 @@ class Input:
         """
         self.preset = int(preset)
         self.preset_rec = P13_PRESET_TABLE.get(int(preset), b"")
+        # 预设记录第 5 字节落在 `[mgr+0x50]`＝**速度/半径**（0x44E4B5..0x44E4C5 把 14 字节拷到
+        # [mgr+0x4C]，故 [+0x50] = 记录 byte4）。预设3（页13）= 0xD6 = 214。
+        # 该值同时是键盘方向键的"整档幅值"（§10.3.2：只取符号、幅值 = 预设速度）
+        # 与鼠标单帧位移半径（`dx²+dy² > 半径²` 时限幅）。
+        self.speed = int(self.preset_rec[4]) if len(self.preset_rec) > 4 else 0
 
     def build(self, keys, mouse_buttons, mouse_delta=(0, 0), keycode: int = 0) -> Record:
         b0 = bool(mouse_buttons[0]) or keys.get("shot", False)
@@ -640,20 +645,23 @@ class Input:
         dx = dy = 0
         if self.kbd_move:                       # 0x44E7FC 的开关
             # 按下沿 → 走**一整档**（真机实测一按一项）；按住不连续推进
+            _step = self.speed or self.KBD_STEP          # [mgr+0x50]，未设预设时退回 0x80
             for name, sx, sy in (("left", -1, 0), ("right", 1, 0),
                                  ("up", 0, -1), ("down", 0, 1)):
                 held = bool(keys.get(name))
                 if held and not self._prevdir.get(name, False):
-                    dx += sx * self.KBD_STEP
-                    dy += sy * self.KBD_STEP
+                    dx += sx * _step
+                    dy += sy * _step
                 self._prevdir[name] = held
         mdx, mdy = mouse_delta
         if mdx or mdy:
-            # 0x44E9xx：鼠标相对位移限幅到 radius
+            # §10.3.2：`dx = lX << [+0x52]`（页13 的预设3 shift=0）后，
+            # `dx²+dy² > 半径²` 时限幅到半径（半径 = 预设速度 [mgr+0x50]）
+            _r = self.speed or self.RADIUS
             n = math.hypot(mdx, mdy)
-            if n > self.RADIUS:
-                mdx = int(round(mdx / n * self.RADIUS))
-                mdy = int(round(mdy / n * self.RADIUS))
+            if n > _r:
+                mdx = int(round(mdx / n * _r))
+                mdy = int(round(mdy / n * _r))
             dx += mdx; dy += mdy
         # 0x44E9A0..0x44E9E2：**先钳位移再加**（不是加完再钳）
         #   if (X + dx > X上限) dx = X上限 - X
