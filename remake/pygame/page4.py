@@ -5471,6 +5471,18 @@ class Page4Mixin:
         _intro.beh = _beh_6B000001
         self.ui52c.append(_intro)
 
+    # 0x4355E0 跳表 [eax*4+0x437074]，type-0x42000001 覆盖 5 项
+    P4_4CC_BEH = {
+        0x42000001: 0x40209A,           # 0x43567C
+        0x42000002: 0x401465,           # 0x4356E5
+        0x42000003: 0x401497,           # 0x43571C
+        0x42000004: 0x401C21,           # 0x43578A
+        0x42000005: 0x401CE9,           # 0x4358B4
+    }
+    P4_4CC_GEO = {                      # (层, l, t, r, b)；只填已从反汇编读出来的
+        0x42000001: (2, 0, 0, 0x17, 0x17),   # 0x4356A9 [edx]=2 + 0x4356AF rect(0,0,0x17,0x17)
+    }
+
     def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,
                      beh: int | None = None):
         """把字节模型 `Ent` 放进**任意**队列（`0x448FF0` 这类"进队列"入口的统一写法）。
@@ -5480,6 +5492,17 @@ class Page4Mixin:
         e = Ent(x, y, typ, a3)
         if beh is not None:
             e.beh = beh
+        else:
+            _b = self.P4_4CC_BEH.get(typ & 0xFFFFFFFF)          # 0x4355E0 按类型给默认行为
+            if _b is not None and _b in P4_BEH:
+                e.beh = P4_BEH[_b]
+                e.d32(0x40, _b)
+            _g = self.P4_4CC_GEO.get(typ & 0xFFFFFFFF)
+            if _g is not None:                             # 0x43567C 支：节点 层2 + 24×24
+                e.node = DNode(_g[0], _g[1], _g[2])
+                e.node.rect = (_g[1], _g[2], _g[3], _g[4])
+                e.node.dst = (x, y)
+                e.node.active = True
         if beh == 0x448C70:                               # 自机：ctor 在 0x445C00 的 0x44604E 支
             # 0x44605E [+0x40]=0x401E06 ; 0x446065 [+0xC]=0x10 ; 0x44606C byte[+0x10]=1
             # 0x446073 [+0x1C]=a3 ; 0x44608C [+0x18]=1
