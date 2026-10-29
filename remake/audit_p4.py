@@ -1686,6 +1686,37 @@ def main():
           and _t5.get(0x445EC9) == ("jmp", "0x446237")
           and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
                                      0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
+    _st447 = {}
+    for _a0, _a1 in ((0x4478D4, 0x4478FF), (0x4478FF, 0x44792D), (0x4478A6, 0x4478BD),
+                     (0x44792D, 0x447958), (0x44796F, 0x44799C), (0x44799C, 0x447A12),
+                     (0x4479E4, 0x447A12), (0x447AA5, 0x447AD0)):
+        _st447[_a0] = {i.address: (i.mnemonic, i.op_str)
+                       for i in _mdk.disasm(img[_a0 - ib:_a1 - ib], _a0)}
+    _tbl447 = page4.Page4Mixin.P4_447640_STATES
+    check("0x447640 状态表：每对『长/缩』状态由 `cmp dword[+0x38+4], IMM` 阈值触发切换，"
+          "长状态每 4 帧(test bl,3)、0x5000/0x7000 每 8 帧(test bl,7)动一次；"
+          "阈值 0x180/0x120/0x0F0/0x150 与步进 0x30/0x60 全部来自指令立即数",
+          _tbl447[0x1000] == (0x180, 0x1000, 3, 0x30)
+          and _tbl447[0x2000] == (0, -0x1000, 3, -0x30)
+          and _tbl447[0x3000] == (0x120, 0x1000, None, None)
+          and _tbl447[0x4000] == (0, -0x1000, 3, -0x30)
+          and _tbl447[0x5000] == (0, -0x5000, 7, -0x30)
+          and _tbl447[0x7000] == (0x150, None, 7, -0x60)
+          and _tbl447[0x9000] == (0x0F0, 0x1000, 3, 0x30)
+          and _tbl447[0xA000] == (0, -0x1000, 3, -0x30)
+          and _st447[0x4478FF].get(0x447905) == ("cmp", "dword ptr [eax], 0x180")
+          and _st447[0x4478FF].get(0x44790D) == ("add", "edx, 0x1000")
+          and _st447[0x4478D4].get(0x4478DF) == ("add", "edx, 0xfffff000")
+          and _st447[0x4478A6].get(0x4478AC) == ("cmp", "dword ptr [eax], 0x120")
+          and _st447[0x44796F].get(0x447979) == ("add", "edx, 0xffffb000")
+          and _st447[0x44796F].get(0x447982) == ("test", "bl, 7")
+          and _st447[0x44799C].get(0x4479AD) == ("cmp", "dword ptr [eax], 0x150")
+          and _st447[0x4479E4].get(0x4479EA) == ("cmp", "dword ptr [eax], 0xf0")
+          and _st447[0x447AA5].get(0x447AB9) == ("test", "bl, 3")
+          and page4.Page4Mixin.p4_447640_state(0x1000) == _tbl447[0x1000]
+          and page4.Page4Mixin.p4_447640_state(0x1005) == _tbl447[0x1000]
+          and page4.Page4Mixin.p4_447640_state(0x8000) is None
+          and page4.Page4Mixin.p4_447640_state(0x6000) is None, "")
     _o447 = {i.address: (i.mnemonic, i.op_str)
              for i in _mdk.disasm(img[0x447AA5 - ib:0x447AD0 - ib], 0x447AA5)}
     _c2d = {i.address: (i.mnemonic, i.op_str)
