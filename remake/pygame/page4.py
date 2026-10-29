@@ -991,7 +991,16 @@ class Page4Mixin:
             g[col] = (g[col] + delta) & 0xFFFFFFFF
 
     def _bg_spawn_band(self, slot, idx: int) -> None:
-        """`0x457120`：按格索引建一条带并挂到 `[+0x04]` 链表头。"""
+        """`0x457120`：按格索引建一条带并挂到 `[+0x04]` 链表头。
+
+        格数上限 890（`0x457282 mov ecx,0xA6E`）；索引越界的带在 `0x457750` 里
+        首帧就会被判出界摘链，这里直接不建（等价结果，省一次分配）。
+        """
+        n = slot.params[10]
+        if idx < 0 or idx >= n:
+            return
+        if len(slot.bands) >= 890:
+            return
         slot.bands.append(BgBand(slot, idx))
 
     def _bg_band(self, band) -> bool:
@@ -1125,8 +1134,9 @@ class Page4Mixin:
               f"bg_layer={sorted({b.layer for x in self.p4_bg for b in x.bands})} "
               f"bg_flags={[hex(x.flags) for x in self.p4_bg[:8]]} "
               f"bg_kind0={[x.grid[0][2] if x.grid else None for x in self.p4_bg[:8]]} "
-              "S0=%s" % ([self.p4_bg[0].params[10], self.p4_bg[0].params[13],
-                          self.p4_bg[0].params[14], len(self.p4_bg[0].bands)],), flush=True)
+              "S0=%s" % ([[self.p4_bg[0].params[i] for i in (10, 11, 12, 13, 14)],
+                          self.p4_bg[0].acc if self.p4_bg[0].acc < 0x80000000 else self.p4_bg[0].acc - 0x100000000,
+                          [b.pos for b in self.p4_bg[0].bands][:4]],), flush=True)
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。
