@@ -1402,6 +1402,25 @@ def main():
     _cv_z2 = _Z({0x4CD4A0 + 0xEC: 0x1000, 0x10C4: 0x30000})
     page4.Page4Mixin.p4_43c460(_cv_z2, _cv_p2, _cv_a2)
     _cv_hits2 = [c for c in _cv_z2.calls if c[0] == "ui40c"]
+    _ef = _Z({0x4CD4A0 + 0xEC: 0x1000})
+    page4.Page4Mixin.p4_45e670(_ef, {"b0": 0x21, "b4": 0, "b5": 0, "w6": 0}, 0, 1, 0)
+    _ef1 = (_ef.p4_stat.get(0x4CD4A0 + 0x18), _ef.p4_stat.get(0x4CD4A0 + 0x08))
+    _ef2 = _Z()
+    page4.Page4Mixin.p4_45e670(_ef2, {"b0": 5, "b4": 3, "b5": 0, "w6": 0}, 1, 1, 1)
+    check("0x45E670：f→[+0x20]/[+0x10]、g→[+0x18]/[+8]、h→[+0x1C]/[+0xC]；"
+          "rec[4] 的 bit0/bit1 分别屏蔽两个分支",
+          _ef1 == (0x21, 0x21) and _ef2.p4_stat == {}, "")
+    _e3 = _Z({0x4CD4A0 + 0xEC: 0x1000})
+    page4.Page4Mixin.p4_45eff0(_e3, 0x21000131, 7, 9)
+    _ev = page4.Page4Mixin.p4_45dfb0(None, page4.p4_tbl_4993c4()[0x31])["b0"]
+    check("0x45EFF0：0x21 族查 0x4993C4 → 拆包 → (type&0xF00)==0x100 时 eb=rec[0]，"
+          "分数/坐标/两路里程都加同一个值，调用计数 +1",
+          _e3.p4_stat.get(0x4CD4A0 + 0x50) == 1
+          and _e3.p4_stat.get(0x4CD4A0 + 0x26) == 1
+          and _e3.p4_stat.get(0x4CD4A0 + 0x04) == _ev
+          and _e3.p4_stat.get(0x4CD4A0 + 0x14) == _ev
+          and _e3.p4_stat.get(0x4CD4A0 + 0x18) == _ev
+          and _e3.p4_stat.get(0x4CD4A0 + 0x08) == _ev, "")
     check("0x43C55D（类型 0x10008431）：命中生成 type6（坐标为靶的 x/y），"
           "写 [[p+0x1C]+0x28]，靶被注销",
           len(_cv_hits) == 1 and _cv_hits[0][1] == 6

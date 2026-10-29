@@ -3034,6 +3034,102 @@ class Page4Mixin:
         o.d16(0x0A + n * 2, 0)                          # 0x460315
         self.p4_4600f0(o)                               # 0x46031C
 
+    def p4_45e670(self, rec, f: int, g: int, h: int) -> None:
+        """`0x45E670(mgr, rec, f, g, h)`：按 `rec[4]` 的 bit0/bit1 把 `rec[0]`（word）累加到 mgr。
+
+        ```
+        0x45E675 f = byte[arg2]  0x45E69F g = byte[arg3]  0x45E6C5 h = byte[arg4]
+        每块：if (flag) { if (!(rec[4]&1)) [mgr+A] += rec[0] ; if (!(rec[4]&2)) [mgr+B] += rec[0] }
+        f → A=0x20 B=0x10 ; g → A=0x18 B=0x08 ; h → A=0x1C B=0x0C
+        ```
+        """
+        m = 0x4CD4A0
+        val = rec["b0"] if isinstance(rec, dict) else 0
+        fl = rec["b4"] if isinstance(rec, dict) else 0
+        for flag, (fa, fb) in ((f, (0x20, 0x10)), (g, (0x18, 0x08)), (h, (0x1C, 0x0C))):
+            if not flag:
+                continue
+            if not (fl & 1):                                    # 0x45E680 / 0x45E6A6 / 0x45E6CC
+                self.p4_stat[m + fa] = (self.p4_stat.get(m + fa, 0) + val) & 0xFFFFFFFF
+            if not (fl & 2):                                    # 0x45E68F / 0x45E6B5 / 0x45E6DB
+                self.p4_stat[m + fb] = (self.p4_stat.get(m + fb, 0) + val) & 0xFFFFFFFF
+
+    def p4_45eff0(self, typ: int, arg2: int = 0, arg3: int = 0, arg4: int = 0) -> None:
+        """`0x45EFF0(mgr, type, a, b, c)`：**全局效果分发**（数值累加 + 字形 + 里程）。
+
+        ```
+        0x45F00E if ([mgr+0xEC] == 0) → ret            ; 表未就绪
+        0x45F024 [mgr+0x50]++                          ; 调用计数
+        0x45F029 eax = 0x21 族 ? [0x4993C4+i] : [[mgr+0xEC]+i*4]
+        0x45F05F 0x45DFB0(&rec, eax)                   ; 位域拆包
+        0x45F074 0x45E670(mgr, &rec, 0, 1, 0)
+        0x45F079 if (rec[4] & 4) 0x45E670(mgr, &rec, 1, 0, 0)
+        0x45F092 按 (type & 0xF00) 五路：
+          0x100 → eb = rec[0] ; word[mgr+0x26]++
+          0x200 → eb = rec[0]*2 ; word[mgr+0x26]++
+          0x300 → 0x45E670(mgr,&rec,0,0,1) ; eb = 0x45E710(&rec, 8) ; 0x45E4A0(mgr, eb, arg2, arg3)
+          0x400 → word[mgr+0x58]++ ; word[mgr+0x26]=0 ; 0x45E670(mgr,&rec,0,0,1) ; eb = 0x45E710(&rec, 2)
+          0x500 → [mgr+0x54]++ ; word[mgr+0x26]++ ; 0x45E670(mgr,&rec,0,0,1)
+                  eb = 0x45E710(&rec, word[0x56CCA4]) ; 0x45E4A0(mgr, eb, arg2, arg3)
+                  word[mgr+0x28]++ ; 满 0x32 → 造 0x32000004 入 0x4AD49C 且 word[mgr+0x28]=0
+                  byte[mgr+0x2A] 非零 → word[0x56CCB0]++ 且造 0x32000005
+          其它  → eb = rec[0]
+        0x45F244 [mgr+4] += eb ; [mgr+0x14] += eb
+        0x45F2FB 尾段 → p4_45f2fb
+        ```
+
+        未落地：`[mgr+4] > [mgr+0xE4]` 时的缓冲重建（`0x45FB80`/`0x45FBF0`/`0x45FCB0`/`0x45FBD0`）。
+        """
+        m = 0x4CD4A0
+        base = self.p4_stat.get(m + 0xEC, 0)                     # 0x45F00E
+        if not base:
+            return
+        self.p4_stat[m + 0x50] = (self.p4_stat.get(m + 0x50, 0) + 1) & 0xFFFFFFFF   # 0x45F024
+        i = typ & 0xFF
+        if (typ & 0xFF000000) == 0x21000000:                    # 0x45F031
+            tbl = p4_tbl_4993c4()
+            entry = tbl[i] if 0 <= i < len(tbl) else 0
+        else:
+            entry = self.p4_stat.get(base + i * 4, 0) & 0xFFFFFFFF
+        rec = self.p4_45dfb0(entry)                             # 0x45F05F
+        self.p4_45e670(rec, 0, 1, 0)                            # 0x45F074
+        if rec["b4"] & 4:                                       # 0x45F079
+            self.p4_45e670(rec, 1, 0, 0)                        # 0x45F08D
+        sel = typ & 0xF00                                       # 0x45F092
+        eb = rec["b0"]
+        if sel == 0x100:                                        # 0x45F0C9
+            self.p4_stat[m + 0x26] = (self.p4_stat.get(m + 0x26, 0) + 1) & 0xFFFF
+        elif sel == 0x200:                                      # 0x45F0B9
+            eb = (rec["b0"] * 2) & 0xFFFFFFFF
+            self.p4_stat[m + 0x26] = (self.p4_stat.get(m + 0x26, 0) + 1) & 0xFFFF
+        elif sel == 0x300:                                      # 0x45F0D6
+            self.p4_45e670(rec, 0, 0, 1)
+            eb = self.p4_45e710(rec, 8)                         # 0x45F0F1
+            self.p4_45e4a0(eb, arg2, arg3)                      # 0x45F10B
+        elif sel == 0x400:                                      # 0x45F212
+            self.p4_stat[m + 0x58] = (self.p4_stat.get(m + 0x58, 0) + 1) & 0xFFFF
+            self.p4_stat[m + 0x26] = 0
+            self.p4_45e670(rec, 0, 0, 1)
+            eb = self.p4_45e710(rec, 2)                         # 0x45F237
+        elif sel == 0x500:                                      # 0x45F12B
+            self.p4_stat[m + 0x54] = (self.p4_stat.get(m + 0x54, 0) + 1) & 0xFFFFFFFF
+            self.p4_stat[m + 0x26] = (self.p4_stat.get(m + 0x26, 0) + 1) & 0xFFFF
+            self.p4_45e670(rec, 0, 0, 1)
+            eb = self.p4_45e710(rec, self.p4_stat.get(0x56CCA4, 0) & 0xFFFF)   # 0x45F156
+            self.p4_45e4a0(eb, arg2, arg3)                      # 0x45F170
+            n = (self.p4_stat.get(m + 0x28, 0) + 1) & 0xFFFF    # 0x45F175
+            self.p4_stat[m + 0x28] = n
+            if n >= 0x32:                                       # 0x45F17D
+                self.spawn(self._p4_q("ui49c"), 0x32000004, arg2, arg3, 0)   # 0x45F194
+                self.p4_stat[m + 0x28] = 0                      # 0x45F1C6
+            if self.p4_stat.get(m + 0x2A, 0) & 0xFF:            # 0x45F1CF
+                self.p4_stat[0x56CCB0] = (self.p4_stat.get(0x56CCB0, 0) + 1) & 0xFFFF   # 0x45F1D3
+                # 0x45F1DA..0x45F1FB 造 0x32000005 并入队；因该区间线性反汇编失步，
+                # 入队目标队列尚未确认，故暂不生成实体（§15）。
+        self.p4_stat[m + 0x04] = (self.p4_stat.get(m + 0x04, 0) + eb) & 0xFFFFFFFF   # 0x45F252
+        self.p4_stat[m + 0x14] = (self.p4_stat.get(m + 0x14, 0) + eb) & 0xFFFFFFFF   # 0x45F25E
+        self.p4_45f2fb()                                        # 0x45F2FB
+
     def p4_45e710(self, rec, d: int) -> int:
         """`0x45E710(mgr, rec, d)`：连击倍率 —— 把 `d` 与 `rec[5]`、`rec[0]` 乘起来。
 
@@ -3057,7 +3153,10 @@ class Page4Mixin:
         a = self.p4_stat.get(m + 0x5A, 0) & 0xFFFF              # 0x45E710
         a = a if a > (d & 0xFFFF) else (d & 0xFFFF)             # 0x45E71B
         self.p4_stat[m + 0x5A] = a                              # 0x45E725
-        bl = rec[5] if len(rec) > 5 else 0                      # 0x45E729
+        if isinstance(rec, dict):
+            b0, bl = rec["b0"], rec["b5"]                        # 0x45E710 rec[0] / rec[5]
+        else:
+            b0, bl = (rec[0] if rec else 0), (rec[5] if len(rec) > 5 else 0)
         if bl == 0:
             e = 1                                               # 0x45E75B
         else:
@@ -3070,7 +3169,7 @@ class Page4Mixin:
         if c <= e:
             c = e
         self.p4_stat[m + 0x5C] = c                              # 0x45E76E
-        return (e * (rec[0] if rec else 0)) & 0xFFFFFFFF        # 0x45E772
+        return (e * b0) & 0xFFFFFFFF                            # 0x45E772
 
     def p4_45f2fb(self) -> None:
         """`0x45EFF0` 的尾段（`0x45F2FB..0x45F3F0`）：**里程门槛递进**。
@@ -3418,6 +3517,7 @@ class Page4Mixin:
             self.p4_stat[target + 0x28] = r
         self.spawn(self._p4_q("ui40c"), 6,
                    a.s32(0x04), a.s32(0x08), hit, p.g32(0x1C))  # 0x43C5F7 / 0x43C594
+        self.p4_45eff0(ta, a.s32(0x04), a.s32(0x08), 0x10008431)   # 0x43C61D
         a.d32(0x18, 0)                                          # 0x43C612
         a.d32(0x10, 0)                                          # 0x43C619
         self.p4_se_pan(0xD, (p.s32(0x04) - 0x140) << 4)         # 0x43C636
