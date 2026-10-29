@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+_P4_BLOCK: dict | None = None
+
 # 0x450BBD..0x450D59：`0x40127B(slot, script_id)` 共 21 条，全部返回真才继续
 # （任一条失败 → 0x450D62 `0x4AB5C0 |= 8`）。槽号 0..0x14、脚本 id 见右列。
 P4_SCRIPT_SLOTS = [
@@ -33,6 +35,100 @@ P4_STAT_ZERO = [0x56CC98, 0x56CC9C, 0x56CCA0, 0x56CCA4, 0x56CCA8, 0x56CCAC,
 
 class Page4Mixin:
     """页4 的 enter / step / finish（0x4505B0 / 0x451110 / 0x451C50）。"""
+
+    # ---- 0x4505B0 参数块 ------------------------------------------------
+    @staticmethod
+    def _p4_block_data() -> dict:
+        """读 `remake/p4_block.json`（`remake/build_p4_block.py` 从 `0x4505B0` 机械提取）。"""
+        global _P4_BLOCK
+        if _P4_BLOCK is None:
+            import json
+            from pathlib import Path
+            f = Path(__file__).resolve().parent.parent / "p4_block.json"
+            _P4_BLOCK = json.loads(f.read_text(encoding="utf-8"))
+        return _P4_BLOCK
+
+    def p4_block(self) -> bytearray:
+        """`0x4505B0` 的参数块（0xD2 字节，基址 `[esp+0x10]`；`0x4505F5` 先 `rep stosd` 11 次清零）。
+
+        块尺寸 = `esp+0x10..esp+0xE3` = 0xD4 字节（最后一对 16 位在 `0x450817/0x450821`）。
+
+        分支选择（`0x4505C8` 之后）：
+          · `0x450648 0x45B030(0x4AB5B0,1)`：**bit0 清 → 返回 1 → 落到 `0x450651`（A_flag 变体）**；
+            bit0 置 → `0x450686` 继续按 `si<8` / `bp<=3` 分 A / B / C。
+          · A `0x45069A`（si<8 且 bp<=3）、B `0x450943`（bp>3）、C `0x45096E`（si>=8）。
+        块内 +0x10/+0x12/+0x14/+0x16 四个字段是 (关,周目) 查表的结果，其余是常量表。
+        """
+        d = self._p4_block_data()
+        si = int(self.stage_no) & 0xFFFF          # [0x4AB5C8]
+        bp = int(self.loop_no) & 0xFFFF           # word[0x4AB5CA]
+        tbl = d["tables"]
+        if not self.sysw.test(1):                 # bit0 清 ⇒ 0x450651 变体
+            blk = bytearray(d["size"])
+            for off, val in d["branches"]["A_flag"]["imm"].items():
+                o = int(off, 16) - 0x10
+                blk[o] = val & 0xFF
+                blk[o + 1] = (val >> 8) & 0xFF
+            blk[0x1A] = 0x06                      # [esp+0x2A]=6（0x450665）
+            blk[0x14] = 0x00                      # [esp+0x24]=0
+            blk[0x12] = 0x00                      # [esp+0x22]=0
+            blk[0x16] = 0x00                      # [esp+0x26]=0
+            blk[0x19] = 0x64                      # [esp+0x29]=0x64（0x45065C..0x450678）
+            return blk
+        if si < 8 and bp <= 3:
+            name = "A"
+        elif si < 8:
+            name = "B"
+        else:
+            name = "C"
+        blk = bytearray(d["size"])
+        for off, val in d["branches"][name]["imm"].items():
+            o = int(off, 16) - 0x10
+            blk[o] = val & 0xFF
+            blk[o + 1] = (val >> 8) & 0xFF
+        def put(o: int, v: int) -> None:            # 块内偏移 → 16 位
+            blk[o] = v & 0xFF
+            blk[o + 1] = (v >> 8) & 0xFF
+        # 查表四字段在 **esp+0x20..0x27 = 块内 0x10..0x17**
+        if name == "A":
+            put(0x10, si * 4 + 0x0B)               # 0x4506F1/0x450700
+            put(0x12, tbl["0xa4"][si + bp * 8])    # 0x450833 → 0x450908
+            v = tbl["0x64"][si + bp * 8]           # 0x450903 → 0x45090D
+            put(0x14, v)
+            put(0x16, min(v // 7, 0x0C))           # 0x450915..0x450932（/7 后钳 0xC）
+            blk[0x1A] = 0xFF                       # 0x450939 [esp+0x2A]
+        elif name == "B":
+            put(0x10, si * 4 + 0x38)               # 0x450943
+            put(0x12, 0x320)                       # 0x45094A
+            put(0x14, 0x64)                        # 0x450956
+            put(0x16, 0x0C)                        # 0x45095D
+            blk[0x1A] = 0xFF                       # 0x450964
+        else:                                      # C：四张按 bp 查的表（0x4509B7..0x450A21）
+            put(0x10, tbl["0x54"][bp])             # [esp+0x20]
+            put(0x12, tbl["0x4c"][bp])             # [esp+0x22]
+            put(0x14, tbl["0x5c"][bp])             # [esp+0x24]
+            put(0x16, tbl["0x3c"][bp])             # [esp+0x26]
+            blk[0x19] = 0                          # [esp+0x29]=bl
+            blk[0x1A] = tbl["0x44"][bp] & 0xFF     # [esp+0x2A]=dl
+        blk[0x1C] = self.sysw.field_get(0xC000) & 0xFF   # 0x450644 [esp+0x2C]
+        blk[0x1F] = 1 if self.sysw.test(0x200) else 0    # 0x450611 [esp+0x2F]
+        blk[0x20] = 1 if self.sysw.test(1) else 0        # 0x450621 [esp+0x30]
+        blk[0x21] = 1 if self.sysw.test(2) else 0        # 0x450634 [esp+0x31]
+        return blk
+
+    @staticmethod
+    def _p4_sword(b: bytearray, o: int) -> int:
+        v = b[o] | (b[o + 1] << 8)
+        return v - 0x10000 if v & 0x8000 else v
+
+    @classmethod
+    def _p4_dword(cls, b: bytearray, o: int) -> int:
+        return b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)
+
+    @classmethod
+    def _p4_sbyte(cls, b: bytearray, o: int) -> int:
+        v = b[o]
+        return v - 0x100 if v & 0x80 else v
 
     # ---- 0x4505B0 -----------------------------------------------------
     def p4_enter(self) -> None:
@@ -119,8 +215,7 @@ class Page4Mixin:
         self.begin_frame()                        # 0x458CB0 → 0x44D740（含 present）
 
         # 3 流程 VM 每帧一步
-        cmd = self.flow_vm_step()                 # 0x450FE0 → 0x460350(0x56CC4C)
-        self.flow_vm_command(cmd)
+        self.p4_flow_vm()                         # 0x450FE0
 
         # 4 输入记录（+ 回放录制）
         self.inp.rec = self.inp.build_record(self.mirror)
@@ -158,6 +253,47 @@ class Page4Mixin:
         self.p4_frames += 1                       # [0x56CCA8]++
         self.band_advance()                       # 0x456270
         return self.flags.is_empty()              # 0x45AFF0(0x4AB5C0,0)
+
+    # ---- 0x450FE0 -----------------------------------------------------
+    def p4_flow_vm(self) -> None:
+        """`0x450FE0`（长度 0xF0）：流程 VM 每帧一步 + 命令字分发。
+
+        - `0x450FE5 0x402149(0x56CC4C)` 返回 0 ⇒ 本帧无命令，直接返回。
+        - `0x450FF9 0x40145B(0x4AB5B0,1)`（= `0x45B030`，**bit0 清时返回 1**）为真走 0x451091：
+          `cmd==0x2E` ⇒ `0x4AB5C0 |= 0x400000`；`cmd==0x58` ⇒ `|= 0x800000`。
+        - 否则（bit0 置）取 `cmd=(short)0x40111D(0x56CC4C)`：
+          · `cmd==0`：`0x4CD590` 的 `0x401FB9` 为真 ⇒ `0x4CD4A0` 的 `0x401ED3` + `0x4AB5C0 |= 0x200000`；
+            否则 `0x401D84(0x56CC4C,9)`（VM 换流）+ `0x45AF10(0x56CC84,0)`。
+          · `cmd==9`：`0x4CD4A0.0x401ED3()`，然后
+            `0x4AB5C0 |= (0x45AFF0(0x56CCB8,0x40) ? 0x400000 : 0x200000)`
+            （`0x45102A neg al/sbb/and 0x200000/add 0x200000` 的等价式）。
+          · 其余命令字：什么都不做。
+        """
+        if not self.flowvm.step():                # 0x450FE5 0x402149
+            return
+        # `0x450FF9 0x45B030(0x4AB5B0,1)` 在**位已置**时返回 0 ⇒ `je 0x451091`；
+        # 即 bit0 置位走 0x2E/0x58 分支，bit0 清零走命令 0/9 分支（与 §10.7 一致）。
+        if self.sysw.test(1):                     # 0x450FF2..0x451005
+            cmd = self.flowvm.command()           # 0x451091 0x40111D → ax
+            if cmd == 0x2E:                       # 0x451096
+                self.flags.set_or(0x400000)       # 0x4510A6 0x45AF30(0x4AB5C0,0x400000)
+            elif cmd == 0x58:                     # 0x4510B6
+                self.flags.set_or(0x800000)       # 0x4510C6
+            return
+        cmd = self.flowvm.command()               # 0x45100B 0x40111D → ax
+        if cmd == 0:
+            if self.stage_queue.method_401FB9():  # 0x451055 0x4CD590 的方法
+                self.stage_globals_obj.method_401ED3()   # 0x451025
+                self.flags.set_or(0x200000)       # 0x451072
+                return
+            self.flowvm.restart(9)                # 0x45107F 0x401D84(0x56CC4C,9)
+            self.input_flags.clear()              # 0x45108B 0x45AF10(0x56CC84,0)
+            return
+        if cmd == 9:                              # 0x451017
+            self.stage_globals_obj.method_401ED3()       # 0x451025
+            # 0x45102A..0x451049：0x56CCB8 bit6 置位 ⇒ 0x400000，否则 0x200000
+            self.flags.set_or(0x400000 if self.sysw_b8.test(0x40) else 0x200000)
+            return
 
     # ---- 0x451630 -----------------------------------------------------
     def p4_intro_frame(self) -> bool:
