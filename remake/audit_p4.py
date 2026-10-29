@@ -1305,6 +1305,29 @@ def main():
     check("0x460E00 十次一循环：>= 0xA 或 == -1 转 0x45F690",
           img[0x460E03 - ib:0x460E0B - ib] == bytes([0x83, 0xF8, 0x0A, 0x7D, 0x0C, 0x83, 0xF8, 0xFF]), "")
 
+    def _mk():
+        class _S(page4.Page4Mixin):
+            def __init__(self):
+                self.p4_stat = {0x4CD590 + 0x30: 7, 0x4CD4A0 + 0x08: 50,
+                                0x4CD4A0 + 0x0C: 25, 0x4CD4A0 + 0x10: 200}
+        return _S()
+    check("0x460EA0 就是 mov eax,[ecx+0x30]; ret（结算取值器）",
+          img[0x460EA0 - ib:0x460EA4 - ib] == bytes([0x8B, 0x41, 0x30, 0xC3]), "")
+    check("0x45E7A0 是 a*1000/b：三次 lea 后 shl 3 再 div，且 a>0x200000 时同步右移",
+          img[0x45E7C4 - ib:0x45E7D4 - ib] == bytes([0x8D, 0x04, 0x80, 0x33, 0xD2, 0x8D, 0x04, 0x80,
+                                                    0x8D, 0x04, 0x80, 0xC1, 0xE0, 0x03, 0xF7, 0xF1]), "")
+    _s1 = _mk()
+    page4.Page4Mixin.p4_45f760(_s1)
+    _v1 = _s1.p4_stat[0x4CD4A0 + 0x04]
+    _s2 = _mk()
+    _s2.p4_stat[0x4CD590 + 0x30] = 0xFFFFFFFF
+    page4.Page4Mixin.p4_45f760(_s2)
+    _v2 = _s2.p4_stat[0x4CD4A0 + 0x04]
+    check("0x45F760 三项得分：r1*400 + r2*400 + v*200000；v==-1 时只累加前两项",
+          _v1 == 1700000 and _v2 == 300000, "")
+    check("0x45E7A0 边界：除零返 0、a>0x200000 先同步右移",
+          page4.Page4Mixin.p4_45e7a0(_mk(), 5, 0) == 0
+          and page4.Page4Mixin.p4_45e7a0(_mk(), 0x400000, 0x2000) == 512000, "")
     check("0x499798 的字形表与 p4_str_table() 逐项一致",
           page4.p4_str_table() == [int.from_bytes(img[0x499798 - ib + 2 * k:0x499798 - ib + 2 * k + 2], "little")
                                    for k in range(9)] + [60, 0]

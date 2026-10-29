@@ -2927,6 +2927,57 @@ class Page4Mixin:
         else:
             self.p4_stat[0x4CD4A0 + 0x30] = eax + 1             # 0x460E0D
 
+    def p4_45e7a0(self, a: int, b: int) -> int:
+        """`0x45E7A0(a, b)` = **`a*1000/b`**（无符号），`a > 0x200000` 时两边同步右移防溢出。
+
+        ```
+        0x45E7A4 if (b == 0) return 0                    ; 0x45E7A8 xor ax,ax
+        0x45E7B2 while (a > 0x200000) { a >>= 1 ; b >>= 1 }
+        0x45E7C4 lea ×3 → a*125 ; 0x45E7CF shl 3 → **a*1000**
+        0x45E7D2 div ecx                                 ; 无符号除
+        ```
+        `ecx`（this）在函数体里从未使用 —— 它是被忽略的 `__thiscall` 第一参数。
+        """
+        if b == 0:
+            return 0                                     # 0x45E7A8
+        a &= 0xFFFFFFFF
+        b &= 0xFFFFFFFF
+        while a > 0x200000:                              # 0x45E7B2
+            a >>= 1
+            b >>= 1
+        if b == 0:
+            return 0
+        return (a * 1000) // b                           # 0x45E7C4..0x45E7D2
+
+    def p4_45f760(self) -> None:
+        """`0x45F760(obj)`：结算时把三项得分累加进 `obj[+4]`。
+
+        `obj` 是 **`0x4CD4A0`** 那个大结构（与 `0x45F5F0` 同一个；注意它比 `Ent` 的 0x5C 大得多，
+        `[+0xE1]` 就在 `Ent.SZ` 之外）。
+
+        ```
+        0x45F76D r1 = 0x45E7A0(obj, [+8], [+0x10]) & 0xFFFF
+        0x45F77A lea ×2 → r1*25 ; 0x45F783 shl 4 → **r1*400**
+        0x45F788 [+4] += r1*400
+        0x45F792 r2 = 0x45E7A0(obj, [+0xC], [+8]) & 0xFFFF
+        0x45F7AF [+4] += r2*400
+        0x45F7B2 v = 0x460EA0(0x4CD590) = **[0x4CD590+0x30]**（0x460EA0 就是 `mov eax,[ecx+0x30]; ret`）
+        0x45F7B7 if (v != -1) { 0x45F7C6 lea ×5 → v*3125 ; shl 6 → **v*200000** ; [+4] += v*200000 }
+        0x45F7E0 byte[+0xE1] = 1
+        ```
+        """
+        m = 0x4CD4A0
+        base = self.p4_stat.get(m + 0x04, 0)                                 # 0x45F788 的累加器
+        r1 = self.p4_45e7a0(self.p4_stat.get(m + 0x08, 0), self.p4_stat.get(m + 0x10, 0)) & 0xFFFF
+        base = (base + r1 * 400) & 0xFFFFFFFF                               # 0x45F788
+        r2 = self.p4_45e7a0(self.p4_stat.get(m + 0x0C, 0), self.p4_stat.get(m + 0x08, 0)) & 0xFFFF
+        base = (base + r2 * 400) & 0xFFFFFFFF                               # 0x45F7AF
+        self.p4_stat[m + 0x04] = base
+        v = self.p4_stat.get(0x4CD590 + 0x30, 0) & 0xFFFFFFFF               # 0x45F7B2
+        if v != 0xFFFFFFFF:                                                 # 0x45F7BA je 0x45F7E0
+            self.p4_stat[m + 0x04] = (base + ((v * 200000) & 0xFFFFFFFF)) & 0xFFFFFFFF   # 0x45F7DD
+        self.p4_stat[m + 0xE1] = 1                                          # 0x45F7E0
+
     def p4_460280(self, o) -> None:
         """`0x460280(this)`：清空文本对象（释放 `[+0x2C]` 缓冲并复位所有字段）。"""
         o.d32(0x04, 0)                                  # 0x460289
