@@ -2579,6 +2579,21 @@ class Page4Mixin:
 
     # ---- 自机输入/队列辅助（0x448C70 用）----------------------------------
     # ---- 碰撞（0x451461..0x4514A6 三组）------------------------------
+    def p4_bit_any(self, mask: int) -> bool:
+        """`0x45AFF0(obj, mask)`：**任一位被置**（`neg/sbb/neg` = `!!(v & mask)`）。
+
+        mask 为 0 时退化为 `v == 0`（`0x45B006` 的 `sete`）。
+        """
+        return bool(self.p4_sys_bits() & mask) if mask else self.p4_sys_bits() == 0
+
+    def p4_bit_none(self, mask: int) -> bool:
+        """`0x45B030(obj, mask)`：**所有位都清**（`neg/sbb/inc` = `!(v & mask)`）。
+
+        ★ 与 `0x45AFF0` 只差最后一条 `inc eax`（`0x45B041`）对 `neg eax`（`0x45B001`），
+        语义正好相反。mask 为 0 时退化为 `v != 0`（`0x45B04C` 的 `setne`）。
+        """
+        return not (self.p4_sys_bits() & mask) if mask else self.p4_sys_bits() != 0
+
     def p4_sys_bits(self) -> int:
         """`0x56CCB8`：页4 系统状态位图（`0x43BFD4` 用它做碰撞总开关）。"""
         return int(getattr(self, "_p4_sys", 0))
@@ -2940,7 +2955,7 @@ class Page4Mixin:
             return
         if tgt.s32(0x20) <= 0x12C:                              # 0x43CF11
             return
-        if not (self.p4_stat.get(0x56CCB8, 0) & 0x10):          # 0x43CF21 0x45B030 bit4
+        if not self.p4_bit_none(0x10):                          # 0x43CF21 0x45B030(…,0x10)：bit4 清才继续
             return
         if tgt.s32(0x28) == 3:                                  # 0x43CF2A
             tgt.d32(0x28, 0)                                    # 0x43CF30
@@ -2975,11 +2990,12 @@ class Page4Mixin:
         ⇒ 当 `0x56CCB8` 的 bit2 为 0 时，只处理**类型带 0x8000 位**的实体。
         """
         hits = 0
-        fast = bool(self.p4_stat.get(0x56CCB8, 0) & 0x4)        # 0x43C075
+        # 0x43C075 0x45B030(0x56CCB8, 2)：**bit2 清**时返回 1 → jne 跳过类型过滤
+        bit2_clear = self.p4_bit_none(0x02)
         for e in list(qa):
             if not e.g32(0x10):                                 # 0x43C094
                 continue
-            if not fast and not (e.g32(0x14) & 0x8000):         # 0x43C085 test ah,0x80
+            if not bit2_clear and not (e.g32(0x14) & 0x8000):   # 0x43C085 test ah,0x80
                 continue
             for t in list(qb):
                 if not t.g32(0x10):
