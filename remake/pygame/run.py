@@ -127,11 +127,13 @@ def main(argv: list[str] | None = None) -> int:
     _inv_auto = _is_wsl() and not args.no_inv
     if _inv_auto and not args.headless:
         print("[input] 检测到 WSL ⇒ 自动取反鼠标两轴（--no-inv 关闭）", flush=True)
+    _abs_mouse = [320, 240]     # 上一次读到的绝对位置（配合"边缘才回中"的采样）
     _grab = not args.headless and not args.no_grab
     if _grab:
         try:
             pygame.event.set_grab(True)
             pygame.mouse.set_pos((320, 240))
+            _abs_mouse[:] = pygame.mouse.get_pos()   # 以免第一帧把"回中"当成手势
             print("[input] 光标抓取 + 中心采样：已开启（F1 释放/再次捕获）", flush=True)
         except Exception as _e:
             _grab = False
@@ -217,12 +219,17 @@ def main(argv: list[str] | None = None) -> int:
                     pend_dy += ev.rel[1]
 
         if _grab:
-            # 读"离中心多远"= 本帧位移，然后把光标弹回中心（原作 0x458CB0/0x454759 的顺序）
+            # 位移 = **本次位置 − 上次位置**（纯绝对坐标差分，符号天然正确，且不会因 warp 回弹抖动）。
+            # 只在接近窗口边缘时才把光标弹回中心一次（原作 0x454759 的 SetCursorPos 作用等价），
+            # 弹回那一帧不产生位移（否则会把跳跃当成手势）。
             _mx, _my = pygame.mouse.get_pos()
-            pend_dx += _mx - 320
-            pend_dy += _my - 240
-            if _mx != 320 or _my != 240:
+            if _mx < 40 or _mx > 600 or _my < 40 or _my > 440:
                 pygame.mouse.set_pos((320, 240))
+                _abs_mouse[0], _abs_mouse[1] = 320, 240
+            else:
+                pend_dx += _mx - _abs_mouse[0]
+                pend_dy += _my - _abs_mouse[1]
+                _abs_mouse[0], _abs_mouse[1] = _mx, _my
 
         if keycode:
             pend_key = keycode
