@@ -5901,6 +5901,57 @@ for (i = 0; i < count; i++) {
 落在 `[0,param[0x3C])` ⇒ 行 0，落在 `[param[0x3C], param[0x3C]+param[0x40])` ⇒ 行 1，依此类推（4 行权重）。
 这解答了此前"`带+0x10` 谁写"的疑问。
 
+
+#### 16.126 背景槽推进 `0x457380` 与带更新 `0x457750` 全解
+
+**槽推进 `0x457380`**（`0x458E70` 第一条经 `0x457BD0` 对 12 槽各调一次）：
+
+```
+if (![slot+0x2A90]) return;                       // 未激活
+if ([slot+0x2A88] != 0) {                         // 速率块还有剩余帧
+    0x456D80(&slot[0x30], &slot[0x80]);           // 参数块 += 速率块（逐 dword）
+    [slot+0x2A88]--;
+    0x456EB0(slot);                               // 按 [slot+0x2A8C] 位平移/重建格子表
+}
+head = [slot+0x04]; prev = 0;                     // 带链表
+while (head) {
+    if (0x457750(head)) { prev = head; head = [head+0x30]; }   // 仍有效，前移
+    else head = 0x457210(slot, prev, head);                    // 摘链并释放
+}
+[slot+0x2A94] += [slot+0x68];                     // 滚动累加（16.16）
+acc = [slot+0x2A94];
+if (|acc| < [slot+0x64]) return;                  // 未到一格
+if ([slot+0x68] >= 0) { [slot+0x2A94] = acc - [slot+0x64]; 0x457120(slot, acc - [slot+0x64]); }
+else                  { [slot+0x2A94] = acc + [slot+0x64]; 0x457120(slot, [slot+0x58] + acc - 1); }
+```
+
+⇒ `[slot+0x58]` 是**格数/回绕长**，正向用 `acc-thresh` 当格索引，负向用 `count+acc-1`。
+
+**带更新 `0x457750`**（参数块指针 `[band+8] = &slot[0x30]`）：
+
+```
+[band+0x0C] += param[0x38];                       // 位置推进，param[0x38] = slot+0x68 = 每帧滚动量
+pos = [band+0x0C];
+// 可见性：落在 [param[0x2C], param[0x30]] 且 param[0x4C]!=0 → 节点 [+0x1C]=1，否则 0
+if (pos < 0 || pos >= param[0x28]) return 0;      // 出界 ⇒ 摘链，param[0x28] = 格数
+kind = grid[pos*3 + 2];                           // 格子表第三条（0x4577AB `[eax+edx*4+8]`）
+if (kind == [band+0x1C]) goto tail;               // kind 未变，跳过重建
+[band+0x20] = ([band+0x14] * kind) >> 6;          // w = 抖动x * kind / 64
+[band+0x24] = ([band+0x18] * kind) >> 6;          // h
+[band+0x1C] = kind;
+if (kind > 0xF0) goto tail;                       // 超上限不改层
+layer = 层表(byte[0x457938 + kind]);              // 0→隐藏，1→层3，2→层4 … 11→不改
+```
+
+`0x457938` 是 **kind → 阶梯序号** 的 241 字节表（`[0]=0`、`[6]=1`、`[10]=2`、`[16]=3`、`[24]=4` …，
+非阶梯尺寸一律 `0x0B`=不改层），`0x457908` 是 12 项跳转表（`0x4577EC` 隐藏 / `0x4577F5` 层3 /
+`0x457800` 层4 / …），**确认层号 = 2 + 阶梯序号**，与 `bm_s1l3..l8` 完全对应。
+
+**仍未闭合**：关 1 的 6 条 op06 记录（t=0..5）里 `P[10]` 恒为 0，而 `param[0x28]` 正是格数 ⇒
+按字面读，关 1 的带会在第一帧就被判出界摘链。已排除"OP06 记录解析错位"（按 op 码长度逐条走完
+4352 字节，6 条 op06 + 6 条 op07 与文本转储一致）。⇒ 格数要么由 `0x456D80` 之外的东西写入
+（`0x456D50` 的拷贝长度/目标基址需复核），要么 `param` 基址不是 `&slot[0x30]`。
+
 **复刻接线**：`remake/pygame/page4.py`（`Page4Mixin`）= `p4_enter`/`p4_step`/`p4_intro_frame`/
 `p4_finish`/`p4_block`/`p4_flow_vm`/`p4_engine`，已接进 `geki.Pages`（`--page 4` 跑通）；
 VM/发射器/碰撞/HUD 的具体实现待下一步（接口已列，占位函数都标了地址）。
