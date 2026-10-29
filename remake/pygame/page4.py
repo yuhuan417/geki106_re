@@ -638,6 +638,43 @@ def p4_hud_unpack(v: int) -> dict:
     }
 
 
+def p4_hud_accum(self, h, desc: dict, f2: int = 0, f3: int = 0) -> None:
+    """`0x45E670(h, desc, f2, f3)`：把描述字的 `value` 累加进 HUD 的布局累计量。
+
+    ```
+    0x45E670 al = byte[desc+0]  ; 即 value 的低字节
+    0x45E67C dl = 1
+    0x45E67E if (al != 0) {                                  ; value 非 0 才累加
+    0x45E680   if (!(desc->b4 & 1)) [h+0x20] += desc->value
+    0x45E68F   if (!(desc->b4 & 2)) [h+0x10] += desc->value
+             }
+    0x45E69F if (f2 != 0) { 同两位门控 → [h+0x18] / [h+8] }
+    0x45E6C5 if (f3 != 0) { 同两位门控 → [h+0x1C] / [h+0xC] }
+    ```
+
+    即三对累加器（`+0x20/+0x10`、`+0x18/+8`、`+0x1C/+0xC`），
+    第一对只受 `value != 0` 控制，后两对还要各自开关；
+    `desc->b4` 的 bit0/bit1 决定**跳过哪个累加器**（`test byte[desc+4],1/2`）。
+    """
+    v = int(desc.get("value", 0)) & 0xFFFFFFFF
+    b4 = desc.get("b4", 0)
+    if v & 0xFF:                                   # 0x45E675 / 0x45E67E
+        if not (b4 & 1):                           # 0x45E680
+            h.d32(0x20, (h.g32(0x20) + v) & 0xFFFFFFFF)
+        if not (b4 & 2):                           # 0x45E68F
+            h.d32(0x10, (h.g32(0x10) + v) & 0xFFFFFFFF)
+    if f2:                                         # 0x45E69F
+        if not (b4 & 1):
+            h.d32(0x18, (h.g32(0x18) + v) & 0xFFFFFFFF)
+        if not (b4 & 2):
+            h.d32(0x08, (h.g32(0x08) + v) & 0xFFFFFFFF)
+    if f3:                                         # 0x45E6C5
+        if not (b4 & 1):
+            h.d32(0x1C, (h.g32(0x1C) + v) & 0xFFFFFFFF)
+        if not (b4 & 2):
+            h.d32(0x0C, (h.g32(0x0C) + v) & 0xFFFFFFFF)
+
+
 def p4_hud_keys(self):
     """`0x4993C4` 全局键表（256 个 dword，`build_p4_hudkeys.py` 导出）。
 
@@ -689,7 +726,10 @@ def p4_hud_get(self, key: int):
         raw = None if not vals else vals[idx]
     if raw is None:
         return None
-    return p4_hud_unpack(raw)                    # 0x45EF9D → 0x45DFB0
+    desc = p4_hud_unpack(raw)                    # 0x45EF9D → 0x45DFB0
+    if not (key & 4):                            # 0x45EFA9：key&4 时跳过写回
+        p4_hud_accum(self, h, desc, 0, 0)        # 0x45EFBA → 0x45E670(h, desc, 0, 0)
+    return desc
 
 
 def p4_tables():
