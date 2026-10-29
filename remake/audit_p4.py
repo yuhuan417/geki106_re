@@ -1604,6 +1604,34 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    import struct as _st14
+    _kind = page4.Page4Mixin.p4_446470_kind
+    _pre = page4.Page4Mixin.p4_input_preset
+    _td = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x44E4A0 - ib:0x44E4E5 - ib], 0x44E4A0)}
+    _k7 = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x446470 - ib:0x4464C5 - ib], 0x446470)}
+    _tab = []
+    for _k in range(7, 23):
+        _o = 0x498A88 + _k * 14
+        _a, _b2, _c = _st14.unpack_from("<III", img, _o - ib)
+        _w = _st14.unpack_from("<H", img, _o - ib + 12)[0]
+        _tab.append((_a, _b2, _c, _w))
+    check("0x498A88 输入预设表 **stride 14**（kind*8-kind=kind*7, *2 = kind*14），16 项 kind 7..22；"
+          "0x446470 的 kind=(a!=0)+op*2+(bit2?0xF:7) 恰好铺满该表 ⇒ §15② 无越界；"
+          "0x44E4A0 本身无边界检查",
+          _k7.get(0x44648A) == ("and", "eax, 8")
+          and _k7.get(0x446492) == ("add", "eax, 7")
+          and _td.get(0x44E4B5) == ("sub", "eax, edi")
+          and _td.get(0x44E4BE) == ("mov", "eax, dword ptr [eax*2 + 0x498a88]")
+          and _td.get(0x44E4C5) == ("mov", "dword ptr [edx], eax")
+          and _td.get(0x44E4DB) == ("test", "al, al")
+          and tuple(_tab) == page4.Page4Mixin.P4_INPUT_PRESET
+          and _kind(0, 0, 0, 0) == 7 and _kind(1, 0, 0, 0) == 8
+          and _kind(0, 7, 3, 0) == 13 and _kind(1, 0, 3, 0) == 14
+          and _kind(0, 1, 0, 1) == 15 and _kind(1, 0, 3, 1) == 22
+          and _pre(7) == _tab[0] and _pre(22) == _tab[15]
+          and _pre(6) is None and _pre(23) is None, "")
     _c41 = page4.Page4Mixin.p4_10008041_ctor
     _c41d = {i.address: (i.mnemonic, i.op_str)
              for i in _mdk.disasm(img[0x42DABC - ib:0x42DB60 - ib], 0x42DABC)}

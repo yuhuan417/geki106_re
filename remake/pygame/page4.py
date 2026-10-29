@@ -5010,6 +5010,67 @@ class Page4Mixin:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
+    # 0x498A88 输入预设表，**stride 14 字节**（3 dword + 1 word），16 项（kind 7..22）
+    P4_INPUT_PRESET = (
+        (0x00000100, 0x00000000, 0x00280020, 0x0001),   # 7
+        (0x00000100, 0x00020000, 0x00000000, 0x0000),   # 8
+        (0x00000100, 0x00000000, 0x0000001C, 0x0001),   # 9
+        (0x00000100, 0x00000000, 0x00000010, 0x0001),   # 10
+        (0x00000100, 0x00000000, 0x00300028, 0x0001),   # 11
+        (0x00000100, 0x00000000, 0x00300028, 0x0001),   # 12
+        (0x00000100, 0x00000000, 0x00200020, 0x0001),   # 13
+        (0x00000100, 0x00000000, 0x000C000C, 0x0001),   # 14
+        (0x00010001, 0x00000005, 0x00060000, 0x0001),   # 15
+        (0x00010001, 0x00000009, 0x000C0000, 0x0000),   # 16
+        (0x00010001, 0x00000004, 0x00000000, 0x0001),   # 17
+        (0x00010001, 0x00000002, 0x00000000, 0x0001),   # 18
+        (0x00010001, 0x00000006, 0x00070000, 0x0001),   # 19
+        (0x00010001, 0x00000004, 0x00040000, 0x0001),   # 20
+        (0x00010001, 0x00000004, 0x00040000, 0x0001),   # 21
+        (0x00010001, 0x00000002, 0x00020000, 0x0001),   # 22
+    )
+
+    @staticmethod
+    def p4_446470_kind(a: int, b: int, op: int, bit2: int) -> int:
+        """`0x446470` 算出的**输入预设号**：`kind = (a!=0) + op*2 + (bit2 ? 0xF : 7)`。
+
+        ```
+        0x446475 0x45AFF0(0x4AB5B0, 2) → al
+        0x446481 neg al ; sbb eax,eax ; 0x44648A and eax,8
+                ⇒ al!=0（bit2 置位）→ 8，否则 0
+        0x446492 eax += 7                     ; edi = 7 或 0xF
+        0x446497 eax = 0x45AFC0(0x4AB5B0,0xC000) ; op ∈ 0..3
+        0x4464A6 ecx = 0 ; test bl,bl ; setne cl ; ecx = (a != 0)
+        0x4464A4 eax = op*2 ; 0x4464B7/0x4464C1 ecx += eax + edi
+        ```
+
+        ⇒ `kind ∈ [7, 22]`，**恰好铺满 0x498A88 表的 16 项**，
+        所以 `§15②` 担心的「越界」在构造上不可能发生；
+        `0x44E4A0` 本身**没有边界检查**（`kind*14 + 0x498A88` 直接读）。
+
+        `b` 只决定走 `0x44E620`（五参）还是 `0x44E4A0`（三参）两支，不进 kind。
+        """
+        base = 0xF if bit2 else 7
+        return (1 if a else 0) + (op & 3) * 2 + base
+
+    @staticmethod
+    def p4_input_preset(kind: int):
+        """`0x44E4A0`：`kind` 索引 `0x498A88`（**stride 14**）把 3 个 dword + 1 个 word
+        铺到输入管理器的 `+0x4C / +0x50 / +0x54 / +0x58`。
+
+        ```
+        0x44E4AB eax = kind*8 ; 0x44E4B5 eax -= kind   ; = kind*7
+        0x44E4B7 ecx = eax*2 + 0x498A88                ; = kind*14 + base
+        0x44E4BE eax = [kind*14 + 0x498A88] ; [mgr+0x4C] = eax
+        0x44E4C7 [mgr+0x50] = [ecx+4]
+        0x44E4CD [mgr+0x54] = [ecx+8]
+        0x44E4D7 cx = word[ecx+0xC] ; [mgr+0x58] = cx
+        ```
+        """
+        if not (7 <= kind <= 22):
+            return None
+        return Page4Mixin.P4_INPUT_PRESET[kind - 7]
+
     P4_CAP_BEH = (0x401285, 0x402338, 0x402153, 0x401866,
                   0x4013E8, 0x401E51, 0x401CF3, 0x401EB5)
 
