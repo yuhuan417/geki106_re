@@ -3280,6 +3280,53 @@ class Page4Mixin:
             self.p4_stat["tbl_4ab5cc"] = t
         return t
 
+    def p4_45fcb0(self, buf: bytearray) -> int:
+        """`0x45FCB0(obj, buf)`：把整帧状态序列化进 `buf`，返回写入的总字节数（`esi` 末值）。
+
+        头部（`0x45FCB9..0x45FCE7`）：
+        ```
+        [+0x00] = [obj+4]  总字节数        [+0x04] = [obj+8] = 0xE
+        [+0x08] = [obj+0xC] 段数 A         [+0x0C] = [obj+0x10] = total
+        [+0x10] = 0x456390(0x4CD484) = [0x4CD484+8]
+        [+0x14] = 0x4563B0(0x4CD484) = [0x4CD484+0xC]
+        ```
+        然后：`+0x18` 起 0xE 个 dword（`0x44DCF0(0x4AA7B0,i)`）→ 段块（`0x4563D0`）→ 跳过 `A*4`
+        → 12 个背景槽（`0x457D20` + `0x45FF80`）→ 4 条实体队列（`0x430880` + `0x45FF80`）。
+
+        `0x456370/0x456390/0x4563B0` 全是 `mov eax,[ecx+N]; ret` 的 getter，
+        `0x457520` 是 `lea eax,[ecx+0xC]; ret` —— 都已在 §16.241 定案。
+        """
+        seg = int(self.p4_stat.get("45fbf0_seg", 0))          # [obj+0xC]
+        total = int(self.p4_stat.get("45fbf0_total", 0))      # [obj+0x10]
+        size = int(self.p4_stat.get("45fbf0_size", 0))        # [obj+4]
+        mgr = self.p4_stat.get("blk_4cd484")
+
+        def d32(off, v):
+            buf[off:off + 4] = (v & 0xFFFFFFFF).to_bytes(4, "little")
+
+        if len(buf) < 0x18:
+            return 0
+        d32(0x00, size)                                       # 0x45FCBC
+        d32(0x04, 0xE)                                        # 0x45FCC1
+        d32(0x08, seg)                                        # 0x45FCCC
+        d32(0x0C, total)                                      # 0x45FCE7
+        d32(0x10, int.from_bytes(mgr[8:12], "little") if isinstance(mgr, (bytes, bytearray)) and len(mgr) >= 0xC else 0)   # 0x45FCD9
+        d32(0x14, int.from_bytes(mgr[0xC:0x10], "little") if isinstance(mgr, (bytes, bytearray)) and len(mgr) >= 0x10 else 0)  # 0x45FCE1
+        off = 0x18
+        for i in range(0xE):                                  # 0x45FCF6 循环
+            if off + 4 > len(buf):
+                return off
+            d32(off, self.p4_44dcf0("blk_4aa7b0", i))         # 0x45FCFC / 0x45FD01
+            off += 4
+        off += self.p4_4563d0("blk_4cd484", buf, off)         # 0x45FD14
+        off += seg * 4                                        # 0x45FD1E
+        for i in range(0xC):                                  # 0x45FD21 12 个背景槽
+            ents = self.p4_stat.get(("bgslot", i)) or ()
+            off += self.p4_45ff80(ents, buf, off)             # 0x45FD30
+        for name in ("ui4cc", "ui43c", "ui49c", "ui40c"):     # 0x45FD3D.. 四条队列
+            off += self.p4_45ff80(self.p4_430880(getattr(self, name, [])), buf, off)
+        return off
+
     def p4_44dcf0(self, key, idx: int) -> int:
         """`0x44DCF0(this, idx)` = `mov eax,[ecx+eax*4+0x4C]; ret` —— 取 `+0x4C` 起的 dword 数组第 idx 项。
 

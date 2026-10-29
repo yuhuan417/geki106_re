@@ -1501,6 +1501,32 @@ def main():
     _sn_n = _Z().p4_45ff80([_sn_e1, _sn_e2], _sn_buf, 0)
     _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
     _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
+    _sb = _Z()
+    _sb.ui4cc = []
+    _sb.ui43c = []
+    _sb.ui49c = []
+    _sb.ui40c = [page4.Ent(5, 6, 7, 0)]
+    _sb.p4_stat["45fbf0_seg"] = 1
+    _sb.p4_stat["45fbf0_total"] = 1
+    _sb.p4_stat["45fbf0_size"] = 0x5C
+    _sb_m = bytearray(0x20)
+    _st.pack_into("<I", _sb_m, 4, 1)          # 段字节数 1*4
+    _st.pack_into("<I", _sb_m, 8, 0xAA)       # [mgr+8] → buf+0x10
+    _st.pack_into("<I", _sb_m, 0xC, 0xBB)     # [mgr+0xC] → buf+0x14
+    _sb.p4_stat["blk_4cd484"] = _sb_m
+    _sb.p4_stat[("blk", "blk_4cd484")] = bytes(range(32))
+    _sb_t = bytearray(0x80)
+    _sb.p4_stat["blk_4aa7b0"] = _sb_t
+    _st.pack_into("<I", _sb_t, 0x4C, 0x1234)
+    _sb.p4_stat[("bgslot", 0)] = [page4.Ent(1, 2, 3, 0)]
+    _sb_buf = bytearray(0x400)
+    _sb_n = _sb.p4_45fcb0(_sb_buf)
+    _sb_hdr = _st.unpack_from("<6I", _sb_buf, 0)
+    check("0x45FCB0 全程：头部 6 dword（大小/0xE/段数/total/[mgr+8]/[mgr+0xC]）"
+          "+ 0xE 个层表项 + 段块 + 12 背景槽 + 4 队列；返回末偏移",
+          _sb_hdr == (0x5C, 0xE, 1, 1, 0xAA, 0xBB)
+          and _st.unpack_from("<I", _sb_buf, 0x18)[0] == 0x1234
+          and _sb_n == 0x18 + 0x38 + 4 + 4 + 0x20 + 0x20, "")
     _dc = _Z()
     _dc_tbl = bytearray(0x80)
     _dc.p4_stat["LT"] = _dc_tbl
