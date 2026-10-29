@@ -5403,7 +5403,7 @@ class Page4Mixin:
 
     def p4_bg_update(self) -> None:
         """S21 第一条 `0x458E75` → `0x457BD0` → 12× `0x457380`。"""
-        for slot in self.p4_bg:
+        for _sj, slot in enumerate(self.p4_bg):
             self._bg_update(slot)
 
     # k 斜坡值 → 层号（`0x457938` 0xF1 项字节表 → `0x457908` 跳表，逐个读取得出）
