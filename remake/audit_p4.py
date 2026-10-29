@@ -2663,6 +2663,78 @@ def main():
           and _g51.p4_stat[0x4CD4A0 + 0x38] == 1
           and _g51.p4_stat[0x4CD590 + 0x38] == 0,
           "r0=" + repr(_r0[:16]) + " r1x=" + repr(_r1x[:16]))
+    _rk = _G51()
+    _rk.p4_stat[0x56CCB5] = 1                       # 回放播放门
+    _rk.p4_45f850(1, 2, 3)
+    _rkt = _rk._p4_tbl4ab5cc()
+    _gate_ok = _rkt[8:12] == b"\x00\x00\x00\x00"
+    _rk.p4_stat[0x56CCB5] = 0
+    _rkt[4] = 0                                        # mode
+    _rkt[5] = 0                                        # 主表
+    _rk.p4_stat[0x4CD4A0 + 0x04] = 12345
+    _rk.p4_stat[0x4CD4A0 + 0x08] = 400
+    _rk.p4_stat[0x4CD4A0 + 0x10] = 500
+    _rk.p4_stat[0x4CD4A0 + 0x0C] = 200
+    _rk.p4_stat[0x4CD590 + 0x34] = 7
+    _rk.p4_stat[0x56CCB0] = 3
+    _rk.p4_stat[0x4CD4A0 + 0x30] = 0x42
+    _rk.p4_stat[0x4CD4A0 + 0x2C] = 9
+    _rk.p4_stat[0x4CD4A0 + 0x24] = 2
+    _rk.p4_stat[0x4CD4A0 + 0xE8] = 777
+    _rk.keys.set_field(0xC000, 1)
+    _fr = 1234
+    _rk.p4_frame_no = lambda: _fr
+    _rk.p4_45f850(0x1111, 0x2222, 0x33)
+    _rkrec = bytes(_rkt[8:8 + 0x54])
+    _rkshadow = bytes(_rkt[0x548 + 2 * 0x54:0x548 + 3 * 0x54])
+    check("0x45F850 排行榜登记：[0x56CCB5] 门；记录 = 总分/两率(0x45E7A0)/[0x4CD590+0x34]/"
+          "关卡/[[+0x30]/[+0x2C]/槽位 0xC000/[+0x24]低/0x200 位/名字 10B/时间戳 0x24B/"
+          "帧/[0x56CCAC]/已播帧/[+0xE8]；主表插入 row0 + 影子槽 +0x548+(mode+2*recmode)*0x54",
+          _gate_ok
+          and int.from_bytes(_rkrec[0:4], "little") == 12345
+          and int.from_bytes(_rkrec[4:6], "little") == 800
+          and int.from_bytes(_rkrec[6:8], "little") == 500
+          and int.from_bytes(_rkrec[8:10], "little") == 7
+          and int.from_bytes(_rkrec[0x0A:0x0C], "little") == 3
+          and int.from_bytes(_rkrec[0x0C:0x0E], "little") == 0x42
+          and _rkrec[0x0E] == 9 and _rkrec[0x0F] == 1 and _rkrec[0x10] == 2 and _rkrec[0x11] == 0
+          and int.from_bytes(_rkrec[0x12:0x16], "little") == 0x1111
+          and int.from_bytes(_rkrec[0x16:0x1A], "little") == 0x2222
+          and int.from_bytes(_rkrec[0x1A:0x1C], "little") == 0x33
+          and len(_rkrec[0x1C:0x40].rstrip(b"\x00")) >= 19
+          and int.from_bytes(_rkrec[0x40:0x44], "little") == _fr
+          and int.from_bytes(_rkrec[0x4C:0x50], "little") == 777
+          and _rkshadow[0:4] == _rkrec[0:4]
+          and _rkt[8 + 0x54:8 + 0x58] == b"\x00\x00\x00\x00", "")
+    _rk2 = _G51()
+    _rkt2 = _rk2._p4_tbl4ab5cc()
+    _rkt2[4] = 0
+    _rkt2[5] = 0
+    for _i, _sc in enumerate((1000, 500, 100)):
+        _rko = 8 + (2 * _i) * 0x54
+        _rkt2[_rko:_rko + 4] = _sc.to_bytes(4, "little")
+    _rkrec2 = bytearray(0x54)
+    _rkrec2[0:4] = (700).to_bytes(4, "little")
+    _rkrec2[0xF] = 0
+    _rk2.p4_45c7d0(bytes(_rkrec2), 0)
+    _scores = [int.from_bytes(_rkt2[8 + (2 * _i) * 0x54:8 + (2 * _i) * 0x54 + 4], "little")
+               for _i in range(5)]
+    check("0x45C7D0 主表插入：700 落在第 3 行（1000>700>500>100 的首个 ≤ 位），"
+          "500/100 顺移一行，同 row 另一模式槽分数清 0，影子槽先行拷入",
+          _scores == [1000, 700, 500, 100, 0]
+          and int.from_bytes(_rkt2[0x548:0x54C], "little") == 700
+          and int.from_bytes(_rkt2[8 + 0x54:8 + 0x58], "little") == 0, "")
+    _rk3 = _G51()
+    _rkt3 = _rk3._p4_tbl4ab5cc()
+    _rkt3[4] = 1
+    _rkt3[5] = 1
+    _rkt3[0x740 + 3 * 0x54:0x744 + 3 * 0x54] = (99).to_bytes(4, "little")
+    _rkrec3 = bytearray(0x54)
+    _rkrec3[0:4] = (100).to_bytes(4, "little")
+    _rk3.p4_45c7d0(bytes(_rkrec3), 1)
+    check("0x45C7D0 第二张表（byte[tbl+5]!=0，@+0x740）：slot = +0x740+(mode+2*row)*0x54，"
+          "slot 分数 <= rec 才覆盖（99 ← 100）",
+          int.from_bytes(_rkt3[0x740 + 3 * 0x54:0x744 + 3 * 0x54], "little") == 100, "")
     _fmts = {0x4A4D20: b"BrokenEnemy              %4d",
              0x4A4CFC: b"BrokenEnemy(Laser)       %4d",
              0x4A4CD8: b"Capture                   %3d",

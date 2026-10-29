@@ -1,0 +1,147 @@
+; func 0x463fba  (135 insns)
+
+0x00463fba  push    ebp
+0x00463fbb  mov     ebp, esp
+0x00463fbd  push    esi
+0x00463fbe  mov     esi, dword ptr [ebp + 8]
+0x00463fc1  cmp     dword ptr [esi], 0
+0x00463fc4  jge     0x463fcd
+0x00463fc6  xor     eax, eax
+0x00463fc8  jmp     0x4640df
+loc_463fcd:
+0x00463fcd  call    0x46ad9c   ; call 0x46ad9c
+0x00463fd2  mov     eax, dword ptr [esi]
+0x00463fd4  cmp     eax, 0x3f480
+0x00463fd9  jle     0x464033
+0x00463fdb  cmp     eax, 0x7ffc0b7f
+0x00463fe0  jge     0x464033
+0x00463fe2  sub     eax, dword ptr [0x4a5cd0]
+0x00463fe8  mov     dword ptr [ebp + 8], eax
+0x00463feb  lea     eax, [ebp + 8]
+0x00463fee  push    eax
+0x00463fef  call    0x465b1c   ; call 0x465b1c
+0x00463ff4  cmp     dword ptr [0x4a5cd4], 0
+0x00463ffb  pop     ecx
+0x00463ffc  mov     esi, eax
+0x00463ffe  je      0x4640dd
+0x00464004  push    esi
+0x00464005  call    0x46b067   ; call 0x46b067
+0x0046400a  test    eax, eax
+0x0046400c  pop     ecx
+0x0046400d  je      0x4640dd
+0x00464013  mov     eax, dword ptr [0x4a5cd8]
+0x00464018  sub     dword ptr [ebp + 8], eax
+0x0046401b  lea     eax, [ebp + 8]
+0x0046401e  push    eax
+0x0046401f  call    0x465b1c   ; call 0x465b1c
+0x00464024  mov     esi, eax
+0x00464026  pop     ecx
+0x00464027  mov     dword ptr [esi + 0x20], 1
+0x0046402e  jmp     0x4640dd
+loc_464033:
+0x00464033  push    esi
+0x00464034  call    0x465b1c   ; call 0x465b1c
+0x00464039  mov     esi, eax
+0x0046403b  push    esi
+0x0046403c  call    0x46b067   ; call 0x46b067
+0x00464041  pop     ecx
+0x00464042  test    eax, eax
+0x00464044  mov     eax, dword ptr [esi]
+0x00464046  pop     ecx
+0x00464047  je      0x46404f
+0x00464049  sub     eax, dword ptr [0x4a5cd8]
+loc_46404f:
+0x0046404f  sub     eax, dword ptr [0x4a5cd0]
+0x00464055  push    edi
+0x00464056  push    0x3c
+0x00464058  mov     dword ptr [ebp + 8], eax
+0x0046405b  pop     ecx
+0x0046405c  cdq     
+0x0046405d  mov     edi, ecx
+0x0046405f  idiv    edi
+0x00464061  test    edx, edx
+0x00464063  mov     dword ptr [esi], edx
+0x00464065  jge     0x46406e
+0x00464067  add     edx, ecx
+0x00464069  mov     dword ptr [esi], edx
+0x0046406b  sub     dword ptr [ebp + 8], ecx
+loc_46406e:
+0x0046406e  mov     eax, dword ptr [ebp + 8]
+0x00464071  mov     edi, ecx
+0x00464073  cdq     
+0x00464074  idiv    edi
+0x00464076  add     eax, dword ptr [esi + 4]
+0x00464079  mov     dword ptr [ebp + 8], eax
+0x0046407c  cdq     
+0x0046407d  idiv    edi
+0x0046407f  pop     edi
+0x00464080  test    edx, edx
+0x00464082  mov     dword ptr [esi + 4], edx
+0x00464085  jge     0x464090
+0x00464087  add     edx, 0x3c
+0x0046408a  mov     dword ptr [esi + 4], edx
+0x0046408d  sub     dword ptr [ebp + 8], ecx
+loc_464090:
+0x00464090  mov     eax, dword ptr [ebp + 8]
+0x00464093  push    0x18
+0x00464095  cdq     
+0x00464096  idiv    ecx
+0x00464098  pop     ecx
+0x00464099  add     eax, dword ptr [esi + 8]
+0x0046409c  mov     dword ptr [ebp + 8], eax
+0x0046409f  cdq     
+0x004640a0  idiv    ecx
+0x004640a2  test    edx, edx
+0x004640a4  mov     dword ptr [esi + 8], edx
+0x004640a7  jge     0x4640b1
+0x004640a9  add     edx, ecx
+0x004640ab  mov     dword ptr [esi + 8], edx
+0x004640ae  sub     dword ptr [ebp + 8], ecx
+loc_4640b1:
+0x004640b1  mov     eax, dword ptr [ebp + 8]
+0x004640b4  push    0x18
+0x004640b6  cdq     
+0x004640b7  pop     ecx
+0x004640b8  idiv    ecx
+0x004640ba  mov     ecx, eax
+0x004640bc  test    ecx, ecx
+0x004640be  mov     dword ptr [ebp + 8], ecx
+0x004640c1  jle     0x4640e2
+0x004640c3  mov     eax, dword ptr [esi + 0x18]
+0x004640c6  push    7
+0x004640c8  add     eax, ecx
+0x004640ca  pop     ecx
+0x004640cb  cdq     
+0x004640cc  idiv    ecx
+0x004640ce  mov     dword ptr [esi + 0x18], edx
+0x004640d1  mov     eax, dword ptr [ebp + 8]
+0x004640d4  add     dword ptr [esi + 0xc], eax
+loc_4640d7:
+0x004640d7  mov     eax, dword ptr [ebp + 8]
+0x004640da  add     dword ptr [esi + 0x1c], eax
+loc_4640dd:
+0x004640dd  mov     eax, esi
+loc_4640df:
+0x004640df  pop     esi
+0x004640e0  pop     ebp
+0x004640e1  ret     
+loc_4640e2:
+0x004640e2  jge     0x4640dd
+0x004640e4  mov     eax, dword ptr [esi + 0x18]
+0x004640e7  push    7
+0x004640e9  lea     eax, [eax + ecx + 7]
+0x004640ed  pop     ecx
+0x004640ee  cdq     
+0x004640ef  idiv    ecx
+0x004640f1  mov     dword ptr [esi + 0x18], edx
+0x004640f4  mov     eax, dword ptr [ebp + 8]
+0x004640f7  add     dword ptr [esi + 0xc], eax
+0x004640fa  mov     eax, dword ptr [esi + 0xc]
+0x004640fd  test    eax, eax
+0x004640ff  jg      0x4640d7
+0x00464101  add     eax, 0x1f
+0x00464104  dec     dword ptr [esi + 0x14]
+0x00464107  mov     dword ptr [esi + 0xc], eax
+0x0046410a  mov     dword ptr [esi + 0x1c], 0x16c
+0x00464111  mov     dword ptr [esi + 0x10], 0xb
+0x00464118  jmp     0x4640dd

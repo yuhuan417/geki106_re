@@ -328,6 +328,20 @@ def _p4_s32(v: int) -> int:
     return v - 0x100000000 if v & 0x80000000 else v
 
 
+def _p4_s8(v: int) -> int:
+    v &= 0xFF
+    return v - 0x100 if v & 0x80 else v
+
+
+def _p4_result_stamp() -> bytes:
+    """0x46411A（time → localtime）+ 0x463FBA（格式化）的日期时间串
+    （记录 +0x1C 起 0x24 字节；复刻用本地时间，格式同 0x465B1C 的 %Y/%m/%d %H:%M:%S 族）。"""
+    import time as _t
+    lt = _t.localtime()
+    return ("%04d/%02d/%02d %02d:%02d:%02d" % (lt.tm_year, lt.tm_mon, lt.tm_mday,
+                                               lt.tm_hour, lt.tm_min, lt.tm_sec)).encode("ascii")
+
+
 class BgBand:
     """背景带（`0x457540` ctor；链表 next = `[band+0x30]`）。"""
 
@@ -3097,6 +3111,9 @@ class Page4Mixin:
         # 是两个**独立字节**，不是位掩码。
         self.sysf2.b4 = 1 if self.keys.test(2) else 0     # byte[0x4AB5CC+4]
         self.sysf2.b5 = 1 if self.keys.test(1) else 0     # byte[0x4AB5CC+5]
+        _t = self._p4_tbl4ab5cc()                         # ★ 同一份表的字节模型，
+        _t[4] = self.sysf2.b4                             #   0x45C7D0 从这里读
+        _t[5] = self.sysf2.b5
         self.stream_reset()                       # 0x458E15 0x402081 → 0x459A80(0x56B95C)
         self.sysf.clear()                         # 0x458E1C 0x45AF10(0x56CC84,0)
 
@@ -3588,6 +3605,163 @@ class Page4Mixin:
         self.p4_45eea0((self.p4_45f9d0() * 0xC8) & 0xFFFFFFFF)
         self.p4_45eea0((self.p4_45fa00() * 0xC8) & 0xFFFFFFFF)
         self.p4_45e7f0(0)
+
+    # ---- 排行榜 0x4AB5CC（§16.106C）：0x45C570 深拷贝 / 0x45C7D0 插入 / 0x45F850 登记 ----
+    P4_REC_STRIDE = 0x54                      # 记录 0x54 字节；idx = mode + 2*row；表 2 基址 +0x740
+
+    def p4_45c570(self, dst_off: int, src) -> None:
+        """`0x45C570(ecx=tbl, arg1=dst, arg2=src)`：0x54 字节记录深拷贝。
+        ```
+        0x45C578 eax = [dst+0x4C]（旧附件尺寸）≠0 → 0x47C7E9 释放
+        0x45C58C rep movsd 0x15                   record ← src（0x54 字节）
+        0x45C597 eax = [src+0x4C]（附件指针 {size,data}）→ 0x47C7C0 分配 + 拷贝
+        ```
+        复刻侧附件走 p4_stat 键 ("blob4ab5cc", off)（字节模型无指针域）。"""
+        t = self._p4_tbl4ab5cc()
+        t[dst_off:dst_off + 0x54] = bytes(src)[:0x54]
+        # 附件（rec+0x4C 的 {size,data} 指针域）：写附件的子系统（回放挂接）未建，
+        # 字节模型无指针域，此处按"无附件"处理——已有附件视为一并释放。
+        self.p4_stat.pop(("blob4ab5cc", dst_off), None)
+
+    def _p4_rec_score(self, off: int) -> int:
+        t = self._p4_tbl4ab5cc()
+        return int.from_bytes(t[off:off + 4], "little")
+
+    def p4_45c7d0(self, rec: bytes, row: int) -> None:
+        """`0x45C7D0(ecx=0x4AB5CC, &rec, row)`：排行榜插入（三段）。
+
+        ```
+        byte[tbl+5] != 0（第二张表 @+0x740，0x45CA5C）：
+            slot = +0x740 + (mode + 2*row)*0x54
+            dword[slot] <= dword[rec] 才 0x45C570(slot ← rec) + 0x45D460
+        byte[tbl+5] == 0（主表 @+8）：
+            ① 影子槽 +0x548 + (mode + 2*rec[0xF])*0x54：rec 分数更大则先拷入
+            ② 主插入：mode 列（基址 +8 + mode*0x54，行距 0xA8）自上而下找
+               首个 score <= rec 的行 row（顶格 > 全部 → row=8 不插）；row<8 时
+               行 7→row+1 逐行下移（0x15 dword 拷贝），写 rec 于 row，
+               并把同 row 的**另一模式**槽分数清 0（0x45C8F7）
+            ③ 跨模式回填（0x45C92E..0x45CA55）：收 mode 列 7 行的 byte[+0xF] 位图，
+               缺两个模式时按分数序从影子槽 +0x4A0/+0x3F8 回填
+        0x45D460/0x45D3A0（0x4CD5D8 的 UI 列表更新）以计数登记（该子系统未建）。
+        ```"""
+        t = self._p4_tbl4ab5cc()
+        mode = _p4_s8(t[4])                        # byte[tbl+4]
+        rec_mode = _p4_s8(rec[0xF])
+        score = int.from_bytes(rec[0:4], "little")
+        if t[5] != 0:                              # 0x45C7D5 → 第二张表
+            off = 0x740 + (mode + 2 * row) * 0x54
+            if not (self._p4_rec_score(off) > score):          # 0x45CA85 ja
+                self.p4_45c570(off, rec)
+                st = self.p4_stat
+                st["45d460_calls"] = st.get("45d460_calls", 0) + 1
+            return
+        # ① 影子槽（0x45C7E1..0x45C82D）
+        shadow = 0x548 + (mode + 2 * rec_mode) * 0x54
+        if score > self._p4_rec_score(shadow):
+            self.p4_45c570(shadow, rec)
+            st = self.p4_stat
+            st["45d460_calls"] = st.get("45d460_calls", 0) + 1
+        # ② 主插入（0x45C82E..0x45C92D）
+        col = 8 + mode * 0x54
+        ins = 0
+        if self._p4_rec_score(col) > score:                    # 0x45C84E jbe → ins=0
+            ins = 0
+            while ins < 8 and self._p4_rec_score(col + ins * 0xA8) > score:
+                ins += 1                                       # 0x45C852..0x45C866
+        if ins < 8:                                            # 0x45C868 je → 不插
+            ebp = 7
+            while ebp > ins:                                   # 0x45C899..0x45C8D7
+                src_off = 8 + (mode + 2 * (ebp - 1)) * 0x54
+                dst_off = 8 + (mode + 2 * ebp) * 0x54
+                t[dst_off:dst_off + 0x54] = t[src_off:src_off + 0x54]
+                st = self.p4_stat
+                st["45d3a0_calls"] = st.get("45d3a0_calls", 0) + 1
+                ebp -= 1
+            other = 8 + (mode + 2 * ins + 1) * 0x54            # 0x45C8DF..0x45C8FE
+            t[other:other + 4] = b"\x00\x00\x00\x00"
+            self.p4_45c570(8 + (mode + 2 * ins) * 0x54, rec)   # 0x45C917
+            st = self.p4_stat
+            st["45d460_calls"] = st.get("45d460_calls", 0) + 1
+        # ③ 跨模式回填（0x45C92E..0x45CA55）
+        bits = 0
+        for i in range(7):                                     # 0x45C94F
+            cl = _p4_s8(t[8 + (mode + 2 * i) * 0x54 + 0xF])
+            bits |= 1 << cl
+        if bits == 7:                                          # 0x45C961
+            return
+        ebp = edi = 0                                          # 0x45C96E
+        for cl in range(3):                                    # 0x45C981
+            if not (bits >> cl) & 1:
+                if ebp == 0:
+                    ebp = cl + 8
+                else:
+                    edi = cl + 8
+        if edi != 0:                                           # 0x45C9A2
+            sa = 8 + (mode + 2 * edi) * 0x54
+            sb = 8 + (mode + 2 * ebp) * 0x54
+            if self._p4_rec_score(sa) >= self._p4_rec_score(sb):   # 0x45C9CC jb
+                ebp, edi = edi, ebp
+        self.p4_45c570(8 + (mode + 2 * ebp) * 0x54,
+                       bytearray(t[mode * 0x54 + 0x4A0:mode * 0x54 + 0x4F4]))   # 0x45C9EF
+        st = self.p4_stat
+        st["45d3a0_calls"] = st.get("45d3a0_calls", 0) + 1
+        if edi != 0:                                           # 0x45CA0B
+            self.p4_45c570(8 + (mode + 2 * edi) * 0x54,
+                           bytearray(t[mode * 0x54 + 0x3F8:mode * 0x54 + 0x44C]))  # 0x45CA3E
+            st["45d3a0_calls"] = st.get("45d3a0_calls", 0) + 1
+
+    def p4_45f850(self, v24: int, v28: int, w2c: int) -> None:
+        """`0x45F850(0x4CD4A0, &{v24, v28, w2c})`：**排行榜登记**（0x424122 调用）。
+        `byte[0x56CCB5]`（回放播放）非 0 直接返回（0x45F85D）。
+
+        0x54 字节记录（esp_flow 逐帧定案）：
+        ```
+        +0x00 dword [0x4CD4A0+0x04]   总得分
+        +0x04 word  0x45E7A0([+8], [+0x10])   ShootRate 千分比
+        +0x06 word  0x45E7A0([+0xC], [+8])    ShootRate(Laser) 千分比
+        +0x08 word  [0x4CD590+0x34]   （0x460E80）
+        +0x0A word  [0x56CCB0]        关卡
+        +0x0C word  [0x4CD4A0+0x30]
+        +0x0E byte  [0x4CD4A0+0x2C]
+        +0x0F byte  0x45AFC0(0x4AB5B0, 0xC000)   槽位＝记录的模式字节
+        +0x10 byte  [0x4CD4A0+0x24] 低字节
+        +0x11 byte  (0x45AFC0(0x4AB5B0, 0x200) != 0)
+        +0x12..+0x1B  {v24 dword, v28 dword, w2c word}   名字前 10 字节（0x51000004 输入）
+        +0x1C..+0x3F  36 字节日期时间串（0x46411A = time/localtime、0x463FBA = 格式化）
+        +0x40 dword [0x56CCA8]        帧计数
+        +0x44 dword [0x56CCAC]
+        +0x48 dword [0x4AB570+0x20]   已播帧（0x45A610）
+        +0x4C dword [0x4CD4A0+0xE8]
+        ```
+        `0x45C7D0(0x4AB5CC, &rec, word[+0x24]−1)`（行 = 关卡号−1）。"""
+        if self.p4_stat.get(0x56CCB5, 0):
+            return                                  # 0x45F85D jne
+        st = self.p4_stat
+        rec = bytearray(0x54)
+        rec[0x00:0x04] = (st.get(0x4CD4A0 + 0x04, 0) & 0xFFFFFFFF).to_bytes(4, "little")
+        r1 = self.p4_45e7a0(st.get(0x4CD4A0 + 0x08, 0),
+                            st.get(0x4CD4A0 + 0x10, 0)) & 0xFFFF   # 0x45F876
+        r2 = self.p4_45e7a0(st.get(0x4CD4A0 + 0x0C, 0),
+                            st.get(0x4CD4A0 + 0x08, 0)) & 0xFFFF   # 0x45F88A
+        rec[0x04:0x06] = (r1 & 0xFFFF).to_bytes(2, "little")
+        rec[0x06:0x08] = (r2 & 0xFFFF).to_bytes(2, "little")
+        rec[0x08:0x0A] = (st.get(0x4CD590 + 0x34, 0) & 0xFFFF).to_bytes(2, "little")
+        rec[0x0A:0x0C] = (_p4_s16(st.get(0x56CCB0, 0)) & 0xFFFF).to_bytes(2, "little")
+        rec[0x0C:0x0E] = (st.get(0x4CD4A0 + 0x30, 0) & 0xFFFF).to_bytes(2, "little")
+        rec[0x0E] = st.get(0x4CD4A0 + 0x2C, 0) & 0xFF
+        rec[0x0F] = self.keys.field(0xC000) & 0xFF               # 0x45F8B1
+        rec[0x10] = st.get(0x4CD4A0 + 0x24, 0) & 0xFF
+        rec[0x11] = 1 if self.keys.field(0x200) else 0           # 0x45F8E3
+        rec[0x12:0x16] = (v24 & 0xFFFFFFFF).to_bytes(4, "little")
+        rec[0x16:0x1A] = (v28 & 0xFFFFFFFF).to_bytes(4, "little")
+        rec[0x1A:0x1C] = (w2c & 0xFFFF).to_bytes(2, "little")
+        stamp = _p4_result_stamp()                               # 0x46411A + 0x463FBA
+        rec[0x1C:0x40] = stamp[:0x24].ljust(0x24, b"\0")
+        rec[0x40:0x44] = (self.p4_frame_no() & 0xFFFFFFFF).to_bytes(4, "little")
+        rec[0x44:0x48] = (st.get(0x56CCAC, 0) & 0xFFFFFFFF).to_bytes(4, "little")
+        rec[0x48:0x4C] = (st.get(0x4AB570 + 0x20, 0) & 0xFFFFFFFF).to_bytes(4, "little")
+        rec[0x4C:0x50] = (st.get(0x4CD4A0 + 0xE8, 0) & 0xFFFFFFFF).to_bytes(4, "little")
+        self.p4_45c7d0(bytes(rec), _p4_s16(st.get(0x4CD4A0 + 0x24, 0)) - 1)
 
     def p4_45f820(self, v: int) -> None:
         """`0x45F820(0x4CD4A0, v)`：先（v==0 时）0x45E7F0(0)，再 0x45E7F0(1)。"""

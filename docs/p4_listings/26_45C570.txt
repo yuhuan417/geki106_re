@@ -1,0 +1,42 @@
+; func 0x45c570  (38 insns)
+
+0x0045c570  push    ebx
+0x0045c571  push    ebp
+0x0045c572  mov     ebp, dword ptr [esp + 0xc]
+0x0045c576  push    esi
+0x0045c577  push    edi
+0x0045c578  mov     eax, dword ptr [ebp + 0x4c]
+0x0045c57b  test    eax, eax
+0x0045c57d  je      0x45c588
+0x0045c57f  push    eax
+0x0045c580  call    0x47c7e9   ; call 0x47c7e9
+0x0045c585  add     esp, 4
+loc_45c588:
+0x0045c588  mov     ebx, dword ptr [esp + 0x18]
+0x0045c58c  mov     ecx, 0x15
+0x0045c591  mov     esi, ebx
+0x0045c593  mov     edi, ebp
+0x0045c595  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x0045c597  mov     eax, dword ptr [ebx + 0x4c]
+0x0045c59a  mov     esi, dword ptr [eax]
+0x0045c59c  push    esi
+0x0045c59d  call    0x47c7c0   ; call 0x47c7c0
+0x0045c5a2  add     esp, 4
+0x0045c5a5  mov     dword ptr [ebp + 0x4c], eax
+0x0045c5a8  test    eax, eax
+0x0045c5aa  je      0x45c5c1
+0x0045c5ac  mov     ecx, esi
+0x0045c5ae  mov     esi, dword ptr [ebx + 0x4c]
+0x0045c5b1  mov     edx, ecx
+0x0045c5b3  mov     edi, eax
+0x0045c5b5  shr     ecx, 2
+0x0045c5b8  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x0045c5ba  mov     ecx, edx
+0x0045c5bc  and     ecx, 3
+0x0045c5bf  rep movsb byte ptr es:[edi], byte ptr [esi]
+loc_45c5c1:
+0x0045c5c1  pop     edi
+0x0045c5c2  pop     esi
+0x0045c5c3  pop     ebp
+0x0045c5c4  pop     ebx
+0x0045c5c5  ret     8
