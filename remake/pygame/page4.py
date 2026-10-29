@@ -541,7 +541,8 @@ class Ent42(Ent):
             self.node.dst = (x - sz, y - sz)                 # 0x4378A5 用 [+0xC]
         else:                                                # 0x4358B4
             self.beh = 0x437E50
-            v = (owner.p4_afc0(0x4AB5B0, 0xC000) >> 14) & 3 if owner else 0
+            # 0x4358F0 `0x45AFC0(0x4AB5B0,0xC000)` 已经把 0xC000 右移到最低位 ⇒ 返回值就是 0..3
+            v = owner.p4_afc0(0xC000, 0x4AB5B0) if owner else 0
             self.d32(0x3C, 0x4AB5B0)
             l, t, r, b = 0, v * 0x30, 0x2F, v * 0x30 + 0x2F  # 0x4358FF 0x45A750(&r,0,v*0x30,0x2F,…)
             self.node = DNode(0, l, t)                       # 0x4358CE [eax]=ebx=0 ⇒ 层 0
@@ -3210,15 +3211,6 @@ class Page4Mixin:
         if y > 0x1DF:                            # 0x430667
             return False
         return (b - t) + y > 0                   # 0x430674 0x45A730 高
-
-    def p4_afc0(self, which: int, mask: int) -> int:
-        """`0x45AFC0(obj, mask)`：`value & mask`（页4 用 0x4AB5B0 / 0x56CCB8）。
-
-        `0x45AFC0` 本体在 `0x45AFB0` 一族里：`and` 之后返回，**不含**取反。
-        """
-        if which == 0x4AB5B0:
-            return self.p4_sys_bits() & mask if hasattr(self, "p4_sys_bits") else 0
-        return int(getattr(self, "_p4_b5b0", 0)) & mask
 
     def p4_rand(self) -> int:
         """`0x45AD00`：LCG，状态 `[0x5D3E38]`；`st = (st*0x19660D + 0x3C6EF35F) & 0x7FFFFFFF`。"""
