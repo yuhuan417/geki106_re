@@ -1,0 +1,78 @@
+; func 0x450350  (69 insns)
+
+0x00450350  push    esi
+0x00450351  mov     esi, ecx
+0x00450353  push    edi
+0x00450354  mov     eax, dword ptr [esi + 4]
+0x00450357  test    eax, eax
+0x00450359  je      0x450401
+0x0045035f  mov     edi, dword ptr [esp + 0xc]
+0x00450363  mov     eax, dword ptr [esi + edi*4 + 8]
+0x00450367  test    eax, eax
+0x00450369  je      0x450401
+0x0045036f  mov     al, byte ptr [esi + 0x5d]
+0x00450372  test    al, al
+0x00450374  je      0x450401
+0x0045037a  cmp     edi, 2
+0x0045037d  jne     0x450395
+0x0045037f  mov     al, byte ptr [esi + 0x5e]
+0x00450382  mov     cl, al
+0x00450384  neg     cl
+0x00450386  sbb     ecx, ecx
+0x00450388  add     ecx, 3
+0x0045038b  test    al, al
+0x0045038d  sete    dl
+0x00450390  mov     edi, ecx
+0x00450392  mov     byte ptr [esi + 0x5e], dl
+loc_450395:
+0x00450395  mov     al, byte ptr [esi + 0x5c]
+0x00450398  test    al, al
+0x0045039a  je      0x4503c0
+0x0045039c  mov     ecx, dword ptr [esp + 0x10]
+0x004503a0  cmp     ecx, 0xffffd8f0
+0x004503a6  jle     0x4503b2
+0x004503a8  cmp     ecx, 0x2710
+0x004503ae  jge     0x4503b9
+0x004503b0  jmp     0x4503c2
+loc_4503b2:
+0x004503b2  mov     ecx, 0xffffd8f0
+0x004503b7  jmp     0x4503c2
+loc_4503b9:
+0x004503b9  mov     ecx, 0x2710
+0x004503be  jmp     0x4503c2
+loc_4503c0:
+0x004503c0  xor     ecx, ecx
+loc_4503c2:
+0x004503c2  mov     eax, dword ptr [esi + edi*4 + 8]
+0x004503c6  push    ecx
+0x004503c7  push    eax
+0x004503c8  mov     edx, dword ptr [eax]
+0x004503ca  call    dword ptr [edx + 0x40]
+0x004503cd  mov     eax, dword ptr [esi + edi*4 + 8]
+0x004503d1  lea     edx, [esp + 0xc]
+0x004503d5  push    edx
+0x004503d6  push    eax
+0x004503d7  mov     ecx, dword ptr [eax]
+0x004503d9  call    dword ptr [ecx + 0x24]
+0x004503dc  mov     al, byte ptr [esp + 0xc]
+0x004503e0  mov     esi, dword ptr [esi + edi*4 + 8]
+0x004503e4  test    al, 1
+0x004503e6  je      0x4503f5
+0x004503e8  mov     eax, dword ptr [esi]
+0x004503ea  push    0
+0x004503ec  push    esi
+0x004503ed  call    dword ptr [eax + 0x34]
+0x004503f0  pop     edi
+0x004503f1  pop     esi
+0x004503f2  ret     8
+loc_4503f5:
+0x004503f5  mov     ecx, dword ptr [esi]
+0x004503f7  push    0
+0x004503f9  push    0
+0x004503fb  push    0
+0x004503fd  push    esi
+0x004503fe  call    dword ptr [ecx + 0x30]
+loc_450401:
+0x00450401  pop     edi
+0x00450402  pop     esi
+0x00450403  ret     8

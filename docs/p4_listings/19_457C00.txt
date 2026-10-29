@@ -1,0 +1,16 @@
+; func 0x457c00  (14 insns)
+
+0x00457c00  mov     eax, dword ptr [esp + 0xc]
+0x00457c04  mov     edx, dword ptr [esp + 8]
+0x00457c08  push    eax
+0x00457c09  push    edx
+0x00457c0a  mov     edx, dword ptr [esp + 0xc]
+0x00457c0e  mov     eax, edx
+0x00457c10  shl     eax, 4
+0x00457c13  add     eax, edx
+0x00457c15  lea     eax, [eax + eax*4]
+0x00457c18  lea     eax, [edx + eax*8]
+0x00457c1b  lea     edx, [edx + eax*2]
+0x00457c1e  lea     ecx, [ecx + edx*8 + 4]
+0x00457c22  call    0x4011a9   ; → 0x4572e0
+0x00457c27  ret     0xc

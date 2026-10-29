@@ -1,0 +1,18 @@
+; func 0x423ee0  (15 insns)
+
+0x00423ee0  sub     esp, 0xe8
+0x00423ee6  push    ebp
+0x00423ee7  mov     ebp, ecx
+0x00423ee9  push    esi
+0x00423eea  push    edi
+0x00423eeb  mov     eax, dword ptr [ebp + 0x1c]
+0x00423eee  cmp     eax, 4
+0x00423ef1  ja      0x4241a7
+0x00423ef7  jmp     dword ptr [eax*4 + 0x4241b4]
+loc_4241a7:
+0x004241a7  pop     edi
+0x004241a8  pop     esi
+0x004241a9  mov     al, 1
+0x004241ab  pop     ebp
+0x004241ac  add     esp, 0xe8
+0x004241b2  ret     

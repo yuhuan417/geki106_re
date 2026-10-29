@@ -1,0 +1,58 @@
+; func 0x44b140  (51 insns)
+
+0x0044b140  mov     eax, dword ptr fs:[0]
+0x0044b146  push    -1
+0x0044b148  push    0x494fb6
+0x0044b14d  push    eax
+0x0044b14e  mov     dword ptr fs:[0], esp
+0x0044b155  push    esi
+0x0044b156  push    edi
+0x0044b157  mov     edi, dword ptr [esp + 0x18]
+0x0044b15b  mov     esi, ecx
+0x0044b15d  push    edi
+0x0044b15e  call    0x401352   ; → 0x430820
+0x0044b163  mov     eax, dword ptr [esi + 0x28]
+0x0044b166  push    0x48
+0x0044b168  test    eax, eax
+0x0044b16a  jne     0x44b198
+0x0044b16c  call    0x47c7c0   ; call 0x47c7c0
+0x0044b171  add     esp, 4
+0x0044b174  mov     dword ptr [esp + 0x18], eax
+0x0044b178  test    eax, eax
+0x0044b17a  mov     dword ptr [esp + 0x10], 0
+0x0044b182  je      0x44b191
+0x0044b184  push    edi
+0x0044b185  mov     ecx, eax
+0x0044b187  call    0x40128f   ; → 0x449150
+0x0044b18c  mov     dword ptr [esi + 0x28], eax
+0x0044b18f  jmp     0x44b1c8
+loc_44b191:
+0x0044b191  xor     eax, eax
+0x0044b193  mov     dword ptr [esi + 0x28], eax
+0x0044b196  jmp     0x44b1c8
+loc_44b198:
+0x0044b198  call    0x47c7c0   ; call 0x47c7c0
+0x0044b19d  add     esp, 4
+0x0044b1a0  mov     dword ptr [esp + 0x18], eax
+0x0044b1a4  test    eax, eax
+0x0044b1a6  mov     dword ptr [esp + 0x10], 1
+0x0044b1ae  je      0x44b1ba
+0x0044b1b0  push    edi
+0x0044b1b1  mov     ecx, eax
+0x0044b1b3  call    0x40128f   ; → 0x449150
+0x0044b1b8  jmp     0x44b1bc
+loc_44b1ba:
+0x0044b1ba  xor     eax, eax
+loc_44b1bc:
+0x0044b1bc  mov     ecx, dword ptr [esi + 0x2c]
+0x0044b1bf  mov     dword ptr [ecx + 0x44], eax
+0x0044b1c2  mov     edx, dword ptr [esi + 0x2c]
+0x0044b1c5  mov     eax, dword ptr [edx + 0x44]
+loc_44b1c8:
+0x0044b1c8  mov     ecx, dword ptr [esp + 8]
+0x0044b1cc  mov     dword ptr [esi + 0x2c], eax
+0x0044b1cf  pop     edi
+0x0044b1d0  mov     dword ptr fs:[0], ecx
+0x0044b1d7  pop     esi
+0x0044b1d8  add     esp, 0xc
+0x0044b1db  ret     4

@@ -1,0 +1,22 @@
+; func 0x4574c0  (18 insns)
+
+0x004574c0  push    esi
+0x004574c1  mov     esi, ecx
+0x004574c3  push    edi
+0x004574c4  xor     edi, edi
+0x004574c6  mov     eax, dword ptr [esi + 4]
+0x004574c9  cmp     eax, edi
+0x004574cb  je      0x4574da
+loc_4574cd:
+0x004574cd  push    edi
+0x004574ce  push    eax
+0x004574cf  mov     ecx, esi
+0x004574d1  call    0x40206d   ; → 0x457210
+0x004574d6  cmp     eax, edi
+0x004574d8  jne     0x4574cd
+loc_4574da:
+0x004574da  mov     dword ptr [esi + 4], edi
+0x004574dd  mov     dword ptr [esi + 8], edi
+0x004574e0  pop     edi
+0x004574e1  pop     esi
+0x004574e2  ret     

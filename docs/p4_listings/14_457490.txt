@@ -1,0 +1,9 @@
+; func 0x457490  (6 insns)
+
+0x00457490  mov     al, byte ptr [ecx + 0x2a90]
+0x00457496  test    al, al
+0x00457498  je      0x4574a2
+0x0045749a  add     ecx, 0xc
+0x0045749d  jmp     0x4011fe   ; → 0x45a170
+loc_4574a2:
+0x004574a2  ret     

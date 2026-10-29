@@ -1,0 +1,31 @@
+; func 0x457000  (27 insns)
+
+0x00457000  mov     edx, dword ptr [ecx + 0x34]
+0x00457003  mov     eax, dword ptr [ecx + 0x40]
+0x00457006  push    esi
+0x00457007  push    edi
+0x00457008  mov     edi, dword ptr [ecx + 0x58]
+0x0045700b  xor     esi, esi
+0x0045700d  test    edi, edi
+0x0045700f  jle     0x457038
+0x00457011  push    ebx
+0x00457012  lea     edi, [ecx + 0xd4]
+loc_457018:
+0x00457018  mov     ebx, edx
+0x0045701a  add     edx, eax
+0x0045701c  sar     ebx, 6
+0x0045701f  mov     dword ptr [edi], ebx
+0x00457021  mov     ebx, eax
+0x00457023  imul    ebx, dword ptr [ecx + 0x4c]
+0x00457027  sar     ebx, 6
+0x0045702a  add     eax, ebx
+0x0045702c  mov     ebx, dword ptr [ecx + 0x58]
+0x0045702f  inc     esi
+0x00457030  add     edi, 0xc
+0x00457033  cmp     esi, ebx
+0x00457035  jl      0x457018
+0x00457037  pop     ebx
+loc_457038:
+0x00457038  pop     edi
+0x00457039  pop     esi
+0x0045703a  ret     

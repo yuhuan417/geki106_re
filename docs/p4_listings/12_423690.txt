@@ -1,0 +1,65 @@
+; func 0x423690  (60 insns)
+
+0x00423690  sub     esp, 0x28
+0x00423693  mov     eax, dword ptr [esp + 0x30]
+0x00423697  mov     ecx, dword ptr [esp + 0x34]
+0x0042369b  mov     dword ptr [esp], eax
+0x0042369f  mov     eax, dword ptr [esp + 0x2c]
+0x004236a3  cmp     eax, 0xe
+0x004236a6  push    esi
+0x004236a7  mov     dword ptr [esp + 8], ecx
+0x004236ab  jne     0x4236c2
+0x004236ad  push    0x197
+0x004236b2  push    0x17
+0x004236b4  push    0x180
+0x004236b9  lea     edx, [esp + 0x28]
+0x004236bd  push    0
+0x004236bf  push    edx
+0x004236c0  jmp     0x423705
+loc_4236c2:
+0x004236c2  cmp     eax, 0xa
+0x004236c5  jl      0x4236eb
+0x004236c7  lea     ecx, [eax + eax*2]
+0x004236ca  lea     eax, [eax + eax*2 - 0x1b]
+0x004236ce  push    0x197
+0x004236d3  lea     edx, [ecx*8 - 0xc1]
+0x004236da  lea     ecx, [esp + 0x20]
+0x004236de  push    edx
+0x004236df  push    0x180
+0x004236e4  shl     eax, 3
+0x004236e7  push    eax
+0x004236e8  push    ecx
+0x004236e9  jmp     0x423705
+loc_4236eb:
+0x004236eb  lea     eax, [eax + eax*2]
+0x004236ee  push    0x167
+0x004236f3  shl     eax, 3
+0x004236f6  lea     edx, [eax + 0x17]
+0x004236f9  push    edx
+0x004236fa  push    0x150
+0x004236ff  push    eax
+0x00423700  lea     eax, [esp + 0x2c]
+0x00423704  push    eax
+loc_423705:
+0x00423705  call    0x40238d   ; → 0x45a750
+0x0042370a  mov     esi, eax
+0x0042370c  add     esp, 0x14
+0x0042370f  mov     eax, dword ptr [esi]
+0x00423711  mov     ecx, dword ptr [esi + 4]
+0x00423714  mov     edx, dword ptr [esi + 8]
+0x00423717  mov     esi, dword ptr [esi + 0xc]
+0x0042371a  mov     dword ptr [esp + 0x10], ecx
+0x0042371e  lea     ecx, [esp + 0xc]
+0x00423722  mov     dword ptr [esp + 0x14], edx
+0x00423726  push    ecx
+0x00423727  lea     edx, [esp + 8]
+0x0042372b  push    0
+0x0042372d  push    edx
+0x0042372e  push    0xd
+0x00423730  mov     ecx, 0x4aa7b0
+0x00423735  mov     dword ptr [esp + 0x1c], eax
+0x00423739  mov     dword ptr [esp + 0x28], esi
+0x0042373d  call    0x402162   ; → 0x44d060
+0x00423742  pop     esi
+0x00423743  add     esp, 0x28
+0x00423746  ret     0xc

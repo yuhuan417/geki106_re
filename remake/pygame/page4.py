@@ -340,11 +340,18 @@ class BgBand:
 
 
 class BgSlot:
-    """`0x4AD55C` 的 12 个背景槽之一（元素 0x2A98 字节，`0x457B60` → `0x463C4F`）。"""
+    """`0x4AD55C` 的 12 个背景槽之一（元素 0x2A98 字节，`0x457B60` → `0x463C4F`）。
 
-    # _t / _base：带状体对象（0x34 字节，`0x457540`）的 `[+0xC]` 计时器与 `[+0x10]` base
-    __slots__ = ("params", "rates", "grid", "bands", "rem", "flags", "active", "acc",
-                 "_t", "_base")
+    布局（`0x457260` 复位 + `0x457380`/`0x457490`/`0x4574C0` 的读法逐项对出）：
+    `+4`/`+8` = 带状体链表头/尾（`next` 在 `[band+0x30]`，`0x4571B8` 挂尾）；
+    `+0xC`/`+0x10` = 显示链宿主（头/计数，`0x45A170` 渲染、`0x45A070` 清空）；
+    `+0x30..+0x80` = 20 项参数块（`0x456D50` 拷入）；`+0x80..+0xD0` = 20 项速率块
+    （`0x457330` 拷入，`0x456D80` 每帧累加）；`+0xD0..` = 网格（0xA6E dword =
+    890 格 × 3 dword `{x, y, kind}`，`0x457260` 清零界）；`+0x2A88` 速率剩余帧、
+    `+0x2A8C` 分发位、`+0x2A90` 启用、`+0x2A94` 滚动累加器。
+    """
+
+    __slots__ = ("params", "rates", "grid", "bands", "rem", "flags", "active", "acc")
 
     def __init__(self):
         self.params = [0] * 20     # +0x30（0x456D50 拷入）
@@ -5337,17 +5344,23 @@ class Page4Mixin:
             band.h = (band.jit_y * kind) >> 6                # [+0x24]
             band.kind = kind
             if kind > 0xF0:
-                layer = band.layer
+                pass                                     # 0x4577D7 ja → 直落 0x457861
             else:
                 idx = BG_KIND_IDX[kind] if kind < len(BG_KIND_IDX) else 0x0B
                 if idx == 0:                             # 0x4577EC：隐藏
                     band.visible = 0
-                elif idx != 0x0B:                        # 0x4577F5..：层号 = 2 + 序号
+                elif idx != 0x0B:                        # 0x4577F5..0x457858：层号
                     band.layer = idx + 2
-        # 源矩形 (0, row*kind, kind-1, (row+1)*kind-1)；目标 = 格内 (x,y) + 抖动
+                # ★ 0x4577F5..0x457858 十个分支全部 `jmp 0x457861`（逐支解出）：
+                #   写层号之后**必写**源矩形，"映射 kind 不写矩形"的旧说作废。
+        if kind == 0:                                    # 0x4578B5 test k / je 0x4578ED
+            band.visible = 0                             # 每帧都判（不只 kind 变化时）
+            return True
+        # 0x457861 源矩形 (0, row*k, k-1, (row+1)*k-1)（含 idx 0/11 两支也落这里）
         gx = grid[pos][0] if pos < len(grid) else 0
         gy = grid[pos][1] if pos < len(grid) else 0
         band.src = (0, band.row * kind, kind - 1, (band.row + 1) * kind - 1)
+        # 0x4578A5..0x4578D3 目标 = 格子原始坐标 + 抖动*k>>6 − k/2（0x45A690 恒等，无缩放）
         band.dst = (gx + band.w - (kind >> 1), gy + band.h - (kind >> 1))
         return True
 
@@ -5406,98 +5419,42 @@ class Page4Mixin:
         for _sj, slot in enumerate(self.p4_bg):
             self._bg_update(slot)
 
-    # k 斜坡值 → 层号（`0x457938` 0xF1 项字节表 → `0x457908` 跳表，逐个读取得出）
-    P4_BG_K2LAYER = {0x06: 3, 0x0A: 4, 0x10: 5, 0x18: 6, 0x20: 7,
-                     0x30: 8, 0x48: 9, 0x6C: 0x0A, 0xA0: 0x0B, 0xF0: 0x0C}
-
-    # k 斜坡值 → 层号（`0x457938` 0xF1 项字节表 → `0x457908` 跳表，逐个读取得出）
-    P4_BG_K2LAYER = {0x06: 3, 0x0A: 4, 0x10: 5, 0x18: 6, 0x20: 7,
-                     0x30: 8, 0x48: 9, 0x6C: 0x0A, 0xA0: 0x0B, 0xF0: 0x0C}
-
-    def p4_457120(self, slot, acc: int) -> None:
-        """`0x457120(this, acc)`：绕回时重建 0x34 字节"带状体"。
-
-        ```
-        0x457139 push 0x34 ; call 0x47C7C0        ; operator new(0x34)
-        0x45715A lea ecx, [esi+0xC] ; lea edx, [esi+0x30]
-        ```
-        还没读全它如何写 `[+0xC]`（索引），所以这里不做任何事——**不臆造公式**。
-        """
-        return
-
     def p4_bg_draw(self) -> None:
-        """`0x458EF5` → `0x457CB0`（12 槽，步长 0x2A98）→ `0x457490`（单槽 → `0x45A170`）。
+        """`0x458EF5` → `0x457CB0`（12 槽，步长 0x2A98）→ `0x457490` → `0x45A170(slot+0xC)`。
 
-        每槽一个显示节点（`0x457540` 建在 `[obj+0x2C]`），节点由 `0x457750` 每帧更新：
+        每槽的**显示链**（宿主 = `&[slot+0xC]`，`0x45A0E0` 头插 ⇒ 链头 = 最新带状体）
+        逐节点色键贴屏；节点字段由 `_bg_update`/`_bg_band`（`0x457380`/`0x457750`）每帧维护：
 
         ```
-        0x457760 [obj+0xC] += [param+0x38]     ; 索引 += 步长（params[14]）
-        0x45776A 窗口 params[11] .. params[12]
-        0x4577AB k = [[obj+4] + idx*12 + 8]
-        0x4577DD k → 层 3..0xC（k=0 不可见）
-        0x45787E rect = (0, base*k, k-1, (base+1)*k-1)
-        0x4578C9 dst  = (条目x + seedX - k/2, 条目y + seedY - k/2)（`0x45A690` 恒等）
+        0x457490 byte[slot+0x2A90]==0 → 跳过
+        0x45A170 从链头（= 最新带）沿 next 渲染 ⇒ 渲染序 = 带链**逆序**
+        byte[node+0x1C] 可见位（0x457750 的窗口/使能/k==0 三处写）
+        node[+0] 层号（k 阶梯 3..0xC；未映射 kind 保持 0 = 层 0）
+        node[+4..+0x10] 源矩形 (0, row*k, k-1, (row+1)*k-1)
+        node[+0x14/+0x18] 目标 = 格子原始坐标 + 抖动*k>>6 − k/2（**无缩放**，0x45A690 恒等；
+            超出 640×480 的格子由贴屏裁剪，0x456FB0/0x457000 锚定 + op7 速率漂移决定可见性）
         ```
 
-        索引初值来自累加器绕回（`0x457330` 的 `0x4573ED..0x457438`）；**只有发生绕回时**
-        才创建/重置节点（`0x45741D`/`0x457439`），其余帧只做 `+= 步长`（§16.330）。
-
-        条目 x/y 是 1/1024 屏宽的归一化坐标（`0x456FB0` 的 `>>6` 把 16.16 的
-        `params[0] = 0.508` 变成 `520/1024`），屏显 = `值*屏幅 >> 10`。
+        网格坐标是**原始像素坐标**（模式 0 `0x456F30` 的基准 = `params[0]>>6`，如 33280>>6=520）；
+        此前渲染端自造的 `*640>>10 / *480>>10` 归一化与 `slot._t` 单索引模型一并废除。
         """
         c = self.canvas
         for slot in self.p4_bg:
             if not slot.active:
-                continue
-            grid = getattr(slot, "grid", None)
-            if not grid:
-                continue
-            step = slot.params[14]                       # +0x68
-            period = slot.params[13]                     # +0x64
-            count = slot.params[10] or len(grid)         # +0x58（0 时退回实际条数）
-            if period <= 0:
-                continue
-            orig_acc = acc = slot.acc + step              # 0x4573F0
-            # 32 位有符号归一（exe 里 acc 是 int32，绕回只减去一个周期）
-            acc = ((acc + 0x80000000) & 0xFFFFFFFF) - 0x80000000
-            if abs(acc) >= period:                       # 0x457408 → 本帧发生绕回
-                if step >= 0:                            # 0x457410
-                    while acc >= period:
-                        acc -= period
-                else:                                    # 0x457426
-                    while acc <= -period:
-                        acc += period
-                # 0x45741D `0x457120(slot, acc)`：为 0x34 字节的"带状体"做 operator new
-                # （`push 0x34; call 0x47C7C0`），本复刻尚未读定它如何写 [+0xC]，先不臆造
-                self.p4_457120(slot, acc)
-            # 0x457760 `add edi, ecx`：索引每帧推进一步；绕回时由带状体 ctor
-            # `0x457598 [band+0xC] = acc` 把索引重置为**归一后的 acc**
-            if abs(orig_acc) >= period:
-                slot._t = acc
-            else:
-                slot._t = getattr(slot, "_t", 0) + step
-            slot.acc = acc                               # 0x4573FB
-            t = slot._t
-            if t < slot.params[11] or t > slot.params[12]:   # 0x45776A 窗口
-                continue
-            if t < 0 or t >= len(grid):                  # 0x457795
-                continue
-            ent = grid[t]
-            k = ent[2]
-            if k == 0:                                   # 0x4578B5
-                continue
-            layer = self.P4_BG_K2LAYER.get(k)
-            if layer is None:                            # 0x457861 支：不动层号
-                continue
-            base = getattr(slot, "_base", 0)             # [obj+0x10]，0..3 分组
-            l, tp, r, b = 0, base * k, k - 1, (base + 1) * k - 1
-            dx = ((ent[0] * 640) >> 10) - (k >> 1)       # 0x4578C9 归一化 → 屏显
-            dy = ((ent[1] * 480) >> 10) - (k >> 1)
-            lay = self.layers.tab.get(layer)
-            if lay is None:
-                continue
-            c.blit(lay.buf, (l, tp, r + 1, b + 1), (dx, dy), key=lay.ckey)
-            self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
+                continue                             # 0x457490 byte[ecx+0x2A90]
+            for band in reversed(slot.bands):        # 0x45A170：链头 = 最新带 → 先画
+                if not band.visible:
+                    continue                         # byte[node+0x1C]
+                k = band.kind
+                if k <= 0:
+                    continue                         # 0x4578B5 k==0 → 隐藏
+                lay = self.layers.tab.get(band.layer)
+                if lay is None:
+                    continue
+                l, t, r, b = band.src
+                dx, dy = band.dst
+                c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+                self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
 
     def p4_render_ents(self) -> None:
         """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），

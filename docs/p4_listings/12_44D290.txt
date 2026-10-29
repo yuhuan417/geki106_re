@@ -1,0 +1,47 @@
+; func 0x44d290  (39 insns)
+
+0x0044d290  mov     eax, dword ptr [esp + 4]
+0x0044d294  sub     esp, 0x64
+0x0044d297  test    eax, eax
+0x0044d299  je      0x44d2a1
+0x0044d29b  mov     edx, dword ptr [ecx + eax*4 + 0x14]
+0x0044d29f  jmp     0x44d2a4
+loc_44d2a1:
+0x0044d2a1  mov     edx, dword ptr [ecx + 0x10]
+loc_44d2a4:
+0x0044d2a4  mov     al, byte ptr [ecx + 0x86]
+0x0044d2aa  mov     dword ptr [esp], 0x64
+0x0044d2b2  test    al, al
+0x0044d2b4  je      0x44d2c7
+0x0044d2b6  mov     eax, dword ptr [esp + 0x70]
+0x0044d2ba  and     eax, 0xff
+0x0044d2bf  mov     al, byte ptr [eax + 0x4987f4]
+0x0044d2c5  jmp     0x44d2cb
+loc_44d2c7:
+0x0044d2c7  mov     al, byte ptr [esp + 0x70]
+loc_44d2cb:
+0x0044d2cb  push    ebx
+0x0044d2cc  mov     bl, byte ptr [ecx + 0x84]
+0x0044d2d2  and     eax, 0xff
+0x0044d2d7  test    bl, bl
+0x0044d2d9  mov     dword ptr [esp + 0x54], eax
+0x0044d2dd  pop     ebx
+0x0044d2de  jne     0x44d2eb
+0x0044d2e0  mov     ecx, dword ptr [ecx + eax*4 + 0x888]
+0x0044d2e7  mov     dword ptr [esp + 0x50], ecx
+loc_44d2eb:
+0x0044d2eb  test    edx, edx
+0x0044d2ed  je      0x44d308
+0x0044d2ef  mov     eax, dword ptr [edx]
+0x0044d2f1  lea     ecx, [esp]
+0x0044d2f5  push    ecx
+0x0044d2f6  mov     ecx, dword ptr [esp + 0x70]
+0x0044d2fa  push    0x1000400
+0x0044d2ff  push    0
+0x0044d301  push    0
+0x0044d303  push    ecx
+0x0044d304  push    edx
+0x0044d305  call    dword ptr [eax + 0x14]
+loc_44d308:
+0x0044d308  add     esp, 0x64
+0x0044d30b  ret     0xc

@@ -1,0 +1,16 @@
+; func 0x457330  (13 insns)
+
+0x00457330  mov     al, byte ptr [ecx + 0x2a90]
+0x00457336  test    al, al
+0x00457338  je      0x45735f
+0x0045733a  mov     eax, dword ptr [esp + 8]
+0x0045733e  mov     edx, dword ptr [esp + 0xc]
+0x00457342  mov     dword ptr [ecx + 0x2a8c], eax
+0x00457348  mov     eax, dword ptr [esp + 4]
+0x0045734c  mov     dword ptr [ecx + 0x2a88], edx
+0x00457352  lea     edx, [ecx + 0x80]
+0x00457358  push    eax
+0x00457359  push    edx
+0x0045735a  call    0x40129e   ; → 0x456d50
+loc_45735f:
+0x0045735f  ret     0xc

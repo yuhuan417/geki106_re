@@ -1,0 +1,35 @@
+; func 0x457b80  (32 insns)
+
+0x00457b80  int3    
+0x00457b81  int3    
+0x00457b82  int3    
+0x00457b83  int3    
+0x00457b84  int3    
+0x00457b85  int3    
+0x00457b86  int3    
+0x00457b87  int3    
+0x00457b88  int3    
+0x00457b89  int3    
+0x00457b8a  int3    
+0x00457b8b  int3    
+0x00457b8c  int3    
+0x00457b8d  int3    
+0x00457b8e  int3    
+0x00457b8f  int3    
+0x00457b90  push    ebx
+0x00457b91  mov     ebx, ecx
+0x00457b93  push    esi
+0x00457b94  push    edi
+0x00457b95  lea     esi, [ebx + 4]
+0x00457b98  mov     edi, 0xc
+loc_457b9d:
+0x00457b9d  mov     ecx, esi
+0x00457b9f  call    0x4020c2   ; → 0x457260
+0x00457ba4  add     esi, 0x2a98
+0x00457baa  dec     edi
+0x00457bab  jne     0x457b9d
+0x00457bad  pop     edi
+0x00457bae  mov     byte ptr [ebx + 0x1ff24], 1
+0x00457bb5  pop     esi
+0x00457bb6  pop     ebx
+0x00457bb7  ret     

@@ -1,0 +1,24 @@
+; func 0x45f710  (22 insns)
+
+0x0045f710  push    esi
+0x0045f711  mov     esi, ecx
+0x0045f713  call    0x40188e   ; → 0x45f9d0
+0x0045f718  lea     eax, [eax + eax*4]
+0x0045f71b  mov     ecx, esi
+0x0045f71d  lea     eax, [eax + eax*4]
+0x0045f720  shl     eax, 3
+0x0045f723  push    eax
+0x0045f724  call    0x401ae1   ; → 0x45eea0
+0x0045f729  mov     ecx, esi
+0x0045f72b  call    0x402365   ; → 0x45fa00
+0x0045f730  lea     eax, [eax + eax*4]
+0x0045f733  lea     ecx, [eax + eax*4]
+0x0045f736  shl     ecx, 3
+0x0045f739  push    ecx
+0x0045f73a  mov     ecx, esi
+0x0045f73c  call    0x401ae1   ; → 0x45eea0
+0x0045f741  push    0
+0x0045f743  mov     ecx, esi
+0x0045f745  call    0x4016ae   ; → 0x45e7f0
+0x0045f74a  pop     esi
+0x0045f74b  ret     

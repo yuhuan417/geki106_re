@@ -1,0 +1,14 @@
+; func 0x4576f0  (11 insns)
+
+0x004576f0  push    esi
+0x004576f1  mov     esi, ecx
+0x004576f3  call    0x401b2c   ; → 0x457720
+0x004576f8  test    byte ptr [esp + 8], 1
+0x004576fd  je      0x457708
+0x004576ff  push    esi
+0x00457700  call    0x47c7e9   ; call 0x47c7e9
+0x00457705  add     esp, 4
+loc_457708:
+0x00457708  mov     eax, esi
+0x0045770a  pop     esi
+0x0045770b  ret     4

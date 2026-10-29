@@ -1,0 +1,10 @@
+; func 0x4572a0  (8 insns)
+
+0x004572a0  nop     
+0x004572a1  sub     al, byte ptr [eax]
+0x004572a3  add     byte ptr [ecx + 0x2a9486], cl
+0x004572a9  add     al, ch
+0x004572ab  lahf    
+0x004572ad  cli     
+0x004572ae  call    ptr [edi + 0x5e]
+0x004572b1  ret     

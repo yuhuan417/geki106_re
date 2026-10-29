@@ -1,0 +1,14 @@
+; func 0x4240d2  (12 insns)
+
+0x004240d2  mov     edx, dword ptr [ebp + 0x38]
+0x004240d5  pop     edi
+0x004240d6  pop     esi
+0x004240d7  mov     al, 1
+0x004240d9  mov     byte ptr [edx + 0x1c], 0
+0x004240dd  mov     dword ptr [ebp + 0x24], 0
+0x004240e4  mov     dword ptr [ebp + 0x28], 0
+0x004240eb  mov     dword ptr [ebp + 0x2c], 0
+0x004240f2  mov     dword ptr [ebp + 0x1c], 3
+0x004240f9  pop     ebp
+0x004240fa  add     esp, 0xe8
+0x00424100  ret     

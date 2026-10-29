@@ -1,0 +1,100 @@
+; func 0x423820  (93 insns)
+
+0x00423820  sub     esp, 0x1c
+0x00423823  push    ebx
+0x00423824  push    edi
+0x00423825  mov     edi, dword ptr [esp + 0x2c]
+0x00423829  mov     ebx, ecx
+0x0042382b  lea     ecx, [esp + 0x14]
+0x0042382f  push    0
+0x00423831  lea     eax, [edi + 0x17]
+0x00423834  push    ecx
+0x00423835  push    0xd
+0x00423837  mov     ecx, 0x4aa7b0
+0x0042383c  mov     dword ptr [esp + 0x14], 1
+0x00423844  mov     dword ptr [esp + 0x20], 0x48
+0x0042384c  mov     dword ptr [esp + 0x24], edi
+0x00423850  mov     dword ptr [esp + 0x28], 0x11f
+0x00423858  mov     dword ptr [esp + 0x2c], eax
+0x0042385c  call    0x401794   ; → 0x44d290
+0x00423861  push    edi
+0x00423862  push    0x108
+0x00423867  push    0xe
+0x00423869  mov     ecx, ebx
+0x0042386b  call    0x4022ed   ; → 0x423690
+0x00423870  mov     eax, dword ptr [esp + 0x28]
+0x00423874  test    eax, eax
+0x00423876  jne     0x42388f
+0x00423878  push    edi
+0x00423879  push    0xf0
+0x0042387e  push    0
+0x00423880  mov     ecx, ebx
+0x00423882  call    0x4022ed   ; → 0x423690
+0x00423887  pop     edi
+0x00423888  pop     ebx
+0x00423889  add     esp, 0x1c
+0x0042388c  ret     8
+loc_42388f:
+0x0042388f  push    ebp
+0x00423890  push    esi
+0x00423891  mov     esi, 0xf0
+loc_423896:
+0x00423896  mov     edx, dword ptr [esp + 0x30]
+0x0042389a  push    0xa
+0x0042389c  push    edx
+0x0042389d  call    0x462d71   ; call 0x462d71
+0x004238a2  mov     ebp, edx
+0x004238a4  add     esp, 8
+0x004238a7  test    ebp, ebp
+0x004238a9  mov     dword ptr [esp + 0x14], eax
+0x004238ad  je      0x4238f7
+0x004238af  mov     eax, dword ptr [esp + 0x10]
+0x004238b3  cmp     eax, 3
+0x004238b6  jle     0x4238d1
+0x004238b8  push    edi
+0x004238b9  sub     eax, 4
+0x004238bc  push    esi
+0x004238bd  push    0xd
+0x004238bf  mov     ecx, ebx
+0x004238c1  mov     dword ptr [esp + 0x1c], eax
+0x004238c5  call    0x4022ed   ; → 0x423690
+0x004238ca  mov     eax, dword ptr [esp + 0x10]
+0x004238ce  sub     esi, 0x18
+loc_4238d1:
+0x004238d1  test    eax, eax
+0x004238d3  push    edi
+0x004238d4  push    esi
+0x004238d5  je      0x4238ec
+0x004238d7  add     eax, 9
+0x004238da  mov     ecx, ebx
+0x004238dc  push    eax
+0x004238dd  call    0x4022ed   ; → 0x423690
+0x004238e2  sub     esi, 0x18
+0x004238e5  cmp     ebp, 1
+0x004238e8  je      0x4238f7
+0x004238ea  push    edi
+0x004238eb  push    esi
+loc_4238ec:
+0x004238ec  push    ebp
+0x004238ed  mov     ecx, ebx
+0x004238ef  call    0x4022ed   ; → 0x423690
+0x004238f4  sub     esi, 0x18
+loc_4238f7:
+0x004238f7  mov     eax, dword ptr [esp + 0x30]
+0x004238fb  push    0xa
+0x004238fd  push    eax
+0x004238fe  call    0x462d71   ; call 0x462d71
+0x00423903  mov     dword ptr [esp + 0x20], edx
+0x00423907  mov     edx, dword ptr [esp + 0x18]
+0x0042390b  add     esp, 8
+0x0042390e  inc     edx
+0x0042390f  test    eax, eax
+0x00423911  mov     dword ptr [esp + 0x30], eax
+0x00423915  mov     dword ptr [esp + 0x10], edx
+0x00423919  jne     0x423896
+0x0042391f  pop     esi
+0x00423920  pop     ebp
+0x00423921  pop     edi
+0x00423922  pop     ebx
+0x00423923  add     esp, 0x1c
+0x00423926  ret     8

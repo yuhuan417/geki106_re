@@ -2403,6 +2403,57 @@ def main():
           and _ac(7, -20, 10, 5) == (1, 0xFFFFFFFD)
           and img[0x457403 - ib:0x457408 - ib] == bytes([0x99, 0x33, 0xC2, 0x2B, 0xC2])
           and img[0x45740E - ib] == 0x7C, "")
+    check("0x457380 带链遍历每帧调 tick：0x4573CE E8→0x40187A→0x457750（返回 0 走 0x457210 摘链+虚析构）；"
+          "12 槽循环 0x457BD0←0x458E75（0x458E70 行为遍首条）、复位 0x457B90←0x458DAB（0x458D60）；"
+          "渲染 0x457CB0←0x458EF5/0x4534A0",
+          img[0x4573C3 - ib:0x4573C3 - ib + 8] == bytes([0x8B, 0x7E, 0x04, 0x33, 0xDB, 0x85, 0xFF, 0x74])
+          and img[0x4573CE - ib:0x4573CE - ib + 5] == bytes([0xE8, 0xA7, 0xA4, 0xFA, 0xFF])
+          and img[0x457BDA - ib:0x457BDA - ib + 7] == bytes([0x8B, 0xCE, 0xE8, 0x90, 0xA5, 0xFA, 0xFF])
+          and img[0x458E75 - ib:0x458E75 - ib + 5] == bytes([0xE8, 0xE0, 0x90, 0xFA, 0xFF])
+          and img[0x458DAB - ib:0x458DAB - ib + 5] == bytes([0xE8, 0x74, 0x95, 0xFA, 0xFF])
+          and img[0x458EF5 - ib:0x458EF5 - ib + 5] == bytes([0xE8, 0x61, 0x8A, 0xFA, 0xFF])
+          and img[0x4534A0 - ib:0x4534A0 - ib + 5] == bytes([0xE8, 0xB6, 0xE4, 0xFA, 0xFF])
+          and img[0x457237 - ib:0x457237 - ib + 4] == bytes([0x6A, 0x01, 0xFF, 0x10]), "")
+    check("0x4577F5..0x457858 十个 kind 分支写层号后全部 jmp 0x457861（idx1..9 = EB 61，idx10 直落），"
+          "⇒ 映射 kind 同样写矩形 (0,row*k,k-1,(row+1)*k-1)；idx0 隐藏分支也 jmp 0x457861",
+          img[0x4577EC - ib:0x4577EC - ib + 9] == bytes([0x8B, 0x56, 0x2C, 0xC6, 0x42, 0x1C, 0x00, 0xEB, 0x6C])
+          and img[0x4577F5 - ib:0x4577F5 - ib + 11] == bytes([0x8B, 0x46, 0x2C, 0xC7, 0x00, 0x03, 0x00, 0x00, 0x00, 0xEB, 0x61])
+          and img[0x457858 - ib:0x457858 - ib + 9] == bytes([0x8B, 0x46, 0x2C, 0xC7, 0x00, 0x0C, 0x00, 0x00, 0x00])
+          and img[0x457861 - ib:0x457861 - ib + 3] == bytes([0x8B, 0x46, 0x10]), "")
+    _bgp = _PN()
+    _bgslot = page4.BgSlot()
+    (_bgslot.params[10], _bgslot.params[11], _bgslot.params[12],
+     _bgslot.params[13], _bgslot.params[14], _bgslot.params[19]) = 3, 0, 100, 24, -6, 1
+    _bgslot.grid = [[520, 726, 16], [30, 40, 0], [200, 50, 24]]
+    _bgbd = page4.BgBand(_bgslot, 2)
+    _bgbd.pos = 8                                   # tick 先 pos += step(−6) → 落在 2
+    _bgv0 = _bgp._bg_band(_bgbd)
+    _bgv1 = (_bgbd.visible, _bgbd.layer, _bgbd.src[2], _bgbd.src[3] - _bgbd.src[1],
+             _bgbd.dst[0] - 200, _bgbd.kind)
+    _bgbd.pos = 7                                   # → 1（kind 0）
+    _bgr1 = _bgp._bg_band(_bgbd)
+    _bgh = _bgbd.visible
+    _bgbd.pos = 9                                   # → 3（≥ params[10]）
+    _bgr3 = _bgp._bg_band(_bgbd)
+    check("0x457750 行为：k=24 → 层 6、矩形 (0,row*24,23,…)、dst=格x+抖动*24>>6−12；"
+          "k=0 每帧隐藏（0x4578ED，不只 kind 变化时）；pos≥params[10] 返回 0（0x457795 死亡摘链）",
+          _bgv0 and _bgv1 == (1, 6, 23, 23, _bgbd.w - 12, 24)
+          and _bgr1 and _bgh == 0
+          and not _bgr3, "")
+    _bgslot2 = page4.BgSlot()
+    (_bgslot2.params[10], _bgslot2.params[11], _bgslot2.params[12],
+     _bgslot2.params[13], _bgslot2.params[14], _bgslot2.params[19]) = 110, 0, 100, 24, -6, 1
+    _bgslot2.active = 1
+    _bgslot2.grid = [[100, 100, 16]] * 110
+    for _bgi in range(10):
+        _bgp._bg_update(_bgslot2)
+    _bgb0 = _bgslot2.bands[0]
+    check("0x457380 全链行为：acc 绕回（步长整除周期 ⇒ 每次绕回 acc_norm=0）→ 新带 "
+          "index0 = count−1 = 109（0x457434），每 4 帧一条；带链多带并存、逐帧 pos += step、"
+          "窗口 [0,100] 命中时可见（年龄≥2）、k=16 → 层 5",
+          len(_bgslot2.bands) == 2 and _bgb0.pos == 109 - 6 * 6
+          and _bgb0.visible == 1 and _bgb0.layer == 5 and _bgb0.kind == 16 and _bgb0.src[2] == 15
+          and _bgslot2.bands[1].pos == 109 - 2 * 6, "")
     check("0x4606D4 = 15 项 opcode 跳表；op 1..5 分别入 ui40c/ui43c/ui4cc/ui4fc/ui52c；op 0xE 只跳过 0x14",
           _jt == [0x460686, 0x46044F, 0x4603AD, 0x460411, 0x460490,
                   0x4604D1, 0x460554, 0x460574, 0x4605C6, 0x460512,

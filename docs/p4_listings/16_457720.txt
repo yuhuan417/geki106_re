@@ -1,0 +1,8 @@
+; func 0x457720  (6 insns)
+
+0x00457720  mov     eax, dword ptr [ecx + 0x2c]
+0x00457723  mov     dword ptr [ecx], 0x499140
+0x00457729  mov     ecx, dword ptr [ecx + 0x28]
+0x0045772c  push    eax
+0x0045772d  call    0x4013f7   ; → 0x45a130
+0x00457732  ret     

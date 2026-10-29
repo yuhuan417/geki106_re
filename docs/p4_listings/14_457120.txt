@@ -1,0 +1,68 @@
+; func 0x457120  (61 insns)
+
+0x00457120  push    -1
+0x00457122  push    0x495576
+0x00457127  mov     eax, dword ptr fs:[0]
+0x0045712d  push    eax
+0x0045712e  mov     dword ptr fs:[0], esp
+0x00457135  push    ecx
+0x00457136  push    esi
+0x00457137  mov     esi, ecx
+0x00457139  push    0x34
+0x0045713b  mov     eax, dword ptr [esi + 4]
+0x0045713e  test    eax, eax
+0x00457140  jne     0x457181
+0x00457142  call    0x47c7c0   ; call 0x47c7c0
+0x00457147  add     esp, 4
+0x0045714a  mov     dword ptr [esp + 4], eax
+0x0045714e  test    eax, eax
+0x00457150  mov     dword ptr [esp + 0x10], 0
+0x00457158  je      0x45717a
+0x0045715a  lea     ecx, [esi + 0xc]
+0x0045715d  lea     edx, [esi + 0x30]
+0x00457160  push    ecx
+0x00457161  push    edx
+0x00457162  mov     edx, dword ptr [esp + 0x20]
+0x00457166  lea     ecx, [esi + 0xd0]
+0x0045716c  push    ecx
+0x0045716d  push    edx
+0x0045716e  mov     ecx, eax
+0x00457170  call    0x40216c   ; → 0x457540
+0x00457175  mov     dword ptr [esi + 4], eax
+0x00457178  jmp     0x4571c4
+loc_45717a:
+0x0045717a  xor     eax, eax
+0x0045717c  mov     dword ptr [esi + 4], eax
+0x0045717f  jmp     0x4571c4
+loc_457181:
+0x00457181  call    0x47c7c0   ; call 0x47c7c0
+0x00457186  add     esp, 4
+0x00457189  mov     dword ptr [esp + 4], eax
+0x0045718d  test    eax, eax
+0x0045718f  mov     dword ptr [esp + 0x10], 1
+0x00457197  je      0x4571b6
+0x00457199  lea     ecx, [esi + 0xc]
+0x0045719c  lea     edx, [esi + 0x30]
+0x0045719f  push    ecx
+0x004571a0  push    edx
+0x004571a1  mov     edx, dword ptr [esp + 0x20]
+0x004571a5  lea     ecx, [esi + 0xd0]
+0x004571ab  push    ecx
+0x004571ac  push    edx
+0x004571ad  mov     ecx, eax
+0x004571af  call    0x40216c   ; → 0x457540
+0x004571b4  jmp     0x4571b8
+loc_4571b6:
+0x004571b6  xor     eax, eax
+loc_4571b8:
+0x004571b8  mov     ecx, dword ptr [esi + 8]
+0x004571bb  mov     dword ptr [ecx + 0x30], eax
+0x004571be  mov     edx, dword ptr [esi + 8]
+0x004571c1  mov     eax, dword ptr [edx + 0x30]
+loc_4571c4:
+0x004571c4  mov     ecx, dword ptr [esp + 8]
+0x004571c8  mov     dword ptr [esi + 8], eax
+0x004571cb  pop     esi
+0x004571cc  mov     dword ptr fs:[0], ecx
+0x004571d3  add     esp, 0x10
+0x004571d6  ret     4

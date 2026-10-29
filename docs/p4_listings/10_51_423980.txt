@@ -1,0 +1,58 @@
+; func 0x423980  (53 insns)
+
+0x00423980  sub     esp, 0x28
+0x00423983  mov     edx, 0x10
+0x00423988  push    ebx
+0x00423989  mov     ebx, ecx
+0x0042398b  push    esi
+0x0042398c  push    edi
+0x0042398d  test    byte ptr [ebx + 0x20], dl
+0x00423990  mov     eax, dword ptr [ebx + 0x38]
+0x00423993  je      0x4239aa
+0x00423995  mov     edi, dword ptr [eax + 4]
+0x00423998  mov     ecx, 3
+0x0042399d  add     edi, ecx
+0x0042399f  mov     dword ptr [eax + 4], edi
+0x004239a2  mov     eax, dword ptr [ebx + 0x38]
+0x004239a5  add     dword ptr [eax + 0x14], ecx
+0x004239a8  jmp     0x4239ae
+loc_4239aa:
+0x004239aa  add     dword ptr [eax + 0xc], 3
+loc_4239ae:
+0x004239ae  cmp     dword ptr [ebx + 0x20], edx
+0x004239b1  jne     0x4239f3
+0x004239b3  mov     eax, dword ptr [ebx + 0x1c]
+0x004239b6  cmp     eax, 2
+0x004239b9  jge     0x4239f3
+0x004239bb  mov     ecx, dword ptr [ebx + 4]
+0x004239be  inc     eax
+0x004239bf  push    eax
+0x004239c0  mov     eax, dword ptr [ebx + 8]
+0x004239c3  push    0x5100000a
+0x004239c8  push    eax
+0x004239c9  lea     edx, [esp + 0x2c]
+0x004239cd  push    ecx
+0x004239ce  push    edx
+0x004239cf  call    0x4023c4   ; → 0x430400
+0x004239d4  mov     ecx, 5
+0x004239d9  mov     esi, eax
+0x004239db  lea     edi, [esp + 0x20]
+0x004239df  add     esp, 0x14
+0x004239e2  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x004239e4  lea     eax, [esp + 0xc]
+0x004239e8  mov     ecx, 0x4ad4fc
+0x004239ed  push    eax
+0x004239ee  call    0x40128a   ; → 0x44b140
+loc_4239f3:
+0x004239f3  mov     edx, dword ptr [ebx + 0x20]
+0x004239f6  xor     eax, eax
+0x004239f8  inc     edx
+0x004239f9  pop     edi
+0x004239fa  mov     dword ptr [ebx + 0x20], edx
+0x004239fd  mov     ebx, edx
+0x004239ff  cmp     ebx, 0x20
+0x00423a02  pop     esi
+0x00423a03  setl    al
+0x00423a06  pop     ebx
+0x00423a07  add     esp, 0x28
+0x00423a0a  ret     
