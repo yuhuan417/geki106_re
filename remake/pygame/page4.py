@@ -38,6 +38,22 @@ P4_STAT_ZERO = [0x56CC98, 0x56CC9C, 0x56CCA0, 0x56CCA4, 0x56CCA8, 0x56CCAC,
 # ---------------------------------------------------------------------------
 # 脚本流状态机（`0x56CC4C`）：`0x460350` 一帧一步
 # ---------------------------------------------------------------------------
+_P4_STR_TABLE = None
+
+
+def p4_str_table():
+    """`0x499798` 的字形 id 表（由 `remake/build_p4_str.py` 从 exe 导出）。"""
+    global _P4_STR_TABLE
+    if _P4_STR_TABLE is None:
+        try:
+            import json as _j
+            from pathlib import Path as _P
+            _P4_STR_TABLE = _j.loads((_P(__file__).with_name("p4_str_table.json")).read_text())
+        except Exception:
+            _P4_STR_TABLE = []
+    return _P4_STR_TABLE
+
+
 class ScriptBank:
     """资源访问：`0x45DDA0(id)` = 指针、`0x45DDE0(id)` = 长度。
 
@@ -329,6 +345,13 @@ class Ent:
 
     SZ = 0x5C
 
+    def g16(self, off: int) -> int:
+        return self.m[off] | (self.m[off + 1] << 8)
+
+    def d16(self, off: int, v: int) -> None:
+        self.m[off] = v & 0xFF
+        self.m[off + 1] = (v >> 8) & 0xFF
+
     def __init__(self, a: int, b: int, typ: int, d: int):
         self.m = bytearray(self.SZ)
         self.d32(0x00, 0x49874C)          # 0x43045E vtable（0x43A82C 再改成 0x49874c）
@@ -341,6 +364,9 @@ class Ent:
         self.d32(0x40, 0)
         self.beh = 0
         self.node: DNode | None = None
+        self.buf2c = None                 # 0x4601CB 字形位图缓冲（0x4602D0 家族）
+        self.flags38 = 0                  # 0x4602B2 标志字
+        self.link24 = None                # 0x43CD77 演员链表头
         if (typ & 0x2F000000) == 0x23000000:      # 0x40D940 0x23 族
             prop = ENT_PROP.get(typ & 0xFF)       # 0x43AC30 的 0x498000 记录
             if prop is not None:
@@ -1480,7 +1506,7 @@ def _beh_447640(self, e) -> bool:
         d = (e.g32(0x2C) - 1) & 0xFFFFFFFF               # 0x447814 dec
         e.d32(0x2C, d)                                   # 0x447817
         e.d32(0x04, (e.g32(0x04) + d) & 0xFFFFFFFF)      # 0x44781A
-        node = e.p.get("node")
+        node = e.node
         if node is not None:                             # 0x447822 节点 x 同步
             node.d32(0x14, (node.g32(0x14) + d) & 0xFFFFFFFF)
         if e.s32(0x04) < -e.s32(0x0C):                   # 0x44782D jge → 状态机
@@ -1527,7 +1553,7 @@ def _p4_447640_states(self, e, sub) -> None:
     e.d32(0x20, n)
     v = e.g32(0x28)
     st = v & 0xF000                                       # 0x447863
-    node = e.p.get("node")
+    node = e.node
     if node is None:
         return
     lo = node.g32(0x04)                                   # 节点 +4
@@ -1640,7 +1666,7 @@ def _p4_447640_orbit(self, e) -> None:
             self.spawn(self._p4_q("ui46c"), 0x10000051, x, y)    # 0x447D20
         else:
             self.spawn(self._p4_q("ui4cc"), 0x4100000F, x, y)    # 0x447D3F
-    node = e.p.get("node")
+    node = e.node
     if node is not None:                                  # 0x447D66..0x447D80
         node.d32(0x14, e.s32(0x08) - r)
 
@@ -1694,7 +1720,7 @@ def _beh_448230(self, e) -> bool:
             self.spawn(self._p4_q("ui46c"), 0x2300001A, 0xB0, y)
             ebx = 0
         # 0x44898B 闪烁尾（ph>3 时原作越界读栈，不实现）
-        node = e.p.get("node")
+        node = e.node
         if node is not None:
             lo = P4_448230_BLINK[ph]                      # 0x4489AD movsx word[esp+ph*2+0x24]
             if lo <= life < lo + 0x1C:                   # 0x4489B2..0x4489BB
@@ -2901,6 +2927,82 @@ class Page4Mixin:
         else:
             self.p4_stat[0x4CD4A0 + 0x30] = eax + 1             # 0x460E0D
 
+    def p4_460280(self, o) -> None:
+        """`0x460280(this)`：清空文本对象（释放 `[+0x2C]` 缓冲并复位所有字段）。"""
+        o.d32(0x04, 0)                                  # 0x460289
+        o.d16(0x08, 0)                                  # 0x460292
+        o.d16(0x0A, 0)                                  # 0x460296
+        o.buf2c = None                             # 0x460299 0x47C7E9 释放
+        o.d32(0x2C, 0)                                  # 0x4602AC
+        o.d32(0x30, 0)                                  # 0x4602B2
+        o.m[0x34] = 0                                   # 0x4602B6
+        o.d32(0x38, 0)                                  # 0x4602B2 0x45AF10(this+0x38, 0xFF) 清标志字
+        o.flags38 = 0
+
+    def p4_4602d0(self, o, sid: int) -> None:
+        """`0x4602D0(this, sid)`：按 `0x499798` 表把一串字形 id 填进 `this+0xA`（最多 15 个）。
+
+        ```
+        0x460284 0x460280(this)                          ; 先清空
+        0x4602DF movsx eax,cx ; 0x4602E2 word[this+0x2A] = sid
+        0x4602E6 ax = word[0x499798 + sid*2]
+        0x4602F6 while (n < 0xF && ax) { word[this+0xA+2n] = ax ; n++ ; sid++ ; ax = 表[sid] }
+        0x460315 word[this+0xA+2n] = 0                   ; 结尾 0
+        0x46031C 0x4600F0(this)                          ; 立刻推进一个
+        ```
+        表内容（`0x499798`，见 `remake/p4_str_table.json`）= `45 46 47 48 49 50 51 52 0 60 0`。
+        """
+        self.p4_460280(o)                               # 0x460284
+        o.d16(0x2A, sid & 0xFFFF)                       # 0x4602E2
+        tab = p4_str_table()
+        n = 0
+        i = sid
+        while n < 0xF:                                  # 0x4602F6
+            ch = tab[i] if 0 <= i < len(tab) else 0
+            if ch == 0:                                 # 0x4602F1
+                break
+            o.d16(0x0A + n * 2, ch)
+            n += 1
+            i += 1
+        o.d16(0x0A + n * 2, 0)                          # 0x460315
+        self.p4_4600f0(o)                               # 0x46031C
+
+    def p4_4600f0(self, o) -> bool:
+        """`0x4600F0(this)`：取走队首字形 id、左移字符串、并把该资源的位图拷进 `[+0x2C]`。
+
+        ```
+        0x4600F6 cx = word[this+0xA] ; 若 0 → 0x46021C（直接收尾）
+        0x460108 word[this+8] = cx
+        0x46010C 15 次 [this+0xA+2k] = [this+0xA+2(k+1)]     ; 左移一格
+        0x46011E 局部表 = 0x2E,0x2F,0x30,0x31,0x32,0x33,0x34,0x3C（8 项）
+        0x460167 for (i = 1..8) if (c == 表[i-1] && 0x45AFC0(0x4AB5B0,0xF00000) < i)
+                    0x45B0E0(0x4AB5B0, 0xF00000, i)      ; 记录最大编号
+        0x4601A2 if (c == 0x46) 0x45AF30(0x4AB5B0, 0x80000000)   ; 'F' 置标志
+        0x4601BD 0x45DDE0(c) → len ; 0x47C7C0(len) → buf[+0x2C]
+        0x4601D7 0x45DDE0(c) → src ; 0x45DDA0(c) → n ; memcpy(buf, src, n)
+        0x460208 [+0x30] = buf ; byte[+0x34] = 0 ; [+4] = 0
+        ```
+        """
+        c = o.g16(0x0A)                                 # 0x4600F6
+        if c == 0:
+            return False                                # 0x46021C
+        o.d16(0x08, c)                                  # 0x460108
+        for k in range(0xF):                            # 0x46010C..0x46011C
+            o.d16(0x0A + k * 2, o.g16(0x0A + (k + 1) * 2))
+        for i, key in enumerate((0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x3C), 1):
+            if c == key:                                # 0x46016F
+                cur = self.keys.field(0xF00000)         # 0x46017D 0x45AFC0
+                if cur < i:                             # 0x460182
+                    self.keys.set_field(0xF00000, i)    # 0x460191 0x45B0E0
+        if c == 0x46:                                   # 0x4601A2
+            self.keys.set_field(0xF00000, self.keys.field(0xF00000) | 0x80000000)   # 0x45AF30
+        data = self.bank.get(c) if getattr(self, "bank", None) else b""   # 0x45DDA0/0x45DDE0
+        o.buf2c = data                             # 0x4601CB
+        o.d32(0x30, len(data))                          # 0x460208
+        o.m[0x34] = 0                                   # 0x46020B
+        o.d32(0x04, 0)                                  # 0x46020F
+        return True
+
     def p4_45e4a0(self, value: int, x: int, y: int) -> None:
         """`0x45E4A0(mgr, value, x, y)`：把数值渲染成至多 3 个数字实体（type `0x4100000C`）。
 
@@ -2989,11 +3091,11 @@ class Page4Mixin:
                 self.p4_45f6e0(x, y)                            # 0x43CE97
         elif idx in (4, 5):                                     # 0x43CD37 / 0x43CD7F
             # 0x43CD4C/0x43CD94 先清旧链表的 [+0x18]，再造演员并把新记录挂到 [tgt+0x24]
-            old = tgt.p.get("link24")
+            old = getattr(tgt, "link24", None)
             if old is not None and hasattr(old, "d32"):
                 old.d32(0x18, 0)
             t = 0x01000002 if idx == 4 else 0x01000003
-            tgt.p["link24"] = self.spawn(self._p4_q("ui40c"), t, 0, 0, tgt)
+            tgt.link24 = self.spawn(self._p4_q("ui40c"), t, 0, 0, tgt)
         elif idx == 7:                                          # 0x43CE9E
             self.spawn(self._p4_q("ui40c"), 9, x, y, tgt)
         self._p4_43ced5(b)

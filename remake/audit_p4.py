@@ -1305,6 +1305,35 @@ def main():
     check("0x460E00 十次一循环：>= 0xA 或 == -1 转 0x45F690",
           img[0x460E03 - ib:0x460E0B - ib] == bytes([0x83, 0xF8, 0x0A, 0x7D, 0x0C, 0x83, 0xF8, 0xFF]), "")
 
+    check("0x499798 的字形表与 p4_str_table() 逐项一致",
+          page4.p4_str_table() == [int.from_bytes(img[0x499798 - ib + 2 * k:0x499798 - ib + 2 * k + 2], "little")
+                                   for k in range(9)] + [60, 0]
+          and page4.p4_str_table()[:9] == [45, 46, 47, 48, 49, 50, 51, 52, 0], "")
+    class _K:
+        def __init__(self):
+            self.v = 0
+        def field(self, m):
+            return self.v & m
+        def set_field(self, m, x):
+            self.v = (self.v & ~m) | (x & m)
+    class _TS(page4.Page4Mixin):
+        def __init__(self):
+            self.bank = None
+            self.keys = _K()
+    _ts = _TS()
+    _o = page4.Ent(0, 0, 0x23000001, 0)
+    page4.Page4Mixin.p4_4602d0(_ts, _o, 0)
+    check("0x4602D0 功能：sid=0 → 队首 45 被 0x4600F0 取走，队列剩 46..52",
+          [ _o.g16(0x0A + 2 * k) for k in range(9) ] == [46, 47, 48, 49, 50, 51, 52, 0, 0]
+          and _o.g16(0x08) == 45 and _o.g16(0x2A) == 0, "")
+    _src = __import__("inspect").getsource(page4)
+    check("实体属性不再用不存在的 `.p[...]` / `.p.get(...)`（改用 Ent 的真实属性）",
+          ".p.get(\"node\")" not in _src and '.p["buf2c"]' not in _src
+          and '.p["link24"]' not in _src and '.p["flags38"]' not in _src, "")
+    check("Ent 新增 buf2c / flags38 / link24 三个槽位",
+          all(hasattr(page4.Ent(0, 0, 0x23000001, 0), n)
+              for n in ("buf2c", "flags38", "link24")), "")
+
     class _Stub:
         def __init__(self):
             self.calls = []
