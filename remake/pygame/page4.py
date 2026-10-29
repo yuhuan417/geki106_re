@@ -591,8 +591,11 @@ class Ent42(Ent):
                 self.d32(0x24, (self.s32(0x24) - 2) & 0xFFFFFFFF)
                 if dx == 0:                                  # 0x437B32 test eax,eax
                     nx, ny = self.node.dst[0] + 0x30, self.node.dst[1] + 0x30
-                    for i in range(5):                       # 0x437B86 循环 5 次，类型 +1
-                        owner.p4_spawn42(nx, ny, 0x42000004 + i, 0)
+                    # 0x437B86..0x437BA1：`0x43A3C0` 是 `ret 4`，所以循环里
+                    # `[esp+0x14]` = S+0x14 = **记录 +0xC（param）**，不是 +8（type）：
+                    # 5 次都是 type 0x42000004，param=0..4（对应 5 档尺寸）。
+                    for i in range(5):
+                        owner.p4_spawn42(nx, ny, 0x42000004, i)
                     self.d32(0x28, 1)
             else:                                            # 0x437BCF
                 self.d32(0x20, (self.s32(0x20) - 2) & 0xFFFFFFFF)
