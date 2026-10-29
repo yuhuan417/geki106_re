@@ -4996,6 +4996,26 @@ class Page4Mixin:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
+    @staticmethod
+    def p4_44caa0_skip(v2: int, v3: int, v4: int) -> bool:
+        """`0x44CB5A..0x44CB72`：`0x44CAA0` 里**三个值任一为 0 就跳过亮度/对比变换**。
+
+        ```
+        0x44CB45 eax = [esp+0x74] ; 0x44CB54 [ebp+0xC88] = eax
+        0x44CB5A eax = [esp+0x78] ; 0x44CB5E test eax,eax ; je 0x44CCA4
+        0x44CB66 test ecx,ecx (=[esp+0x7c])                ; je 0x44CCA4
+        0x44CB70 test esi,esi (=edx=[esp+0x80])            ; je 0x44CCA4
+        ```
+
+        ⇒ 三个值**全非 0** 才走后面的 `0x44CCBD → 0x44B790` 变换。
+        页4 阶段首帧那次调用 `0x44CAA0(mgr, buf, 对比, 亮度, 淡入=0)` 里有一个 0，
+        所以**变换被跳过** —— 这解释了「配置字静态为 0 ⇒ (−200,−200)」却不会把画面压黑：
+        那两个值只是被登记，没有走到 `0x44B790`。
+
+        返回 True = 跳过变换。
+        """
+        return v2 == 0 or v3 == 0 or v4 == 0
+
     def p4_cfg_word(self) -> int:
         """`0x4AB5B8+4`：配置字（对比/亮度两个 7 位字段的来源）。
 

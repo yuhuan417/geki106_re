@@ -1602,6 +1602,25 @@ def main():
             0x4A4054: b"auto", 0x4A405C: b"color"}
     _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
     import inspect as _insp
+    import capstone as _csk
+    _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _sk = page4.Page4Mixin.p4_44caa0_skip
+    _tests = {}
+    for _i in _mdk.disasm(img[0x44CB58 - ib:0x44CB7A - ib], 0x44CB58):
+        if _i.mnemonic == "test":
+            _tests[_i.address] = _i.op_str
+        if _i.mnemonic == "je":
+            _tests[("je", _i.address)] = _i.op_str
+    check("0x44CAA0 的早期跳过：三个值任一为 0 → je 0x44CCA4，跳过 0x44CCBD→0x44B790 变换 "
+          "（页4 那次调用带一个 0，所以登记了 (-200,-200) 也不会压黑画面）",
+          _sk(1, 1, 1) is False and _sk(0, 1, 1) is True
+          and _sk(1, 0, 1) is True and _sk(1, 1, 0) is True
+          and _tests.get(0x44CB5E) == "eax, eax"
+          and _tests.get(0x44CB66) == "ecx, ecx"
+          and _tests.get(0x44CB70) == "esi, esi"
+          and "0x44cca4" in (_tests.get(("je", 0x44CB60)) or "")
+          and "0x44cca4" in (_tests.get(("je", 0x44CB68)) or "")
+          and "0x44cca4" in (_tests.get(("je", 0x44CB72)) or ""), "")
     _af = page4.Page4Mixin.p4_afc0
     check("0x45AFC0 的 ecx 是对象指针不是固定全局：0x445EAA/0x44613A 传 0x4AB5B0、"
           "0x451663/0x45167A 传 0x4AB5B8；语义 = (word&mask) 右移到 mask 最低位，取 0 直接返回",
