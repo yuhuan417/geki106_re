@@ -3355,6 +3355,18 @@ class Page4Mixin:
             return 0
         return (h - e.g32(0x48)) & 0xFFFFFFFF                  # 0x43AE8E
 
+    def p4_45af30(self, bits: int) -> int:
+        """`0x45AF30(mgr, bits)`：`word[mgr+4] |= bits`，返回新值。"""
+        w = (self.p4_stat.get(0x4AB5B0 + 4, 0) | bits) & 0xFFFFFFFF   # 0x45AF37/0x45AF39
+        self.p4_stat[0x4AB5B0 + 4] = w
+        return w                                                     # 0x45AF3C
+
+    def p4_45af60(self, bits: int) -> int:
+        """`0x45AF60(mgr, bits)`：`word[mgr+4] &= ~bits`，返回新值。"""
+        w = (self.p4_stat.get(0x4AB5B0 + 4, 0) & ~bits) & 0xFFFFFFFF  # 0x45AF67/0x45AF69
+        self.p4_stat[0x4AB5B0 + 4] = w
+        return w                                                     # 0x45AF6E
+
     def p4_afc0(self, mask: int) -> int:
         """`0x45AFC0(mgr, mask)`：取 `word[mgr+4] & mask`，**右移到 mask 的最低位**。
 
@@ -3373,6 +3385,22 @@ class Page4Mixin:
             mask >>= 1
             v >>= 1
         return v                                                # 0x45AFD9
+
+    def _p4_43c691(self, p) -> None:
+        """`0x43C691`：`0x43C55D` 的**未命中**路径 —— 再入列一份爆炸记录，然后注销 `p`。
+
+        ```
+        0x43C691 0x45A690(0, 0x28) → eax:edx ; 结果写 [esp+0x24]/[esp+0x2c]
+        0x43C6AF 0x43A3C0(0x4AD4CC, &rec)     ; rec 沿用 0x43C488 填好的 [x, y, 0x41000004, &buf]
+        0x43C6B4 [p+0x18] = 0 ; 0x43C6BB byte[p+0x10] = 0
+        ```
+
+        `[esp+0x24]`/`[esp+0x2c]` 与 `0x43C8CD` 一样是 `rec+0x14`/`rec+0x1C` 的死写（§16.226），不复现。
+        """
+        self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                   p.s32(0x04), p.s32(0x08), 0)                 # 0x43C6AF
+        p.d32(0x18, 0)                                          # 0x43C6B4
+        p.d32(0x10, 0)                                          # 0x43C6BB
 
     def _p4_43c8cd(self, p, a) -> None:
         """`0x43C8CD`（类型 `0x10FF0053`）：在 `p` 附近撒一个抖动特效到 `0x4AD4CC`。

@@ -1381,6 +1381,23 @@ def main():
     _jz = _Z()
     page4.Page4Mixin.p4_43c460(_jz, _j1, _ja)
     _jhit = [c for c in _jz.calls if c[0] == "ui4cc"]
+    _bo = _Z({0x4AB5B0 + 4: 0x0F00})
+    _bor1 = page4.Page4Mixin.p4_45af30(_bo, 0x1000)
+    _bor2 = page4.Page4Mixin.p4_45af60(_bo, 0x0100)
+    check("0x45AF30 = |= bits；0x45AF60 = &= ~bits（都返回新值）",
+          _bor1 == 0x1F00 and _bo.p4_stat[0x4AB5B0 + 4] == 0x1E00 and _bor2 == 0x1E00
+          and img[0x45AF37 - ib:0x45AF3C - ib] == bytes([0x0B, 0xD0, 0x89, 0x51, 0x04])
+          and img[0x45AF67 - ib:0x45AF6C - ib] == bytes([0xF7, 0xD0, 0x23, 0xD0, 0x89]), "")
+    _m1 = page4.Ent(0x40, 0x50, 0x10008431, 0)
+    _m1.d32(0x10, 1)
+    _m1.d32(0x18, 7)
+    _mz = _Z()
+    page4.Page4Mixin._p4_43c691(_mz, _m1)
+    check("0x43C691 未命中：再入列一份 0x41000004 并注销 p",
+          len(_mz.calls) == 1 and _mz.calls[0][0] == "ui4cc"
+          and _mz.calls[0][1] == 0x41000004
+          and _mz.calls[0][2] == 0x40 and _mz.calls[0][3] == 0x50
+          and _m1.g32(0x18) == 0 and _m1.g32(0x10) == 0, "")
     check("0x43C8CD（类型 0x10FF0053）：抖动 ±0x10/±0x20 的 0x41000004；"
           "[a+0x14]==0x2A000001 时清零 [p+0x18]",
           len(_jhit) == 1 and _jhit[0][1] == 0x41000004
