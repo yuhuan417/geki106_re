@@ -1103,6 +1103,28 @@ class Page4Mixin:
             return
         self.p4_se_pan(5, (a.s32(0x04) - 0x140) << 4)     # 0x43C326 0x4013A2(0x4AB4B0,5,…)
 
+    def p4_hud_rect(self, value: int) -> tuple:
+        """`0x460A90`：数字字形矩形。`eax = ([+0x30]-1) % 10`，每字 24 px，行 0x150..0x167。
+
+        ```
+        0x460A98 ecx = 10; push 0x167
+        0x460AA2 eax = [esi+0x30]; dec eax; idiv 10   ; edx = 余数
+        0x460AA9 eax = edx*3; shl eax,3               ; *24
+        0x460AAF edx = eax + 0x17
+        0x460ABD 0x40238D(&rect, eax, 0x150, eax+0x17, 0x167)
+        ```
+        """
+        d = (value - 1) % 10                              # 0x460AA2..0x460AA7
+        x = d * 0x18                                      # 0x460AA9
+        return (x, 0x150, x + 0x17, 0x167)
+
+    def p4_hud_update(self, e) -> None:
+        """`0x460A90`：把数字矩形写进显示节点 `[+0x2C]+4`，再 `0x4011FE` 推进渲染表。"""
+        if e.node is not None:
+            e.node.src = self.p4_hud_rect(e.s32(0x30))    # 0x460ACE..0x460AE4
+            e.node.visible = 1
+        self.p4_stat[0x11FE] = self.p4_stat.get(0x11FE, 0) + 1   # 0x460AE7 → 0x45A170
+
     def p4_frame_no(self) -> int:
         """`[0x56CCA8]`：全局帧计数器（`0x451442` 每帧 ++）。"""
         return int(getattr(self, "p4_frames", 0))
