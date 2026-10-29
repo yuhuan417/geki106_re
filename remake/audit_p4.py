@@ -224,12 +224,18 @@ def main():
     seen = []
     for ins in md32.disasm(img[0x43C508 - ib:0x43CA00 - ib], 0x43C508):
         if ins.mnemonic == "cmp" and ins.op_str.startswith("eax, 0x"):
+            if ins.address == 0x43C8BF:
+                continue          # 0x10142214 分支里的循环计数器，不是类型比较
             v = int(ins.op_str.split("0x")[1], 16)
             if v not in seen:
                 seen.append(v)
-    want_t = [0x12061128, 0x10142214, 0x10008041, 0x10008431, 0x00000014,
+    want_t = [0x12061128, 0x10142214, 0x10008041, 0x10008431,
               0x10FF0053, 0x12081123, 0x120C112C, 0x1B000001]
-    check("0x43C508 起比较链 == 9 个类型", seen == want_t, f"{[hex(x) for x in seen]}")
+    check("0x43C508 起类型比较链 == 8 个类型（0x14 是循环界）", seen == want_t,
+          f"{[hex(x) for x in seen]}")
+    check("0x43C8BF 是 20 次循环计数器（83 F8 14 + 7C）",
+          img[0x43C8BF - ib:0x43C8C2 - ib] == bytes([0x83, 0xF8, 0x14])
+          and img[0x43C8C6 - ib] == 0x7C, img[0x43C8BF - ib:0x43C8C8 - ib].hex())
     check("0x43C49D 用 0x7000 掩码取特效模式",
           img[0x43C49D - ib:0x43C4A2 - ib] == bytes([0x25, 0x00, 0x70, 0x00, 0x00]),
           img[0x43C49D - ib:0x43C4A2 - ib].hex())
