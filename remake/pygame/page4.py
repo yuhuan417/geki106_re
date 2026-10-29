@@ -2842,6 +2842,141 @@ class Page4Mixin:
         v = self.p4_stat.get(0x4CD4A0 + 0x30, 0) & 0xFFFFFFFF
         self.p4_stat[0x4CD4A0 + 0x30] = (v - 5) & 0xFFFFFFFF if v > 5 else 0
 
+    # ---- `0x4CD4A0` 命中/得分显示结构的四个写入口（§16.209）----
+    def p4_45f5f0(self, x: int, y: int) -> None:
+        """`0x45F5F0(mgr, x, y)`：主计数 —— 每命中一次 `[+0x14]` 与 `[+4]` 各加 `n*200`。
+
+        ```
+        0x45F5F3 eax = [+0x30] ; inc ; [+0x30] = eax        ; 连击数 n
+        0x45F5F6 word[+0x5E]++                              ; 另一个计数
+        0x45F604 lea [eax+eax*4] ×2 → 25n ; 0x45F612 shl 3 → **200n**
+        0x45F615/0x45F619 [+0x14] += 200n
+        0x45F617/0x45F620 [+4]    += 200n
+        0x45F62C 0x45E4A0(mgr, 200n, y, x)                  ; 数字渲染（未实现）
+        0x45F631 byte[+0xE1] = 1
+        ```
+        """
+        n = (self.p4_stat.get(0x4CD4A0 + 0x30, 0) + 1) & 0xFFFFFFFF
+        self.p4_stat[0x4CD4A0 + 0x30] = n                       # 0x45F5FE
+        self.p4_stat[0x4CD4A0 + 0x5E] = (self.p4_stat.get(0x4CD4A0 + 0x5E, 0) + 1) & 0xFFFF
+        e = (n * 200) & 0xFFFFFFFF                              # 0x45F604..0x45F612
+        self.p4_stat[0x4CD4A0 + 0x14] = (self.p4_stat.get(0x4CD4A0 + 0x14, 0) + e) & 0xFFFFFFFF
+        self.p4_stat[0x4CD4A0 + 0x04] = (self.p4_stat.get(0x4CD4A0 + 0x04, 0) + e) & 0xFFFFFFFF
+        # 0x45F62C 0x45E4A0(mgr, e, y, x)：把数值渲染成数字实体 —— 未实现（§15）
+        self.p4_stat[0x4CD4A0 + 0xE1] = 1                       # 0x45F631
+
+    def p4_45f690(self, x: int, y: int) -> None:
+        """`0x45F690`：`word[+0x2C] == 0xC` 才进位（`0x45F69B` 的 `66 3D 0C 00`）。"""
+        ax = self.p4_stat.get(0x4CD4A0 + 0x2C, 0) & 0xFFFF      # 0x45F693
+        self.p4_stat[0x4CD4A0 + 0x60] = (self.p4_stat.get(0x4CD4A0 + 0x60, 0) + 1) & 0xFFFF
+        if ax == 0xC:                                           # 0x45F69B
+            self.p4_45f5f0(x, y)                                # 0x45F6AD
+            self.p4_stat[0x4CD4A0 + 0x26] = (self.p4_stat.get(0x4CD4A0 + 0x26, 0) + 8) & 0xFFFF
+
+    def p4_45f6e0(self, x: int, y: int) -> None:
+        """`0x45F6E0`：先 `word[+0x26] = 0xA0` 再计数。"""
+        self.p4_stat[0x4CD4A0 + 0x26] = 0xA0                     # 0x45F6EA
+        self.p4_45f5f0(x, y)                                    # 0x45F6F0
+
+    def p4_460e00(self, x: int, y: int) -> None:
+        """`0x460E00`：十次一循环，`-1` 是已满标记。"""
+        eax = self.p4_stat.get(0x4CD4A0 + 0x30, 0)              # 0x460E00
+        if eax >= 0xA or eax == -1:                             # 0x460E03 / 0x460E08
+            self.p4_45f690(x, y)                                # 0x460E23
+        else:
+            self.p4_stat[0x4CD4A0 + 0x30] = eax + 1             # 0x460E0D
+
+    # ---- `0x43CCC0` 子弹→目标的命中处置（§16.208）----
+    def p4_43ccc0(self, b, tgt) -> None:
+        """`0x43CCC0(b, tgt)`：按 `[b+0x14] & 0x3F000000` 三路分流。"""
+        cls = b.g32(0x14) & 0x3F000000                          # 0x43CCD4
+        if cls in (0x31000000, 0x33000000):                     # 0x43CCDE / 0x43CCEB
+            self._p4_43cefb(b, tgt)
+            return
+        if cls != 0x32000000:                                   # 0x43CCE4
+            self._p4_43d0bf(b)                                  # 0x43CCF6
+            return
+        if tgt.g32(0x14) != 1:                                  # 0x43CD02
+            return
+        self.p4_stat[0x56CCB0] = (self.p4_stat.get(0x56CCB0, 0) + 2) & 0xFFFF   # 0x43CD10
+        tgt.d32(0x30, 0x3C)                                     # 0x43CD18
+        idx = (b.g32(0x14) - 0x32000002) & 0xFFFFFFFF           # 0x43CD22
+        if idx > 7:                                             # 0x43CD27
+            self._p4_43ced5(b)
+            return
+        x, y = tgt.s32(0x04), tgt.s32(0x08)
+        if idx == 0:                                            # 0x43CDC7
+            v = (tgt.g32(0x1C) | 1) & 0xFFFFFFFF
+            tgt.d32(0x1C, v)                                    # 0x43CDD0
+            p4_446470(self, tgt, (v >> 1) & 1, 0)               # 0x43CDD8
+        elif idx == 1:                                          # 0x43CE54
+            self.p4_460e00(x, y)
+        elif idx in (2, 3, 6):                                  # 0x43CE1B / 0x43CDE2 / 0x43CE68
+            tgt.d32(0x2C, 0xFFFFFF10)                           # 0x43CDEC / 0x43CE25 / 0x43CE72
+            if (self.p4_stat.get(0x4AB5B0 + 0x04, 0) & 0xC000) >> 14 == 2:
+                tgt.d32(0x30, 0x78)                             # 0x43CDFD / 0x43CE36 / 0x43CE83
+            if idx == 2:
+                self.p4_45f690(x, y)                            # 0x43CE4A
+            elif idx == 3:
+                self.p4_45f5f0(x, y)                            # 0x43CE11
+            else:
+                self.p4_45f6e0(x, y)                            # 0x43CE97
+        elif idx in (4, 5):                                     # 0x43CD37 / 0x43CD7F
+            # 0x43CD4C/0x43CD94 先清旧链表的 [+0x18]，再造演员并把新记录挂到 [tgt+0x24]
+            old = tgt.p.get("link24")
+            if old is not None and hasattr(old, "d32"):
+                old.d32(0x18, 0)
+            t = 0x01000002 if idx == 4 else 0x01000003
+            tgt.p["link24"] = self.spawn(self._p4_q("ui40c"), t, 0, 0, tgt)
+        elif idx == 7:                                          # 0x43CE9E
+            self.spawn(self._p4_q("ui40c"), 9, x, y, tgt)
+        self._p4_43ced5(b)
+
+    def _p4_43cefb(self, b, tgt) -> None:
+        """`0x43CEFB`（类 0x31/0x33）：玩家被击破的判定链。"""
+        if tgt.g32(0x14) != 1:                                  # 0x43CF02
+            return
+        if tgt.g32(0x30) != 0:                                  # 0x43CF08
+            return
+        if tgt.s32(0x20) <= 0x12C:                              # 0x43CF11
+            return
+        if not (self.p4_stat.get(0x56CCB8, 0) & 0x10):          # 0x43CF21 0x45B030 bit4
+            return
+        if tgt.s32(0x28) == 3:                                  # 0x43CF2A
+            tgt.d32(0x28, 0)                                    # 0x43CF30
+            tgt.d32(0x20, 0x79)                                 # 0x43CF33
+            return
+        self.p4_460c00()                                        # 0x43CF3C
+        self.p4_45f570()                                        # 0x43CF4B
+        tgt.d32(0x18, 0)                                        # 0x43CF50
+        tgt.d32(0x10, 0)                                        # 0x43CF53 byte
+
+    def _p4_43ced5(self, b) -> None:
+        """`0x43CED5`：子弹 HP 清零 + SE 0x13 + 声像。"""
+        b.d32(0x18, 0)                                          # 0x43CED5
+        self.p4_se_pan(0x13, (self.p4_stat.get(0x56CC8C, 0) - 0x140) << 4)   # 0x43CEF1
+        self._p4_43d0bf(b)
+
+    def _p4_43d0bf(self, b) -> None:
+        """`0x43D0BF`：`[b+0x18] != 0` 则不销毁。"""
+        if b.g32(0x18) != 0:                                    # 0x43D0BF
+            return
+        b.d32(0x10, 0)                                          # 0x43D0C6 byte
+
+    def p4_43c0f0(self, qa, qb) -> int:
+        """`0x43C0F0(a, b)`：与 `0x43BFD0` 同形，但命中回调是 `0x43CCC0`（`0x43C135`）。"""
+        hits = 0
+        for e in list(qa):
+            if not e.g32(0x10):                                 # 0x43C108 byte
+                continue
+            for t in list(qb):
+                if not t.g32(0x10):
+                    continue
+                if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):
+                    self.p4_43ccc0(e, t)                        # 0x43C135 → 0x401FDC
+                    hits += 1
+        return hits
+
     def p4_45f570(self) -> None:
         """`0x45F570(0x4CD4A0)`：自机被击破后的量表重置（**唯一**把 `+0x26` 写成 `0xA0` 的地方）。
 

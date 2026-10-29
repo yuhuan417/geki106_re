@@ -1305,8 +1305,17 @@ def main():
     check("0x460E00 十次一循环：>= 0xA 或 == -1 转 0x45F690",
           img[0x460E03 - ib:0x460E0B - ib] == bytes([0x83, 0xF8, 0x0A, 0x7D, 0x0C, 0x83, 0xF8, 0xFF]), "")
 
-    check("0x43CCC0 未登记进 page4（§16.208 缺 4 个被调函数体）",
-          "43ccc0" not in __import__("inspect").getsource(page4).lower(), "")
+    check("0x43CCC0 已落地：p4_43ccc0 / p4_43c0f0 / 四个 0x4CD4A0 写入口都在",
+          all(hasattr(page4.Page4Mixin, n) for n in
+              ("p4_43ccc0", "p4_43c0f0", "p4_45f5f0", "p4_45f690",
+               "p4_45f6e0", "p4_460e00", "_p4_43cefb", "_p4_43ced5", "_p4_43d0bf"))
+          and callable(page4.p4_446470), "")
+    check("0x45F5F0 的步进是 200n（lea×2 → 25n，shl 3 → 200n）",
+          img[0x45F604 - ib:0x45F607 - ib] == bytes([0x8D, 0x04, 0x80])
+          and img[0x45F60C - ib:0x45F60F - ib] == bytes([0x8D, 0x04, 0x80])
+          and img[0x45F612 - ib:0x45F615 - ib] == bytes([0xC1, 0xE0, 0x03]), "")
+    check("0x45F5F0 尾部：byte[+0xE1] = 1 且 ret 8",
+          img[0x45F631 - ib:0x45F639 - ib] == bytes([0xC6, 0x86, 0xE1, 0x00, 0x00, 0x00, 0x01, 0x5E]), "")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
