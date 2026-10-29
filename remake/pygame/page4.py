@@ -4997,6 +4997,29 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_457d20(i: int) -> int:
+        """`0x457D20(this, i)`：返回 `&(this + i*0x2A98 + 0x10)` —— 第 i 个槽的 `+0xC` 字段地址。
+
+        ```
+        457D24 edx = i
+        457D26 eax = i shl 4        = i*16
+        457D29 eax += i             = i*17
+        457D2B eax = eax + eax*4    = i*85
+        457D2E eax = i + eax*8      = i*681
+        457D31 edx = i + eax*2      = i*1363      ← 步长系数
+        457D34 ecx = this + edx*8 + 4             = this + i*0x2A98 + 4
+        457D38 call 0x457520                      ; = lea eax,[ecx+0xC] ; ret
+        ```
+
+        ⇒ 步长 **`0x2A98 = 1363*8`**，且 `0x457520` 只是个 `+0xC` 取值器，
+        最终地址 = `this + i*0x2A98 + 0x10`（`+4` 与 `+0xC` 相加）。
+
+        这一串 `shl/lea` 是编译器把 `i*1363*8+16` 展开了；系数 1363 = 17*80+3 之类没有直观含义，
+        照抄即可，**不要"化简"**成别的形式（化简容易把 `*8` 的顺序搞错）。
+        """
+        return (i * 0x2A98) + 0x10
+
+    @staticmethod
     def p4_44caa0_skip(v2: int, v3: int, v4: int) -> bool:
         """`0x44CB5A..0x44CB72`：`0x44CAA0` 里**三个值任一为 0 就跳过亮度/对比变换**。
 

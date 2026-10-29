@@ -1604,6 +1604,15 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _d = page4.Page4Mixin.p4_457d20
+    _chain = [(i.address, i.mnemonic, i.op_str)
+              for i in _mdk.disasm(img[0x457D24 - ib:0x457D3A - ib], 0x457D24)]
+    check("0x457D20(this,i) 的步长链 = this + i*0x2A98 + 0x10；0x457520 只是 lea eax,[ecx+0xC] 取值器",
+          _d(0) == 0x10 and _d(1) == 0x2A98 + 0x10 and _d(3) == 3 * 0x2A98 + 0x10
+          and 0x2A98 == 1363 * 8
+          and [c[1] for c in _chain][:6] == ["mov", "shl", "add", "lea", "lea", "lea"]
+          and img[0x457520 - ib:0x457520 - ib + 3] == bytes([0x8D, 0x41, 0x0C])
+          and img[0x457520 - ib + 3] == 0xC3, "")
     _sk = page4.Page4Mixin.p4_44caa0_skip
     _tests = {}
     for _i in _mdk.disasm(img[0x44CB58 - ib:0x44CB7A - ib], 0x44CB58):
