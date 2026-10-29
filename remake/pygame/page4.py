@@ -567,9 +567,13 @@ class Page4Mixin:
         skip = self.p4_speed != 0 and self.p4_skip_mod()
         n = 1 if self.p4_speed != 0 else 4        # S3 0x451156 neg/sbb/and al,0xFD/add 4
         self.p4_pump(n)                           # S4 0x45116D
-        if skip:                                  # 0x451151 jmp 0x451325：整帧跳过绘制
-            self.p4_flow_vm()
-            self.p4_after_vm()
+        if skip:
+            # 0x451151 `jmp 0x451325`：跳过的是"泵 + 调试文字 + present"，**VM/输入/键码/帧计数照跑**，
+            # 随后 0x451448 因 `[esp+7]==0` 改走 0x4CD484 序列引擎而不是碰撞/行为/绘制。
+            self.p4_flow_vm()                     # 0x451327
+            self.p4_after_vm()                    # 0x45132C..0x451423
+            self.p4_frames += 1                   # 0x451442 [0x56CCA8]++
+            self.p4_seq_tick()                    # 0x451457 0x4CD484
             return self.flags.is_empty()
         self.p4_debug_text()                      # S5-S6 0x451186（门 0x56CCC9 & 0x56CCB5）
         self.begin_frame()                        # S7 0x458CB0（含 present）
@@ -716,6 +720,10 @@ class Page4Mixin:
         if f <= 1:
             return False
         return (self.p4_frames % f) != 0
+
+    def p4_seq_tick(self) -> None:
+        """`0x4CD484` 序列引擎的 tick（跳过帧与正常帧都会走它；规格待落地）。"""
+        self.p4_stat[0x4CD484] = self.p4_stat.get(0x4CD484, 0) + 1
 
     def p4_debug_text(self) -> None:
         """0x451186..0x45131C：调试进度文字（门 `[0x56CCC9]` & `[0x56CCB5]`）。
