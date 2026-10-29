@@ -6063,6 +6063,34 @@ op07 记录的速率块（`0x457330` → `+0x80`）在 `rep` 帧内每帧被 `0x
 找出"速率块里只有某几个 dword 非零"的真实形态（若速率块大部分是 0，说明它只微调少数几个参数，
 而 `P[14]` 的漂移应该由 op06 周期性重写来兜住）。
 
+
+#### 16.131 实体生成器 `0x445C00` 的类型分派表定案 —— **自机类型 = 0x10000001**
+
+`0x445C00` 是通用实体 ctor（vtable `0x4987E0`），按 `[ebx+0x14]`（类型）分支，各分支写 `[ebx+0x40]` = 行为地址：
+
+```
+0x445CC1 cmp eax,8 ; ja 0x44603E ; je 0x44601E      ; type 8  → 0x4015FF → 0x447410
+0x445CD0 dec eax ; je 0x445ECE                       ; type 1  → 0x445ECE 分支
+0x445CD7 sub eax,4 ; je 0x445E47                     ; type 5  → 0x445E47 分支
+0x445CE0 dec eax ; jne 0x446237                      ; type 6
+0x445CE7 mov [ebx+0x40],0x4020BD                     ; type 6  → 0x447640
+0x44603E sub eax,9 ; je 0x446227                     ; type 9  → 0x40116D → 0x447F90
+0x446047 dec eax ; je 0x446117                       ; type 10 → 0x401BE0 → 0x448230
+0x44604E sub eax,0xAFFFFF7 ; jne …                   ; ⇒ type 0x10000001
+0x44605E mov [ebx+0x40],0x401E06                     ; → 0x448C70（玩家头像）
+0x446065 mov [ebx+0xC],0x10 ; mov byte[ebx+0x10],1   ; 自机碰撞半径 0x10、可见
+```
+
+**结论：自机实体类型 = `0x10000001`，行为 = `0x448C70`**（与 AGENTS.md 里"玩家头像 0x448C70
+直接取 0x4AB59C/0x4AB5A0 坐标、钳 446/400"的记录一致；`[ent+0xC]=0x10` 即自机判定半径 16）。
+这一条把自机从"未知类型"变成可直接实现的实体。
+
+thunk 解析：`0x4020BD→0x447640`、`0x4015FF→0x447410`、`0x401E06→0x448C70`、
+`0x401BE0→0x448230`、`0x40116D→0x447F90`。
+另有两处 `[ebx+0x40] = edx`（`0x445EB9`/`0x445F53`）是**按 `0x4AB5B0` 的位选择**的一对行为
+（`0x445E93..0x445EB9`：`neg dl/sbb edx,edx/and edx,4` ⇒ 0 或 4，再与 `0x4019C9` 的返回值相加查栈上表），
+即同一类型有"普通/反转"两种行为。
+
 **复刻接线**：`remake/pygame/page4.py`（`Page4Mixin`）= `p4_enter`/`p4_step`/`p4_intro_frame`/
 `p4_finish`/`p4_block`/`p4_flow_vm`/`p4_engine`，已接进 `geki.Pages`（`--page 4` 跑通）；
 VM/发射器/碰撞/HUD 的具体实现待下一步（接口已列，占位函数都标了地址）。
