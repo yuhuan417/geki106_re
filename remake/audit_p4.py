@@ -809,8 +809,7 @@ def main():
             if e != ((((r & 0x1FFF) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF:
                 return False
         return True
-    check("复刻侧登记了 11 个槽（仅 0x42D6A0 速度来源未定案，不登记）",
-          len(slots) == 11, f"{len(slots)}")
+    check("复刻侧登记了全部 12 个槽", len(slots) == 12, f"{len(slots)}")
     all12 = [0x42C810, 0x42CC50, 0x42D070, 0x42D370, 0x42C8F0, 0x42CD70,
              0x42D150, 0x42D4A0, 0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0]
     all12.sort()
@@ -874,7 +873,7 @@ def main():
                     if i.mnemonic == "cmp" and i.op_str.startswith("eax")]
             if cmps and cmps[0] != thr:
                 bad.setdefault(hex(addr), []).append(f"thr {thr} != {cmps[0]}")
-    check("8 个槽的弹型/速度/阈值与 exe 逐项一致", not bad, f"{bad}")
+    check("各槽的弹型/速度/阈值与 exe 逐项一致", not bad, f"{bad}")
     check("每槽登记的行为都已进 P4_BEH", all(a in _p4.P4_BEH for a in slots),
           f"{[hex(a) for a in slots if a not in _p4.P4_BEH]}")
     check("0x42D150 的随机速度序列字节齐备",
@@ -908,6 +907,27 @@ def main():
     check("生成器把 fsin 写 0x5B3E37、fcos 写 0x5D41BF",
           has_disp(0x45A7E0, 0x45A830, 0x5B3E37)
           and has_disp(0x45A7E0, 0x45A830, 0x5D41BF), "")
+
+    import struct as _s3
+
+    def _vel_px(v):
+        lo, hi = _s3.unpack("<hh", _s3.pack("<I", v))
+        return (hi / 256.0, lo / 256.0)
+
+    sane, insane = 0, []
+    for addr, (thr, shots, mode) in slots.items():
+        for tw, vel, dx in shots:
+            if callable(vel):
+                continue
+            vx, vy = _vel_px(vel)
+            sane += 1
+            if abs(vx) > 32 or abs(vy) > 32:
+                insane.append((hex(addr), vx, vy))
+    check("固定速度槽的分量全部在 ±32 像素/帧内（8.8 定点解读的合理性自检）",
+          not insane and sane >= 12, f"{insane} / {sane}")
+    check("0x42D6A0 是唯一朝上的槽（vy < 0）",
+          [hex(a) for a, (t, sh, m) in slots.items()
+           if not callable(sh[0][1]) and _vel_px(sh[0][1])[1] < 0] == ["0x42d6a0"], "")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")

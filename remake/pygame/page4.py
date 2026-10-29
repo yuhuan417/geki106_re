@@ -1469,7 +1469,7 @@ def _p4_slot_vel_trig_d4a0(self, owner) -> int:
     return (hi | lo) & 0xFFFFFFFF
 
 
-# 0x42D6A0 的速度来源仍未定案，不登记。
+# 12 个槽至此全部登记（0x42D6A0 的速度 0xF000 = 正上方 16 像素/帧）。
 P4_SPAWN_SLOTS = {
     0x42C810: (5, ((0x120B1121, 0x00000E00, 0x10),), "single"),
     0x42CC50: (5, ((0x12071126, 0xF4000A00, 0x10),
@@ -1485,6 +1485,7 @@ P4_SPAWN_SLOTS = {
     0x42D150: (3, ((0x120D112B, _p4_slot_vel_rand_d150, 0x10),), "single"),
     0x42D260: (6, ((0x120C112C, _p4_slot_vel_rand_d150, 0x10),), "single"),
     0x42D4A0: (9, ((0x120C112E, _p4_slot_vel_trig_d4a0, 0x10),), "single"),
+    0x42D6A0: (3, ((0x120A112F, 0x0000F000, 0x10),), "single"),
     0x42CA70: (5, ((0x12081123, 0x00001000, 0x10),), "cadence3"),
     0x42CEF0: (5, ((0x12061128, 0xFA000C00, 0x10),
                    (0x12061128, 0x06000C00, 0x10)), "cadence3"),
