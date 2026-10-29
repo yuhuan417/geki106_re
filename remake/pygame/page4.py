@@ -1293,6 +1293,94 @@ def _beh_type1_follow(self, e) -> bool:
     return True
 
 
+def p4_laser(self, e, variant: str) -> bool:
+    """type-5 激光族四行为（§16.194）：`0x446C50` / `0x446D30` / `0x446E20` / `0x446F10`。
+
+    四者共用同一发射段：`ebp = [ent+0x1C]`（**子对象指针**）、
+    `0x430400(rec, [ebp+4], [ebp+8], 0x10008041, ebp)` 入 `0x4AD46C`
+    （第 5 字段传的是**父指针**），随后 `0x446470(ebp, a, b)` 与 `[ent+0x20] = 1`。
+
+    差异（逐条对应反汇编）：
+
+    | 变体 | btn1 门 | `[0x56CC98]` 屏蔽 | 入口置 `[0x56CC94]` | 结算参数 | 释放时 `[ebp+0x30]` 下限 |
+    |---|---|---|---|---|---|
+    | `0x446C50` | 有 | 无 | 无 | `(1,1)` 开火 / 无 0 号 | 0x1E（仅当 `[0x56CC9C]==0`） |
+    | `0x446D30` | 有 | 有 | 无 | `(1,1)` 开火 / `(0,1)` 释放 | 0x1E |
+    | `0x446E20` | 无（用 `[+0x20]==0`） | 无 | `=[0x56CC98]!=[0x56CCA0]` | `(0,1)` | 0x3C（仅当 `[0x56CC98]==[0x56CCA0]`） |
+    | `0x446F10` | 有 | 有 | `=1` | `(1,1)` 开火 / `(0,1)` 释放 | 无 |
+    """
+    sub = e.p.get("sub")                     # 0x446C5E ebp = [ebx+0x1C]
+    s98 = self.p4_stat.get(0x56CC98, 0)
+    sa0 = self.p4_stat.get(0x56CCA0, 0)
+
+    def fire(a: int, b: int) -> None:
+        if sub is None:
+            return
+        # 0x446C78 / 0x446D61 / 0x446E5F / 0x446F4B：位置取子对象，第 5 字段传父指针
+        self.spawn(self._p4_q("ui46c"), 0x10008041,
+                   sub.s32(0x04), sub.s32(0x08), sub)
+        self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1   # 0x401AA5 记账
+
+    def raise_floor(v: int) -> None:
+        if sub is not None and sub.s32(0x30) < v:                # 0x446CE1 / 0x446DD3 / 0x446EC3
+            sub.d32(0x30, v)
+
+    if variant == "e20":
+        # 0x446E20..0x446E3A：先算 [0x56CC94] = ([0x56CC98] != [0x56CCA0])
+        self.p4_stat[0x56CC94] = 1 if s98 != sa0 else 0
+        if e.g32(0x20) == 0:                                     # 0x446E40
+            fire(0, 1)
+            e.d32(0x20, 1)                                       # 0x446E8E
+        if self.p4_btn1_edge() and self.p4_stat.get(0x56CCA0, 0):
+            self.p4_stat[0x56CC94] = 1                           # 0x446EB0
+            if self.p4_stat.get(0x56CC98, 0) == self.p4_stat.get(0x56CCA0, 0):
+                raise_floor(0x3C)                                # 0x446EBE
+        return bool(sub is not None and sub.g32(0x34))            # 0x446ECA
+
+    btn = self.p4_btn1_edge()                                    # 0x4AB597 按下沿
+    if variant in ("d30", "f10") and s98:                        # 0x446D43 / 0x446F2A
+        btn = False
+    if variant == "f10":
+        self.p4_stat[0x56CC94] = 1                               # 0x446F21
+    if btn:
+        fire(1, 1)                                               # 0x446C9C / 0x446D85 / 0x446F6F
+        e.d32(0x20, 1)
+    if e.g32(0x20):                                              # 0x446CB0 / 0x446D99 / 0x446F83
+        if self.p4_btn1_release() or (sub is not None and not sub.g32(0x34)):
+            if variant in ("d30", "f10"):
+                # 0x446DB0 / 0x446F9A：0 号结算（0x401AA5）
+                self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
+            if self.p4_stat.get(0x56CCA0, 0):                     # 0x446CC7 / 0x446DBB / 0x446FA5
+                if variant == "c50":
+                    if not self.p4_stat.get(0x56CC9C, 0):         # 0x446CD0
+                        raise_floor(0x1E)
+                else:
+                    raise_floor(0x1E)                             # 0x446DCB
+                self.p4_stat[0x56CC94] = 1                        # 0x446CE8 / 0x446DC4 / 0x446FAE
+            e.d32(0x20, 0)                                        # 0x446CEF / 0x446DDA / 0x446FB5
+    return bool(sub is not None and sub.g32(0x34))                # 0x446CF6 / 0x446DE1 / 0x446FBC
+
+
+def _beh_446C50(self, e) -> bool:
+    """`0x446C50`：激光族变体（无 `[0x56CC98]` 屏蔽、无入口置位）。见 `p4_laser`。"""
+    return p4_laser(self, e, "c50")
+
+
+def _beh_446D30(self, e) -> bool:
+    """`0x446D30`：激光族变体（有屏蔽、无入口置位）。见 `p4_laser`。"""
+    return p4_laser(self, e, "d30")
+
+
+def _beh_446E20(self, e) -> bool:
+    """`0x446E20`：激光族变体（无按键门，按 `[+0x20]` 状态一次性开火）。见 `p4_laser`。"""
+    return p4_laser(self, e, "e20")
+
+
+def _beh_446F10(self, e) -> bool:
+    """`0x446F10`：激光族变体（入口置 `[0x56CC94]=1`，释放时 0 号结算）。见 `p4_laser`。"""
+    return p4_laser(self, e, "f10")
+
+
 def _beh_446BD0(self, e) -> bool:
     """`0x402199` → `0x446BD0`（type 1 变体）：**直接吸附**到指针位置（无 /4 插值）。
 
@@ -1584,6 +1672,10 @@ P4_BEH: dict[int, object] = {
     0x446950: _beh_446950,
     0x446890: _beh_446950,          # §16.193：与 0x446950 逐字节相同（仅 call 位移不同）
     0x446BD0: _beh_446BD0,
+    0x446C50: _beh_446C50,
+    0x446D30: _beh_446D30,
+    0x446E20: _beh_446E20,
+    0x446F10: _beh_446F10,
     0x448C70: _beh_10000001,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
@@ -2322,6 +2414,14 @@ class Page4Mixin:
     def p4_btn_attack(self) -> bool:
         """`[0x4AB594]`：btn0（C/左键=攻击）当前状态。"""
         return bool(self.p4_in_bits() & 1)
+
+    def p4_btn1_edge(self) -> bool:
+        """`byte[0x4AB597]`：btn1 **按下沿**（输入记录第 4 字节，`rec.e1`）。"""
+        return bool(getattr(self.inp.rec, "e1", 0))
+
+    def p4_btn1_release(self) -> bool:
+        """`byte[0x4AB599]`：btn1 **松开沿**（输入记录第 6 字节，`rec.r1`）。"""
+        return bool(getattr(self.inp.rec, "r1", 0))
 
     def p4_anim_step(self, e) -> None:
         """`0x45A790(节点+4, -0x20, 0, -0x20, 0)`：按 16 帧周期切自机动画帧。"""

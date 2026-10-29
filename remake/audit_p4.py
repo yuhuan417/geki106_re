@@ -1027,6 +1027,33 @@ def main():
           b"\x1e\x00\x00\x00" in img[0x446C50 - ib:0x446CF6 - ib],
           img[0x446CDD - ib:0x446CE8 - ib].hex())
 
+    # ---- §16.194 激光族四变体 ----
+    check("激光族四行为已全部登记",
+          all(x in page4.P4_BEH for x in (0x446C50, 0x446D30, 0x446E20, 0x446F10)), "")
+    def _pushreg_before(lo, hi):
+        """`push 0x10008041` 紧前那条是否是单字节 `push reg`（50..57）。"""
+        pat = bytes([0x68, 0x41, 0x80, 0x00, 0x10])
+        blk = img[lo - ib:hi - ib]
+        k = blk.find(pat)
+        return k > 0 and 0x50 <= blk[k - 1] <= 0x57 and blk.count(pat) == 1
+
+    check("四者都发 0x10008041，紧前一条是 push reg（第 5 字段 = 父指针；"
+          "0x446C50/0x446D30 用 push ebp，0x446E20/0x446F10 用 push edx/eax 传同一个值）",
+          all(_pushreg_before(lo, hi)
+              for lo, hi in ((0x446C50, 0x446CFE), (0x446D30, 0x446DE9),
+                             (0x446E20, 0x446ED2), (0x446F10, 0x446FC4))), "")
+    check("只有 0x446C50 完全不查 [0x56CC98]（其余三个都读它）",
+          [hex(lo) for lo, hi in ((0x446C50, 0x446CFE), (0x446D30, 0x446DE9),
+                                  (0x446E20, 0x446ED2), (0x446F10, 0x446FC4))
+           if b"\x98\xcc\x56\x00" not in img[lo - ib:hi - ib]] == ["0x446c50"], "")
+    check("0x446E20 的**开火段**无按键门（0x446E20..0x446E95 不引用 0x4AB597）",
+          b"\x97\xb5\x4a\x00" not in img[0x446E20 - ib:0x446E95 - ib]
+          and b"\x97\xb5\x4a\x00" in img[0x446E9C - ib:0x446EA2 - ib], "")
+    check("释放时 [ebp+0x30] 的下限：0x446C50/0x446D30 是 0x1E，0x446E20 是 0x3C",
+          b"\x1e\x00\x00\x00" in img[0x446CDC - ib:0x446CE8 - ib]
+          and b"\x1e\x00\x00\x00" in img[0x446DCE - ib:0x446DDA - ib]
+          and b"\x3c\x00\x00\x00" in img[0x446EBE - ib:0x446ECA - ib], "")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
