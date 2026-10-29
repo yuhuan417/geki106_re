@@ -1293,6 +1293,28 @@ def _beh_type1_follow(self, e) -> bool:
     return True
 
 
+def _beh_446BD0(self, e) -> bool:
+    """`0x402199` → `0x446BD0`（type 1 变体）：**直接吸附**到指针位置（无 /4 插值）。
+
+    ```
+    0x446BD3 0x40212B→0x446600(e) ; al == 0 → ret
+    0x446BDE [esi+4] = [0x4AB59C]      ; 0x446BE6 [esi+8] = [0x4AB5A0]（直接赋值，不插值）
+    0x446BF3 [0x56CC8C]/[0x56CC90] = (x, y)
+    0x446C03 节点 +0x14/+0x18 = (x−0x18, y−0x18)
+    0x446C24 返回 ([esi+0x18] != 0)
+    ```
+    函数体到 `0x446C2D ret` 为止，后接 nop/int3 填充。
+    """
+    if not p4_446600(self, e):                       # 0x446BD3 / 0x446BDA
+        return False
+    px, py = self.p4_ptr()                           # 0x446BDE / 0x446BE6
+    e.d32(0x04, px & 0xFFFFFFFF)                     # 0x446BE3 直接写入
+    e.d32(0x08, py & 0xFFFFFFFF)                     # 0x446BEE
+    if e.node is not None:                           # 0x446C16 节点镜像
+        e.node.dst = (px - 0x18, py - 0x18)          # 0x446C09 / 0x446C0C
+    return e.g32(0x18) != 0                          # 0x446C24 setne
+
+
 def _beh_446950(self, e) -> bool:
     """`0x401XXX` → `0x446950`（type 1 变体）：只有 `0x446600` 门 + 1/4 步进逼近，**无**锁定击破分支。
 
@@ -1560,6 +1582,7 @@ P4_BEH: dict[int, object] = {
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
     0x446950: _beh_446950,
+    0x446BD0: _beh_446BD0,
     0x448C70: _beh_10000001,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,

@@ -959,9 +959,15 @@ def main():
           u32(0x445ED9) == 0x401B6D and u32(0x445EF1) == 0x401E3D
           and u32(0x445F11) == 0x402199,
           f"{hex(u32(0x445ED9))} {hex(u32(0x445EF1))} {hex(u32(0x445F11))}")
-    check("0x446950 与 0x4466F0 已在 P4_BEH 登记（0x446BD0 尚未）",
-          0x446950 in _p4b.P4_BEH and 0x4466F0 in _p4b.P4_BEH
-          and 0x446BD0 not in _p4b.P4_BEH, "")
+    check("type-1 三行为已全部在 P4_BEH 登记",
+          all(x in _p4b.P4_BEH for x in (0x4466F0, 0x446950, 0x446BD0)), "")
+    check("0x446BD0 是直接赋值（mov [esi+4],eax）而非 /4 插值",
+          img[0x446BDE - ib:0x446BE6 - ib] == bytes([0xA1, 0x9C, 0xB5, 0x4A, 0x00, 0x89, 0x46, 0x04])
+          and b"\x7c\x03\x83\xc0\x03" not in img[0x446BD0 - ib:0x446C2E - ib],
+          img[0x446BDE - ib:0x446BE6 - ib].hex())
+    check("0x446950 与 0x446BD0 都无锁定击破调用（无 0x401AA5）",
+          b"\xa5\x1a\x40\x00" not in img[0x446950 - ib:0x4469D4 - ib]
+          and b"\xa5\x1a\x40\x00" not in img[0x446BD0 - ib:0x446C2E - ib], "")
     check("0x446950 的 /4 取整序列：test eax,eax / jl / add eax,3 / sar 2",
           img[0x446973 - ib:0x446980 - ib] == bytes([0x85, 0xC0, 0x7C, 0x03, 0x83, 0xC0, 0x03, 0xC1, 0xF8, 0x02])
           or img[0x446973 - ib:0x446980 - ib][:5] == bytes([0x85, 0xC0, 0x7C, 0x03, 0x83]),
