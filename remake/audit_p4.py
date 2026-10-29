@@ -389,6 +389,36 @@ def main():
           or img[0x45AFC3 - ib:0x45AFC9 - ib] == bytes([0x8B, 0x4C, 0x24, 0x04, 0x23, 0xC1]),
           img[0x45AFC0 - ib:0x45AFCC - ib].hex())
 
+    print("== 11k. 类型 1/5 的索引算术（§16.167）")
+
+    def bitidx(mask, keystate):
+        """按 0x45AFC0 的实现模拟：返回掩码内最高位权重。"""
+        eax = keystate & mask
+        ecx = mask
+        if eax == 0:
+            return 1 if keystate == 0 else 0
+        while (ecx & 1) == 0:
+            ecx >>= 1
+            eax >>= 1
+        return ecx
+
+    check("0x45AFC0(0xC000) == 3（两键都按）", bitidx(0xC000, 0xC000) == 3, "")
+    check("0x45AFC0(0xC000, 仅 bit14) == 3（返回值只由掩码决定）",
+          bitidx(0xC000, 0x4000) == 3, f"{bitidx(0xC000, 0x4000)}")
+    check("0x45AFC0(0xC000, 仅 bit15) == 3", bitidx(0xC000, 0x8000) == 3, "")
+    check("0x45AFC0(0xC000, 完全无键) == 1（走 0x45B006 分支）",
+          bitidx(0xC000, 0) == 1, f"{bitidx(0xC000, 0)}")
+    check("0x45AFC0(0xC000, 只按别的键) == 0", bitidx(0xC000, 0x0001) == 0,
+          f"{bitidx(0xC000, 0x0001)}")
+    check("0x45AFF0 以 ret 4 弹参（0x45B003）", img[0x45B003 - ib:0x45B004 - ib] == b"\xc2"
+          and int.from_bytes(img[0x45B004 - ib:0x45B006 - ib], "little") == 4, "")
+    check("0x45AFC0 以 ret 4 弹参（0x45AFD9）",
+          img[0x45AFD9 - ib:0x45AFDA - ib] == b"\xc2"
+          and int.from_bytes(img[0x45AFDA - ib:0x45AFDC - ib], "little") == 4, "")
+    check("两分支都 push 0xC000 作掩码",
+          img[0x445E95 - ib:0x445E9A - ib] == bytes([0x68, 0x00, 0xC0, 0x00, 0x00])
+          and img[0x445F1C - ib:0x445F21 - ib] == bytes([0x68, 0x00, 0xC0, 0x00, 0x00]), "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
