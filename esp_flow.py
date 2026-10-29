@@ -57,6 +57,8 @@ def esp_ops(ops):
         out.append(v if mo.group(1) == "+" else -v)
     for mo in re.finditer(r"\[esp\]", ops):
         out.append(0)
+    for mo in re.finditer(r"\[esp \+ [a-z0-9]+\*\d \+ (0x[0-9a-f]+)\]", ops):
+        out.append(int(mo.group(1), 16))
     return out
 
 def flow(start, end):

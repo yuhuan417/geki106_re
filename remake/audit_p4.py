@@ -439,7 +439,7 @@ def main():
     check("死亡路径返回 0（0x448DF4 xor al,al）",
           img[0x448DF4 - ib:0x448DF6 - ib] == bytes([0x32, 0xC0]), "")
 
-    print("== 11m. 类型 2 行为 0x447640（§16.169）")
+    print("== 11m. 类型 6 行为 0x447640（§16.169/§16.202）")
     # 表基址 [esp+0x60]：前两项由 ebx 写入，后五项是 C7 44 24 xx + imm32
     tbl = [0x11FFA321, 0x11FFA321] + [u32(a) for a in
            (0x4476BD, 0x4476C5, 0x4476CD, 0x4476D5, 0x4476DD)]
@@ -1185,6 +1185,21 @@ def main():
           _f(0x448123, 0x1C) == _f(0x448113, 0x18)
           and _f(0x448117, 0x1C) == _f(0x448113, 0x18) + 4,
           f"{_f(0x448123, 0x1C)} {_f(0x448117, 0x1C)} {_f(0x448113, 0x18)}")
+
+    # ---- §16.202 0x447640 的 7 项表必然越界 ----
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import esp_flow as _ef2
+    _m2 = _ef2.flow(0x447640, 0x447801)
+    _tab = [_m2[0x4476A6][0x60], _m2[0x4476AF][0x64], _m2[0x4476B9][0x68],
+            _m2[0x4476C1][0x6C], _m2[0x4476C9][0x70], _m2[0x4476D1][0x74], _m2[0x4476D9][0x78]]
+    check("0x447640 的 7 项表占据连续的 7 个 dword（帧−0x1C..帧−0x4）",
+          [next(iter(x)) for x in _tab] == [-0x1C, -0x18, -0x14, -0x10, -0xC, -0x8, -0x4],
+          f"{[next(iter(x)) for x in _tab]}")
+    check("索引读基址 == 表首槽 ⇒ idx=7 起越界（读到帧+0x00 及以后）",
+          next(iter(_m2[0x4476E1][0x60])) == next(iter(_tab[0])), "")
+    check("0x447640 未登记进 P4_BEH（越界语义无法 1:1 照抄，见 §16.202）",
+          0x447640 not in page4.P4_BEH, "")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
