@@ -3778,6 +3778,73 @@ class Page4Mixin:
         e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x445EBC
         e.d32(0x20, 0)                                         # 0x445EC2
 
+    def p4_44601e(self, e, rec=None) -> None:
+        """`0x44601E`：type-8 构造器。
+
+        ```
+        0x44601E [e+0x40] = 0x4015FF
+        0x446025 [e+0x1C] = [rec+0xC]
+        0x446028 eax = 5 → [e+0x20] = 5 ; [e+0x24] = 5 ; [e+0x28] = esi(=0)
+        ```
+        """
+        e.d32(0x40, 0x4015FF)                                  # 0x44601E
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x446025
+        e.d32(0x20, 5)                                         # 0x446030
+        e.d32(0x24, 5)                                         # 0x446033
+        e.d32(0x28, 0)                                         # 0x446036
+
+    def p4_446227(self, e, rec=None) -> None:
+        """`0x446227`：type-9 构造器。
+
+        ```
+        0x446227 [e+0x40] = 0x40116D
+        0x44622E [e+0x1C] = [rec+0xC]
+        0x446234 [e+0x20] = esi(=0)
+        ```
+        """
+        e.d32(0x40, 0x40116D)                                  # 0x446227
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x44622E
+        e.d32(0x20, 0)                                         # 0x446234
+
+    def p4_446117(self, e, rec=None) -> None:
+        """`0x446117`：type-10 构造器（**三次**取操作器，前两次各算一半矩形）。
+
+        ```
+        0x446121 [e+0x40] = 0x401BE0 ; [e+0xC]=0xC ; byte[e+0x10]=0 ; [e+0x1C] = -1
+        0x44613A op = 0x45AFC0(0x4AB5B0,0xC000)
+        0x446142 [e+0x20] = op ; 0x446145 [e+0x30] = 0 ; 0x446148 [e+0x18] = 1
+        0x44614F [node+0] = 0
+        0x446151 edx = (op*0x30) + 0x2F        ; 第三次 0x45AFC0 得到的 op
+        0x446176 eax = op*0x30
+        0x44618B rect = 0x45A750(&buf, 0(=esi), eax, 0x2F, edx)
+        0x4461B4 0x45A690(e.x-0x18, e.y-0x18) → [node+0x14]/[+0x18]
+        0x4461CD byte[node+0x1C] = 1
+        0x4461D9 0x45A690(e.x, e.y) → [0x56CC8C]/[0x56CC90]
+        0x4461E5 0x430400(&buf, 0xA0, 0x78, 0x10008043, e)  ; 5 dword
+        0x44621A 0x430290(0x4AD46C, &rec)                    ; ★ 入 ui46c
+        ```
+        """
+        e.d32(0x40, 0x401BE0)                                  # 0x446121
+        e.d32(0x0C, 0xC)                                       # 0x446128
+        e.m[0x10] = 0                                          # 0x44612F
+        e.d32(0x1C, 0xFFFFFFFF)                                # 0x446133
+        op = self.p4_afc0(0xC000)                              # 0x44613A
+        e.d32(0x20, op)                                        # 0x446142
+        e.d32(0x30, 0)                                         # 0x446145
+        e.d32(0x18, 1)                                         # 0x446148
+        rect = self.p4_45a750([0, 0, 0, 0], 0, op * 0x30, 0x2F, op * 0x30 + 0x2F)  # 0x44618B
+        node = getattr(e, "node", None)
+        if node is not None:
+            node.src = tuple(rect)                             # 0x4461AB
+            nx, ny = p4_45A690(e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)   # 0x4461BC
+            node.dst = (nx, ny)
+            node.frame = 1                                     # 0x4461CD
+        px, py = p4_45A690(e.s32(0x04), e.s32(0x08))           # 0x4461D9
+        self.p4_player_pos = (px, py)
+        self.p4_stat["44621a_ui46c"] = self.p4_stat.get("44621a_ui46c", 0) + 1   # 0x44621A
+
     def p4_44604e(self, e, rec=None) -> None:
         """`0x44604E`：**自机头像**（type `0x0B000002`）构造器。
 
@@ -3848,6 +3915,15 @@ class Page4Mixin:
         if typ == 6:
             self.p4_stat["445c00_type6"] = self.p4_stat.get("445c00_type6", 0) + 1
             return "handled:6"
+        if typ == 8:                                           # 0x44601E
+            self.p4_44601e(e, rec)
+            return "handled:8"
+        if typ == 9:                                           # 0x446227
+            self.p4_446227(e, rec)
+            return "handled:9"
+        if typ == 10:                                          # 0x446117
+            self.p4_446117(e, rec)
+            return "handled:10"
         if typ == 0x0B000002:                                  # 0x44604E
             self.p4_44604e(e, rec)
             return "handled:0xb000002"

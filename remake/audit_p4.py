@@ -1548,6 +1548,29 @@ def main():
     _av_e = page4.Ent(0x30, 0x40, 0x0B000002, 0)
     _av_e.node = _Nd2()
     _av_r = _av.p4_445c00(_av_e, (0, 0, 0, 5))
+    _t8 = _PN()
+    _t8e = page4.Ent(0, 0, 8, 0)
+    _t8e.node = _Nd2()
+    _r8 = _t8.p4_445c00(_t8e, (0, 0, 0, 7))
+    _t9 = _PN()
+    _t9e = page4.Ent(0, 0, 9, 0)
+    _t9e.node = _Nd2()
+    _r9 = _t9.p4_445c00(_t9e, (0, 0, 0, 7))
+    _ta = _PN()
+    _tae = page4.Ent(0x30, 0x40, 10, 0)
+    _tae.node = _Nd2()
+    _ra = _ta.p4_445c00(_tae, (0, 0, 0, 7))
+    check("type 8/9/10 构造器：8→0x4015FF 且 [+0x20/0x24/0x28]=5/5/0；9→0x40116D 且 [+0x20]=0；"
+          "10→0x401BE0 半径 0xC、[+0x1C]=-1、矩形 (0,op*0x30,0x2F,op*0x30+0x2F)、dst=(x-0x18,y-0x18)",
+          _r8 == "handled:8" and _t8e.g32(0x40) == 0x4015FF
+          and (_t8e.g32(0x20), _t8e.g32(0x24), _t8e.g32(0x28)) == (5, 5, 0)
+          and _t8e.g32(0x1C) == 7
+          and _r9 == "handled:9" and _t9e.g32(0x40) == 0x40116D and _t9e.g32(0x20) == 0
+          and _ra == "handled:10" and _tae.g32(0x40) == 0x401BE0
+          and _tae.g32(0x0C) == 0xC and _tae.g32(0x1C) == 0xFFFFFFFF
+          and _tae.node.src == (0, 0, 47, 47)
+          and _tae.node.dst == (0x30 - 0x18, 0x40 - 0x18)
+          and _ta.p4_stat.get("44621a_ui46c") == 1, "")
     check("0x44604E 自机头像：行为 0x401E06、半径 0x10、**构造即活**(alive=1)、HP 1、"
           "节点 dst 的 x 偏 +0x40、frame=1、置 word[0x56CCC0] 的 bit0",
           _av_r == "handled:0xb000002"
