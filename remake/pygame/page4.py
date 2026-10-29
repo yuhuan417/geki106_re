@@ -1648,9 +1648,35 @@ class Page4Mixin:
         self.canvas.blit(lay.buf, r2, (0x128, 0x188), key=lay.ckey)
 
     def p4_pause(self) -> None:
-        """0x451B10 暂停循环：`0x44ECC0` 重读键盘 → SetCursorPos → 键命令，
-        条件 `0x4AB5C0 非空 || 键码==2` 才退出。无头模式下直接返回（不阻塞）。"""
-        self.log("page4.pause（0x451B10）：无头模式跳过阻塞循环")
+        """`0x451B10`：暂停嵌套循环（每轮一帧）。
+
+        ```
+        0x451B10 if ([0x4AB59A] == 2) {              ; 特殊模式（回放/演示）
+                     0x44CDF0(0x4AA7B0, 2, [0x4AB5B8]>>… *4-0xC8, …)   ; 载暗调色板
+                     if (!ok) 0x45AF30(0x4AB5C0, 2) }
+        0x451B68 0x458B80(this)                      ; 泵 + 帧门
+        0x451B6F 0x44EB60(0x4AB454, 0x4AB594)        ; 输入记录（复刻侧 run.py 已做）
+        0x451B7E SetCursorPos(0x140, 0xF0)
+        0x451B96 0x458FD0(this, [0x4AB59A])          ; 键码 → 旗标
+        0x451BA3 if (0x45B070(0x4AB5C0) == 0         ; 旗标为空
+                     && [0x4AB59A] != 2) return 1     ; ⇒ 继续暂停
+        0x451BB9 0x44CDF0(0x4AA7B0, 1, …)            ; 恢复亮调色板 ⇒ 退出暂停
+        ```
+        """
+        n = 0
+        while n < 4096:
+            n += 1
+            if getattr(self, "p4_ab59a", 0) == 2:            # 0x451B16
+                if not self.p4_load_palette(2):               # 0x451B53
+                    self.flags.set(2)                         # 0x451B5C 0x45AF30(0x4AB5C0,2)
+            self.p4_pump(1)                                  # 0x451B6A
+            self._p4_recenter_cursor()                       # 0x451B7E
+            self.key_command(self.inp.rec.key)               # 0x451B97
+            if self.flags.bits == 0 and getattr(self, "p4_ab59a", 0) != 2:
+                continue                                     # 0x451BA8 仍在暂停
+            self.p4_load_palette(1)                          # 0x451BF0 恢复亮版
+            return
+        self.log("page4.pause（0x451B10）：无头模式下限次退出")
 
     def btn0_edge(self) -> bool:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
