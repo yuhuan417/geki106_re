@@ -1064,8 +1064,52 @@ class Page4Mixin:
         return hits
 
     def p4_hit_cb(self, b, a) -> None:
-        """`0x43C170`：命中回调（下一步实现）。"""
-        self.p4_stat[0xC1] = self.p4_stat.get(0xC1, 0) + 1
+        """`0x43C170(b, a)`：命中回调。`b` = 我方子弹（arg1）、`a` = 被击中实体（arg2）。
+
+        ```
+        0x43C181 t = b[0x14]; dec → t==1：0x43C344 分支
+        0x43C18B sub 5 → t==6：0x43C1AF 命中特效
+        0x43C190 sub 0xAFFFFFB → t==0x10000001：b[0x18]=0（自机被击中）
+        其余 → 直接返回
+        ```
+        """
+        t = b.s32(0x14)
+        if t == 1:                                        # 0x43C344
+            if b.g32(0x30) or b.s32(0x20) <= 0x12C:
+                return
+            if a.s32(0x14) in (0x27000011, 0x29000013):
+                return
+            if b.s32(0x28) == 3:
+                b.d32(0x28, 0)
+                b.d32(0x20, 0x79)
+                return
+            b.d32(0x10, 0)                                # 0x43C39F
+            b.d32(0x18, 0)
+            return
+        if t == 6:                                        # 0x43C1AF 命中特效
+            jx = (rng.randrange(0x20) - 0xF)
+            jy = (rng.randrange(0x20) - 0xF)
+            self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                       a.s32(0x04) + jx, a.s32(0x08) + jy)   # 0x43C1DA..0x43C20A
+            if a.s32(0x18) <= 1:                          # 0x43C212 ja → 血量>1 才走扣血
+                self.p4_stat[0xC2] = self.p4_stat.get(0xC2, 0) + 1   # 0x43C21B.. 最后一击特判（待实现）
+        elif t == 0x10000001:                             # 0x43C19B 自机被击中
+            b.d32(0x18, 0)
+            return
+        else:
+            return
+        a.d32(0x18, (a.s32(0x18) - 1) & 0xFFFFFFFF)       # 0x43C30D 血量减一
+        if self.p4_frame_no() & 7:                        # 0x43C311 [0x56CCA8] & 7
+            return
+        self.p4_se_pan(5, (a.s32(0x04) - 0x140) << 4)     # 0x43C326 0x4013A2(0x4AB4B0,5,…)
+
+    def p4_frame_no(self) -> int:
+        """`[0x56CCA8]`：全局帧计数器（`0x451442` 每帧 ++）。"""
+        return int(getattr(self, "p4_frames", 0))
+
+    def p4_se_pan(self, se: int, pan: int) -> None:
+        """`0x4013A2(0x4AB4B0, se, pan)`：带声像的音效（见 §11）。"""
+        self.p4_stat[0x3A2] = self.p4_stat.get(0x3A2, 0) + 1
 
     def p4_ptr(self):
         """`[0x4AB59C]`/`[0x4AB5A0]`：指针坐标（0x44E660 Poll 写、0x44EB60 记录）。"""
