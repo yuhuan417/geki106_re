@@ -2910,6 +2910,23 @@ def main():
     Page4Mixin.p4_debug_text(_dt3)
     check("非回放 ⇒ 不产出", _dt3._p4_dbg_text is None, "")
 
+    # ---- 0x4606D4 op 表：推进量与复刻 SIZES 逐项一致 -------------------------
+    print("\n[0x4606D4 VM op 表]")
+    from page4 import ScriptVM
+    # 反汇编实测（handler 里 mov edi,IMM；op0 是 xor edi,edi；op9 是 [esi+0xC]*4+0x10）
+    want = {0x0: 0, 0x1: 0x14, 0x2: 0x14, 0x3: 0x14, 0x4: 0x14, 0x5: 0x14,
+            0x6: 0x5C, 0x7: 0x60, 0x8: 8, 0xA: 0xC, 0xB: 0x3C, 0xC: 8,
+            0xD: 8, 0xE: 0x14}
+    for k, v in want.items():
+        check(f"op {k:#x} 推进量 = {v:#x}", ScriptVM.SIZES.get(k) == v,
+              f"{ScriptVM.SIZES.get(k)}")
+    # op 0xE 必须是空操作（0x4603E9 = 共用尾）
+    _vm = ScriptVM.__new__(ScriptVM)
+    _vm.out = {i: [] for i in range(0xF)}
+    ScriptVM.exec_op(_vm, 0xE, bytes(0x14))
+    check("op 0xE 无副作用（0x4603E9 直落共用尾）",
+          all(not v for v in _vm.out.values()), f"{_vm.out}")
+
     print()
     if fails:
         print(f"[audit] {len(fails)} 项失败：{fails}")

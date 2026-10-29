@@ -102,7 +102,9 @@ class ScriptVM:
     """
 
     # 记录总长（含 4 字节头）；op9 变长，op0 特例 edi=0
-    SIZES = {0x0: 4, 0x1: 0x14, 0x2: 0x14, 0x3: 0x14, 0x4: 0x14, 0x5: 0x14,
+    # 每条 op 的推进量（handler 里的 `mov edi, IMM`）。op 0 = `xor edi,edi`（0x460695），
+    # 它走 `0x4600F0` 换流后**不推进游标**（新游标由 0x4600F0 重置），step() 里提前 continue。
+    SIZES = {0x0: 0, 0x1: 0x14, 0x2: 0x14, 0x3: 0x14, 0x4: 0x14, 0x5: 0x14,
              0x6: 0x5C, 0x7: 0x60, 0x8: 8, 0xA: 0xC, 0xB: 0x3C, 0xC: 8, 0xD: 8, 0xE: 0x14}
 
     def __init__(self, bank: ScriptBank, chains: list[int], owner=None):
@@ -187,8 +189,11 @@ class ScriptVM:
         import os as _os
         if _os.environ.get("P4_VMTRACE"):
             print(f"[vm] f={self.frame} op={op:#x} body={body[:0x14].hex()}", flush=True)
-        if op == 0xE:                                            # 0x4603E9 注释
-            self.out[0xE].append(body.split(b"\0")[0])
+        if op == 0xE:
+            # 0x4603E9：跳表第 14 项**直接指向共用尾**（`mov edi,0x14; jmp 0x4603EE`），
+            # 也就是 op 0xE **没有任何副作用**，只是把游标推进 0x14。
+            # 之前把它当成"字符串记录"是错的（没有任何消费者）；这里只推进游标。
+            pass
         elif 1 <= op <= 5:                                       # 0x46044F/3AD/411/490/4D1
             rec = tuple(int.from_bytes(body[i:i + 4], "little") for i in (0, 4, 8, 0xC))
             self.out[op].append(rec)
