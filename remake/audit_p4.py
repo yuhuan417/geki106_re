@@ -1577,6 +1577,17 @@ def main():
             _ok = _ok and _tgt == _exp_t[_idx]
             _ok = _ok and int.from_bytes(
                 img[_tgt - ib + 5:_tgt - ib + 6], "little") == _code   # mov [reg],imm8 的立即数字节
+    import capstone as _cs2
+    _md2 = _cs2.Cs(_cs2.CS_ARCH_X86, _cs2.CS_MODE_32)
+    _hud_calls = []
+    for _off, _in in enumerate(_md2.disasm(img[0x451260 - ib:0x451400 - ib], 0x451260)):
+        if _in.mnemonic == "call":
+            _t = _in.address + 5 + int.from_bytes(img[_in.address + 1 - ib:_in.address + 5 - ib], "little", signed=True)
+            _hud_calls.append(_t)
+    check("HUD 文字绘制的入口：页4 每帧里 0x451316 调 0x4022C0(→0x44D330)，"
+          "另有 0x43DF71..0x43E079 八连调与 0x43E2C3、0x445395",
+          img[0x451316 - ib] == 0xE8
+          and 0x4022C0 in _hud_calls, "")
     check("0x457938 字节索引表 + 0x457908 十二项跳表：kind ∈ {0,6,10,16,24,32,48,72,108,160,240} "
           "→ 图块码 {—,3..12}；其余与 >0xF0 一律走 0x457861 兜底",
           _ok
