@@ -3417,7 +3417,7 @@ class Page4Mixin:
             pass                                               # 未落地
         elif u == 0x10142214:                                  # 0x43C541 → 0x43C868（未落地）
             pass
-        elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4（未落地）
+        elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4（依赖 0x43AE60，未落地）
             pass
         elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D（见 §16.216）
             pass
