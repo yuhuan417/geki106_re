@@ -3374,6 +3374,22 @@ class Page4Mixin:
             v >>= 1
         return v                                                # 0x45AFD9
 
+    def _p4_43c868(self, p) -> None:
+        """`0x43C868`（类型 `0x10142214`）：在 `p` 原址连发 **20 个 `0x10032215`** 到 `0x4AD46C`。
+
+        ```
+        0x43C86E..0x43C87F 0x430400(rec, [p+4], [p+8], 0x10032215, 0)   ; a3 槽先清 0
+        0x43C8A3 [esp+0x1c] = 0        ← 注意 rec 在 esp+0x10，[esp+0x1c] = rec+0xC = **a3 槽**
+        0x43C8AB 0x430290(0x4AD46C, &rec)
+        0x43C8BA eax = [esp+0x1c] + 1 ; 0x43C8C6 if (eax < 0x14) 继续
+        ```
+        ⇒ 同一个坐标发 20 份，**a3 依次为 0..0x13**（不是 20 个随机位置）。
+        """
+        x = p.s32(0x04)                                        # 0x43C86B
+        y = p.s32(0x08)                                        # 0x43C868
+        for i in range(0x14):                                  # 0x43C8BF cmp eax,0x14
+            self.spawn(self._p4_q("ui46c"), 0x10032215, x, y, i)   # 0x43C8B5
+
     def _p4_43c6c4(self, p, a, u: int) -> None:
         """`0x43C6C4`（类型 `0x10008041`）：命中演出 —— 4 个 `0x41000005` 碎片 + 1 条 `0x41400507` 记录。
 
@@ -3495,8 +3511,8 @@ class Page4Mixin:
             self._p4_43c987(p, u)
         elif u > 0x10142214:                                   # 0x43C53B → 0x43C8CD：只剩 0x10FF0053
             pass                                               # 未落地
-        elif u == 0x10142214:                                  # 0x43C541 → 0x43C868（未落地）
-            pass
+        elif u == 0x10142214:                                  # 0x43C541 → 0x43C868
+            self._p4_43c868(p)
         elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4
             self._p4_43c6c4(p, a, u)
         elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D（见 §16.216）

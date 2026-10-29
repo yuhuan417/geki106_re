@@ -1371,6 +1371,14 @@ def main():
     _za = _Z({0x4AB5B0 + 4: 0xC000})
     _zb = _Z({0x4AB5B0 + 4: 0x4000})
     _zc = _Z({0x4AB5B0 + 4: 0})
+    _q1 = page4.Ent(0x120, 0x80, 0x10142214, 0)
+    _qz = _Z()
+    page4.Page4Mixin._p4_43c868(_qz, _q1)
+    check("0x43C868（类型 0x10142214）：同址连发 20 个 0x10032215，a3 = 0..0x13",
+          len(_qz.calls) == 0x14
+          and all(c[0] == "ui46c" and c[1] == 0x10032215 and c[2] == 0x120 and c[3] == 0x80
+                  for c in _qz.calls)
+          and [c[4] for c in _qz.calls] == list(range(0x14)), "")
     check("0x45AFC0 = 取 (word & mask) 并右移到 mask 最低位（0xC000 → 操作器 0..3）",
           page4.Page4Mixin.p4_afc0(_za, 0xC000) == 3
           and page4.Page4Mixin.p4_afc0(_zb, 0xC000) == 1
