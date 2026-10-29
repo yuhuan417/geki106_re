@@ -602,6 +602,25 @@ def main():
     check("0x01000001 的高字节命中生成器的特殊类判据",
           (0x01000001 & 0xFF000000) == 0x01000000, "")
 
+    print("== 11s. 0x4CD590 取值器与阶段结算分支（§16.175）")
+    for getter, off in ((0x460EA0, 0x30), (0x460EC0, 0x3C), (0x460EE0, 0x40)):
+        want = bytes([0x8B, 0x41, off, 0xC3])
+        check(f"取值器 {getter:#x} = mov eax,[ecx+{off:#x}] ; ret",
+              img[getter - ib:getter - ib + 4] == want,
+              img[getter - ib:getter - ib + 4].hex())
+    check("0x451055 调 0x460EE0 取 [+0x40]", thunk(0x401FB9) == 0x460EE0, "")
+    check("0x451068 置旗标 0x200000 到 0x4AB5C0",
+          u32(0x451069) == 0x200000 and u32(0x45106E) == 0x4AB5C0,
+          f"{hex(u32(0x451069))} / {hex(u32(0x45106E))}")
+    check("0x451078 向 0x56CC4C 传 9",
+          img[0x451078 - ib:0x45107A - ib] == bytes([0x6A, 0x09])
+          and u32(0x45107B) == 0x56CC4C, "")
+    check("0x401E1F→0x45AF30（置位）、0x401AAA→0x45AF10（赋值）",
+          thunk(0x401E1F) == 0x45AF30 and thunk(0x401AAA) == 0x45AF10, "")
+    check("0x401ED3→0x45F760、0x401D84→0x4602D0、0x401EEC→0x45D1A0",
+          thunk(0x401ED3) == 0x45F760 and thunk(0x401D84) == 0x4602D0
+          and thunk(0x401EEC) == 0x45D1A0, "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
