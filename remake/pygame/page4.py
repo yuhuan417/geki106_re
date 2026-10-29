@@ -5081,20 +5081,19 @@ class Page4Mixin:
 
         ```
         0x457760 [obj+0xC] += [param+0x38]     ; 索引 += 步长（params[14]）
-        0x45776A 窗口 [param+0x2C] .. [param+0x30]（params[11]..params[12]）
-        0x4577AB k = [[obj+4] + idx*12 + 8]    ; 第 idx 条的第三 dword
+        0x45776A 窗口 params[11] .. params[12]
+        0x4577AB k = [[obj+4] + idx*12 + 8]
         0x4577DD k → 层 3..0xC（k=0 不可见）
         0x45787E rect = (0, base*k, k-1, (base+1)*k-1)
-        0x4578C7 dst  = (条目x, 条目y)
+        0x4578C9 dst  = (条目x + seedX - k/2, 条目y + seedY - k/2)（`0x45A690` 恒等）
         ```
 
-        索引初值来自累加器绕回（`0x457330` 的 `0x4573ED..0x457438`）：`acc += 步长`，
-        `|acc| >= 周期（params[13]）` 时绕回并重建，`idx = acc-周期`（步长≥0）
-        或 `idx = 条数 + acc - 1`（步长<0）。
+        索引初值来自累加器绕回（`0x457330` 的 `0x4573ED..0x457438`）；**只有发生绕回时**
+        才创建/重置节点（`0x45741D`/`0x457439`），其余帧只做 `+= 步长`（§16.330）。
+
+        条目 x/y 是 1/1024 屏宽的归一化坐标（`0x456FB0` 的 `>>6` 把 16.16 的
+        `params[0] = 0.508` 变成 `520/1024`），屏显 = `值*屏幅 >> 10`。
         """
-        import os as _os
-        if not _os.environ.get("P4_BG_EXPERIMENT"):
-            return      # 索引/窗口/矩形都有出处，但实测仍画不出（见 §16.327），默认关闭
         c = self.canvas
         for slot in self.p4_bg:
             if not slot.active:
@@ -5104,20 +5103,24 @@ class Page4Mixin:
                 continue
             step = slot.params[14]                       # +0x68
             period = slot.params[13]                     # +0x64
-            count = slot.params[10] or len(grid)          # +0x58（为 0 时退回实际条数）
+            count = slot.params[10] or len(grid)         # +0x58（0 时退回实际条数）
             if period <= 0:
                 continue
             acc = slot.acc + step                        # 0x4573F0
-            if abs(acc) >= period:                       # 0x457408
+            # 32 位有符号归一（exe 里 acc 是 int32，绕回只减去一个周期）
+            acc = ((acc + 0x80000000) & 0xFFFFFFFF) - 0x80000000
+            if abs(acc) >= period:                       # 0x457408 → 本帧发生绕回
                 if step >= 0:                            # 0x457410
-                    acc -= period
+                    while acc >= period:
+                        acc -= period
                     slot._t = acc
                 else:                                    # 0x457426
-                    acc = period + acc
+                    while acc <= -period:
+                        acc += period
                     slot._t = count + acc - 1
+            else:
+                slot._t = getattr(slot, "_t", count - 1) + step   # 0x457760
             slot.acc = acc                               # 0x4573FB
-            # 首次创建时 `[obj+0xC]` = `0x457434` 的 `条数 + acc - 1`；acc≈0 ⇒ 条数-1
-            slot._t = getattr(slot, "_t", count - 1) + step   # 0x457760
             t = slot._t
             if t < slot.params[11] or t > slot.params[12]:   # 0x45776A 窗口
                 continue
@@ -5132,11 +5135,8 @@ class Page4Mixin:
                 continue
             base = getattr(slot, "_base", 0)             # [obj+0x10]，0..3 分组
             l, tp, r, b = 0, base * k, k - 1, (base + 1) * k - 1
-            # 0x4578C7 的 dst 是恒等写回（§16.329），但条目值是「1/1024 归一化」坐标：
-            # `0x456FB0` 里 `arr[i].x = [param+0x30] >> 6`，而 params[0]=33280=0.508(16.16)
-            # ⇒ 520/1024 = 0.508。故屏幕坐标 = 归一化值 × 屏宽/屏高 >> 10。
-            dx = (ent[0] * 640) >> 10
-            dy = (ent[1] * 480) >> 10
+            dx = ((ent[0] * 640) >> 10) - (k >> 1)       # 0x4578C9 归一化 → 屏显
+            dy = ((ent[1] * 480) >> 10) - (k >> 1)
             lay = self.layers.tab.get(layer)
             if lay is None:
                 continue
