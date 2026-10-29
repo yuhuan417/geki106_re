@@ -604,6 +604,60 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
         self.p4_avatar_rec = rec
 
 
+class P4Replay:
+    """回放三数组（`0x4CD5D8` 对象内 +0x30 / +0x34BF0 / +0x697B0）。
+
+    `0x45CEA0` 打包（`ret 8`，this=arg1, rec=arg2）：
+
+    ```
+    bits = ((byte[rec+9]&1) << 1) | (byte[rec+8]&1)    ; 2 个按键位
+    bits = (bits << 10) | (dword[rec+4] & 0x3FF)       ; dy 10 bit
+    bits = (bits << 11) | (dword[rec+0] & 0x7FF)       ; dx 11 bit ⇒ 23 bit
+    byte[this+pos+0x30]    = bits
+    byte[this+pos+0x34BF0] = bits >> 8
+    byte[this+pos+0x697B0] = bits >> 16
+    ```
+
+    `0x45CF20` 解包：`bits = b0 | b1<<8 | b2<<16`，然后
+    `dx = bits & 0x7FF`（bit10 为符号，`+0xFFFFF800` 补）、
+    `dy = (bits>>11) & 0x3FF`（bit9 为符号，`+0xFFFFFC00` 补）、
+    按键在 bit21/22（`shr 0x15`/`shr 0x16` 后 `and al,1`）。
+    """
+
+    CAP = 0x34BC0            # 0x34BF0-0x30 ⇒ 数组长度
+
+    def __init__(self) -> None:
+        self.a = bytearray(self.CAP)
+        self.b = bytearray(self.CAP)
+        self.c = bytearray(self.CAP)
+        self.pos = 0             # [this+0x9E37C]
+        self.flag = 0            # [this+0x9E378]
+        self.count = 0           # [this+0x9E380]
+
+    def pack(self, rec: bytearray) -> None:      # 0x45CEA0，rec 为 ≥10 字节记录
+        bits = (((rec[9] & 1) << 1) | (rec[8] & 1))
+        bits = (bits << 10) | (int.from_bytes(rec[4:8], "little") & 0x3FF)
+        bits = (bits << 11) | (int.from_bytes(rec[0:4], "little") & 0x7FF)
+        i = self.pos
+        self.a[i] = bits & 0xFF
+        self.b[i] = (bits >> 8) & 0xFF
+        self.c[i] = (bits >> 16) & 0xFF
+
+    def unpack(self, out: bytearray) -> None:    # 0x45CF20，out 为 ≥10 字节记录
+        i = self.pos
+        bits = self.a[i] | (self.b[i] << 8) | (self.c[i] << 16)
+        dx = bits & 0x7FF
+        if dx & 0x400:
+            dx -= 0x800
+        dy = (bits >> 11) & 0x3FF
+        if dy & 0x200:
+            dy -= 0x400
+        out[0:4] = (dx & 0xFFFFFFFF).to_bytes(4, "little")
+        out[4:8] = (dy & 0xFFFFFFFF).to_bytes(4, "little")
+        out[8] = (bits >> 21) & 1
+        out[9] = (bits >> 22) & 1
+
+
 def p4_input_cfg(self, fid: int):
     """`0x498A88 + fid*14` → 输入配置（`build_p4_avatar.py` 导出 `configs`）。
 
