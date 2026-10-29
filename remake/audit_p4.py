@@ -1117,8 +1117,10 @@ def main():
 
     # ---- §16.198 0x460C00 死亡链（未落地，防止误登记） ----
     _c0 = img[0x460C00 - ib:0x460D84 - ib]
-    check("0x460C00 尚未登记进 P4_BEH（未落地就不许登记）",
-          0x460C00 not in page4.P4_BEH, "")
+    check("0x460C00 不是行为（不进 P4_BEH），而是由命中回调显式调用",
+          0x460C00 not in page4.P4_BEH
+          and "def p4_460c00(" in open("remake/pygame/page4.py", encoding="utf-8").read()
+          and "self.p4_460c00()" in open("remake/pygame/page4.py", encoding="utf-8").read(), "")
     check("0x460C00 栈帧 sub esp,0x44 且以 ret 收尾（0x460D83）",
           img[0x460C00 - ib:0x460C06 - ib] == bytes([0x66, 0xA1, 0xB0, 0xCC, 0x56, 0x00])
           and img[0x460D83 - ib] == 0xC3, img[0x460C00 - ib:0x460C06 - ib].hex())
@@ -1131,6 +1133,20 @@ def main():
           _c0.count(bytes([0x83, 0xE0, 0x7F])) == 2
           and _c0.count(bytes([0x83, 0xE8, 0x3F])) == 2,
           f"{_c0.count(bytes([0x83, 0xE0, 0x7F]))}/{_c0.count(bytes([0x83, 0xE8, 0x3F]))}")
+
+    # ---- §16.199 死亡链最后那条 type-1 记录的字段归属 ----
+    check("0x460D11 push 后的 [esp+0x20]/[esp+0x24] 写入（rec+8=1 / rec+0xC=1）",
+          img[0x460D11 - ib:0x460D1F - ib] == bytes([0x52, 0xB9, 0x0C, 0xD4, 0x4A, 0x00,
+                                                     0x89, 0x44, 0x24, 0x20, 0x89, 0x44, 0x24, 0x24]),
+          img[0x460D11 - ib:0x460D1F - ib].hex())
+    check("0x460D08 的记录基准是 [esp+0x14]",
+          img[0x460D08 - ib:0x460D0C - ib] == bytes([0x8D, 0x54, 0x24, 0x14]),
+          img[0x460D08 - ib:0x460D0C - ib].hex())
+    check("生成器小类型分派：cmp eax,8 / ja 越界 / je 8 / dec je 1 / sub 4 je 5 / dec jne",
+          img[0x445CC1 - ib:0x445CC4 - ib] == bytes([0x83, 0xF8, 0x08])
+          and img[0x445CC4 - ib] == 0x0F and img[0x445CC5 - ib] in (0x87, 0x84)
+          and img[0x445CD0 - ib] == 0x48 and img[0x445CD7 - ib:0x445CDA - ib] == bytes([0x83, 0xE8, 0x04]),
+          img[0x445CC1 - ib:0x445CCC - ib].hex())
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")

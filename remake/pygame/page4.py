@@ -2325,9 +2325,8 @@ class Page4Mixin:
             if a.s32(0x18) <= 1:                          # 0x43C212 ja → 血量>1 才走扣血
                 self.p4_stat[0xC2] = self.p4_stat.get(0xC2, 0) + 1   # 0x43C21B.. 最后一击特判（待实现）
         elif t == 0x0B000001:                             # 0x43C190 自机被击中
-            # 0x43C38B 的 0x460C00(0x4CD590)（死亡演出/计分链）**尚未实现**，见 §15；
-            # 0x43C395 的 0x45F570(0x4CD4A0)（量表重置）已实现。
-            self.p4_45f570()                              # 0x43C395
+            self.p4_460c00()                              # 0x43C38B 死亡演出/命数
+            self.p4_45f570()                              # 0x43C395 量表重置
             b.d32(0x10, 0)                                # 0x43C39F byte[+0x10] = 0
             b.d32(0x18, 0)                                # 0x43C3A2 [+0x18] = 0
             return
@@ -2455,6 +2454,48 @@ class Page4Mixin:
     def p4_frame_no(self) -> int:
         """`[0x56CCA8]`：全局帧计数器（`0x451442` 每帧 ++）。"""
         return int(getattr(self, "p4_frames", 0))
+
+    def p4_460c00(self) -> None:
+        """`0x460C00(0x4CD590)`（`0x43C38B` 调用）：自机死亡演出 + 命数递减（§16.198/§16.199）。
+
+        ```
+        0x460C00 word[0x56CCB0] -= min(…, 8)                    ; 饱和减 8
+        0x460C2A 0x450350(0x0B, ([0x56CC8C]−0x140)<<4)          ; SE 0x0B + 声像
+        0x460C59 0x41000001 @ ([0x56CC8C],[0x56CC90]) → 0x4AD4CC
+        0x460C8C 0x4100000E × 4（vel 0..3）                      → 0x4AD4CC
+        0x460CBD 0x41000004 × 30，抖动 (rand&0x7F)−0x3F，第 5 字段 = &(jx,jy)
+        0x460D08 类型 1 @ 自机位置，vel 1                        → 0x4AD40C（演员队列）
+        0x460D24 [+0x34]++ / [+0x38]++ ; [+0x30] 命数递减（− 1 = 无限）
+        0x460D42 byte[[0x4CD590+0x2C] + 0x1C] = 0 ; 0x51000002 @ (0,0) → 0x4AD4FC
+        ```
+        """
+        M = 0x4CD590
+        ax = self.p4_stat.get(0x56CCB0, 0) & 0xFFFF          # 0x460C00
+        sax = ax - 0x10000 if ax & 0x8000 else ax            # 0x460C12 movsx
+        d = 8 if sax >= 8 else sax                           # 0x460C09 / 0x460C17
+        self.p4_stat[0x56CCB0] = (ax - d) & 0xFFFF           # 0x460C24
+        px = self.p4_stat.get(0x56CC8C, 0)
+        py = self.p4_stat.get(0x56CC90, 0)
+        self.p4_se_pan(0x0B, (px - 0x140) << 4)              # 0x460C3A
+        qfx = self._p4_q("ui4cc")                            # 0x4AD4CC
+        self.spawn(qfx, 0x41000001, px, py)                  # 0x460C59
+        for i in range(4):                                   # 0x460C9C..0x460CB7
+            self.spawn(qfx, 0x4100000E, px, py, i)           # vel = 0,1,2,3
+        for _ in range(0x1E):                                # 0x460CCE..0x460D06
+            jx = rng.randrange(0x80) - 0x3F                  # 0x460CD3 / 0x460CD6
+            jy = rng.randrange(0x80) - 0x3F                  # 0x460CDF / 0x460CE2
+            self.spawn(qfx, 0x41000004, px + jx, py + jy)    # 第 5 字段 = &(jx,jy)
+        self.spawn(self._p4_q("ui40c"), 1, px, py, 1)        # 0x460D1F 演员队列
+        self.p4_stat[M + 0x34] = self.p4_stat.get(M + 0x34, 0) + 1   # 0x460D2D
+        self.p4_stat[M + 0x38] = self.p4_stat.get(M + 0x38, 0) + 1   # 0x460D32
+        lives = self.p4_stat.get(M + 0x30, 0)                # 0x460D2A
+        if lives != 0xFFFFFFFF:                              # 0x460D2F cmp eax,-1
+            lives = (lives - 1) & 0xFFFFFFFF                 # 0x460D3A
+            self.p4_stat[M + 0x30] = lives
+            if lives == 0:                                   # 0x460D40 jne
+                # 0x460D42 是 `byte[[0x4CD590+0x2C] + 0x1C] = 0`——该指针的写入点
+                # 尚未定位（§15），故此处不写，避免凭空造一个实体。
+                self.spawn(self._p4_q("ui4fc"), 0x51000002, 0, 0)   # 0x460D78
 
     def p4_45f660(self) -> None:
         """`0x401FD2` → `0x45F660(0x4CD4A0)`：`[+0x30] = max(0, [+0x30] − 5)`（饱和减 5）。
