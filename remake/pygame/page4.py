@@ -5278,36 +5278,133 @@ class Page4Mixin:
         return True
 
     def _p4_443c67(self, e, ebp: int) -> bool:
-        """`0x443C67`：状态 8 —— 终场爆炸序列（**未实现完**，见 docstring 尾部）。
+        """`0x443C67`：状态 8 —— 终场爆炸序列（全程按栈结构逐字还原）。
+
+        结构在栈上拼（`0x443CB9..0x443DD0`，基址记作 esp0）：
 
         ```
-        0x443C67 if (ebp == 0 || ebp == 0x21C) {
-                   0x443C78 0x43BC40(0x4AD43C) 清 ui43c
-                   0x443C82 0x4301F0(0x4AD46C) 清 ui46c
-                   0x443C8C 0x43A320(0x4AD4CC) 清 ui4cc
-                   0x443C96 0x448F50(0x4AD40C) 清 actorq（thunk 0x4023B0）
+        byte[0x18..0x1D] = 40 40 60 40 20 40      ; 第一组颜色索引
+        byte[0x20..0x25] = 00 00 10 10 20 20      ; 第二组颜色索引
+        byte[0x22] = byte[0x23] = 0x10            ; 与上面同址，后写覆盖
+        word[0x28] = 0x50   word[0x2A] = 0x80     ; （push 后按 esp-8 写，等价 esp0）
+        word[0x2C] = 0xB0   word[0x2E] = 0xE0
+        word[0x30] = 0x110  word[0x32] = 0x140
+        word[0x34] = 0xB0   word[0x36] = 0xF0
+        word[0x38] = 0xE0   word[0x3A] = 0x140
+        word[0x3C] = 0xE0   word[0x3E] = 0x100
+        word[0x40] = 0x120  word[0x42] = 0x120
+        word[0x44] = 0x110  word[0x46] = 0x120
+        word[0x48] = 0x130  word[0x4A] = 0x130
+        ```
+
+        `k = ebp / 0x5A`（`0xB60B60B7 imul + sar 6` 那个magic）：
+
+        ```
+        a3 = (signed byte[0x18+k]) | 0x100000
+        y  = (signed byte[0x20+k] << 16) | word[0x34+k*2]
+        x  = (signed word[0x28+k*2] << 16) | word[0x40+k*2]
+        0x430400(&rec, x, y, 0x4B000001, a3) → 0x43A3C0(0x4AD4CC)
+        ```
+
+        展开后 k=0..5 的六格（这就是 `0x4B000001` 那套 `(a<<16)|b` 坐标打包）：
+
+        | k | a3 | y | x |
+        |---|---|---|---|
+        | 0 | 0x100040 | 0x00B0 | 0x500120 |
+        | 1 | 0x100040 | 0x00F0 | 0x800120 |
+        | 2 | 0x100060 | 0x1000E0 | 0xB00110 |
+        | 3 | 0x100040 | 0x100140 | 0xE00120 |
+        | 4 | 0x100020 | 0x2000E0 | 0x1100130 |
+        | 5 | 0x100040 | 0x200100 | 0x1400130 |
+
+        其余时间点：
+
+        ```
+        0x443C67 if (ebp == 0 || ebp == 0x21C) { 清 ui43c/ui46c/ui4cc/actorq }
+        0x443DF9 if (ebp == 0x21C) {
+                    (0x64003C, 0x1300000) 与 (0x64017C, 0x13000C0)，均 0x4B000003/a3=0xC000C0 → ui4cc
+                    0x44F600(0x4AB514, 1, 0x12)        ; BGM 0x12
                  }
-        0x443C9B if (ebp > 0x1C2) goto 0x443DF9
-        0x443CA7 if (ebp % 0x5A != 0) goto 0x443DF9      ; 每 90 帧一次
-                 ; 在栈上拼 0x2A 字节的小矩形/调色板结构（0x443CB9..0x443DA5）
-                 ; 0xB60B60B7 imul + sar 6 = 按 /0x5A 取索引，从字节表取颜色
-        0x443D7C or ecx, 0x100000 ...
+        0x443EA6 if (0x316 <= ebp <= 0xC16 && (ebp-0x316) % 0xC0 == 0) {
+                    n = (ebp-0x316)/0xC0；n >= 0xB → n = 0xB + (n == 0xB)   ; 即 0xC
+                    (0x1A80088, (n << 0x15) & 0xFFFF0000) 0x4B000003/a3=0x2001A0 → ui4cc
+                 }
+        0x443F44 ebp == 0xCD6 → 0x44FDD0(0x4AB514) 停 BGM
+        0x443F63 ebp == 0xD30 → 0x450350(0x4AB4B0, 0, 0) 波形槽 0
+        0x443F86 ebp > 0xE20 且 byte[0x4AB596]（btn0）→ [esi+0x1C] = 0；
+                 若 0x45AFC0(0x4AB5B0, 0x70000) < 4 → 0x45B0E0(0x4AB5B0, 0x70000, 4)
         ```
-
-        `0x443DF9` 之后的生成调用与那块 0x2A 字节结构的字段语义**尚未解完**，
-        所以这里只做"清场"部分，生成部分记 TODO 计数器，不猜坐标/颜色。
         """
+        q3 = self._p4_q("ui43c")
+        q6 = self._p4_q("ui46c")
+        q4 = self._p4_q("ui4cc")
+        _clr = lambda _q: (getattr(_q, "clear", None) or (lambda: None))()
+
         if ebp in (0, 0x21C):                              # 0x443C67
-            for _q in (self._p4_q("ui43c"), self._p4_q("ui46c"), self._p4_q("ui4cc")):
-                _c = getattr(_q, "clear", None)
-                if _c is not None:
-                    _c()
+            _clr(q3)                                       # 0x443C78
+            _clr(q6)                                       # 0x443C82
+            _clr(q4)                                       # 0x443C8C
             _aq = getattr(self, "actorq", None)            # 0x443C96 0x448F50
             if _aq is not None and hasattr(_aq, "clear"):
                 _aq.clear()
-        if ebp <= 0x1C2 and ebp % 0x5A == 0:               # 0x443C9B / 0x443CA7
-            _k = (0x443C67, "explosion")
-            self.p4_beh_missing_types[_k] = self.p4_beh_missing_types.get(_k, 0) + 1
+
+        if ebp <= 0x1C2 and ebp % 0x5A == 0:               # 0x443C9B / 0x443CB1
+            B = bytearray(0x60)                            # 0x443CB9..0x443DD0 的栈结构
+            def _w(o, v):
+                B[o] = v & 0xFF
+                B[o + 1] = (v >> 8) & 0xFF
+            _w(0x40, 0x120); _w(0x42, 0x120); _w(0x46, 0x120)
+            _w(0x48, 0x130); _w(0x4A, 0x130)               # 0x443CC3..0x443CDC
+            _w(0x2C, 0xB0); _w(0x2E, 0xE0)                 # 0x443CE6/0x443CEB
+            _w(0x38, 0xE0); _w(0x3C, 0xE0)                 # 0x443CF0/0x443CF5
+            B[0x22] = 0x10; B[0x23] = 0x10                 # 0x443CFC/0x443D00
+            _w(0x34, 0xB0)                                 # 0x443D09
+            _w(0x44, 0x110); _w(0x30, 0x110)               # 0x443D1C/0x443D24
+            _w(0x32, 0x140); _w(0x3A, 0x140)               # 0x443D30/0x443D35
+            B[0x18] = 0x40; B[0x19] = 0x40; B[0x1A] = 0x60  # 0x443D3A..0x443D44
+            B[0x1B] = 0x40; B[0x1C] = 0x20; B[0x1D] = 0x40  # 0x443D49..0x443D53
+            B[0x20] = 0; B[0x21] = 0                        # 0x443D58/0x443D68
+            B[0x24] = 0x20; B[0x25] = 0x20                  # 0x443D6D/0x443D72
+            _w(0x36, 0xF0)                                  # 0x443D82
+            _w(0x3E, 0x100)                                 # 0x443D8C（push 后 esp-4+0x42）
+            _w(0x28, 0x50); _w(0x2A, 0x80)                  # 0x443DA2/0x443DA9（esp-8+0x30/0x32）
+            _k = ebp // 0x5A                               # 0x443D04 magic /0x5A
+            _a3 = B[0x18 + _k] | 0x100000                  # 0x443D5D/0x443D7C
+            _y = (B[0x20 + _k] << 16) | (B[0x34 + _k * 2] | (B[0x35 + _k * 2] << 8))
+            _xw = B[0x28 + _k * 2] | (B[0x29 + _k * 2] << 8)
+            _xl = B[0x40 + _k * 2] | (B[0x41 + _k * 2] << 8)
+            _x = ((_xw & 0xFFFF) << 16) | _xl             # 0x443DB3..0x443DC7
+            self.spawn(q4, 0x4B000001, _x, _y, _a3)        # 0x443DF0
+
+        if ebp == 0x21C:                                   # 0x443DF9
+            self.spawn(q4, 0x4B000003, 0x64003C, 0x1300000, 0xC000C0)    # 0x443E05..0x443E40
+            self.spawn(q4, 0x4B000003, 0x64017C, 0x13000C0, 0xC000C0)    # 0x443E45..0x443E86
+            if self.audio is not None:
+                self.audio.bgm(0x12)                       # 0x443E94 0x44F600(0x4AB514,1,0x12)
+            return True
+
+        if 0x316 <= ebp <= 0xC16:                          # 0x443EA6/0x443EB2
+            _c = ebp - 0x316
+            if _c % 0xC0 == 0:                             # 0x443ECE
+                _n = _c // 0xC0                            # 0x443ED2 magic /0xC0
+                if _n >= 0xB:                              # 0x443EE3
+                    _n = 0xB + (1 if _n == 0xB else 0)
+                self.spawn(q4, 0x4B000003, 0x1A80088,
+                           (_n << 0x15) & 0xFFFF0000, 0x2001A0)          # 0x443F3B
+
+        if ebp == 0xCD6:                                   # 0x443F44
+            if self.audio is not None:
+                self.audio.bgm_stop()                      # 0x443F51 0x44FDD0
+            return True
+        if ebp == 0xD30:                                   # 0x443F63
+            self.p4_se_pan(0, 0)                           # 0x443F74 0x450350(0x4AB4B0,0,0)
+            return True
+        if ebp > 0xE20 and self.p4_btn0_edge():            # 0x443F86
+            e.d32(0x1C, 0)                                 # 0x443FA9
+            _kb = self.keys.bits if getattr(self, "keys", None) is not None else 0
+            if ((_kb >> 16) & 7) < 4:                      # 0x443FB5 0x45AFC0(0x4AB5B0,0x70000)
+                if getattr(self, "keys", None) is not None:
+                    self.keys.bits = (_kb & ~0x70000) | (4 << 16)   # 0x443FCA 0x45B0E0
         return True
 
     def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,

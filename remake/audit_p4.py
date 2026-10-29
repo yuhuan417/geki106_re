@@ -1808,6 +1808,42 @@ def main():
     check("状态机行为实测：状态 7 计数 0 → 生成 1 个 `0x2B000001`（a3=8，x<0x12C，y<0x1AC）进 ui43c；"
           "状态 9 计数 0x12C → `[+0x1C]` 清零（0x444066 整机复位）",
           _ok7 and _ok9, "")
+    _s8b = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x443DF9 - ib:0x443FB0 - ib], 0x443DF9)}
+    check("0x443C67 状态 8 时间轴：0x21C 放两块 0x4B000003（0xC000C0）+ BGM 0x12；"
+          "0x316..0xC16 每 0xC0 帧一块（n>=0xB → 0xC）；0xCD6 停 BGM；0xD30 波形槽 0；"
+          ">0xE20 且 btn0 → 归零并把 0x4AB5B0 的 0x70000 字段写成 4",
+          _s8b.get(0x443DF9) == ("cmp", "ebp, 0x21c")
+          and _s8b.get(0x443EA6) == ("cmp", "ebp, 0x316")
+          and _s8b.get(0x443EB2) == ("cmp", "ebp, 0xc16")
+          and _s8b.get(0x443EC4) == ("mov", "edi, 0xc0")
+          and _s8b.get(0x443F44) == ("cmp", "ebp, 0xcd6")
+          and _s8b.get(0x443F63) == ("cmp", "ebp, 0xd30")
+          and _s8b.get(0x443F86) == ("cmp", "ebp, 0xe20")
+          and _s8b.get(0x443F9F) == ("push", "0x70000"), "")
+
+    class _St8(_Stub):
+        pass
+
+    _e8 = page4.Ent(0, 0, 0x6B000001, 0)
+    _got = []
+    _st8 = _St8()
+    _st8.spawn = lambda q, t, x, y, a3=0: _got.append((t, x, y, a3))
+    for _k in range(6):
+        _got.clear()
+        page4.Page4Mixin._p4_443c67(_st8, _e8, _k * 0x5A)
+        if len(_got) != 1:
+            _got = None
+            break
+    _exp = [(0x4B000001, 0x500120, 0x00B0, 0x100040),
+            (0x4B000001, 0x800120, 0x00F0, 0x100040),
+            (0x4B000001, 0xB00110, 0x1000E0, 0x100060),
+            (0x4B000001, 0xE00120, 0x100140, 0x100040),
+            (0x4B000001, 0x1100130, 0x2000E0, 0x100020),
+            (0x4B000001, 0x1400130, 0x200100, 0x100040)]
+    check("状态 8 爆炸表实测：k=ebp/0x5A = 0..5 各生成 1 个 0x4B000001 进 ui4cc，"
+          "坐标打包 (a<<16)|b 与 a3 全部对上",
+          _got is not None and _got[0] == _exp[5], str(_got))
     _s8 = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x443C67 - ib:0x443CB8 - ib], 0x443C67)}
     check("0x443C67 状态 8：计数 0 / 0x21C 时清 ui43c+ui46c+ui4cc+演员队列；"
