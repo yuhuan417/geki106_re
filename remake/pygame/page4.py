@@ -1645,6 +1645,94 @@ def _p4_447640_orbit(self, e) -> None:
         node.d32(0x14, e.s32(0x08) - r)
 
 
+# `0x448230` 三张相位表（跳表 0x448A30 / 0x448A40 / 0x448A50），每项 = (模数, type, vel…)
+P4_448230_A = ((6, 0x120B1121, ((0xB0, 0x0E00),)),
+               (6, 0x12071126, ((0xB0, 0xF4000A00), (0xB0, 0xC000A00))),
+               (5, 0x120F112A, ((0xB0, 0x0F00),)),
+               (7, 0x120E112D, ((0xB0, 0xFA000A64), (0xB0, 0x6000A64))))
+P4_448230_B = ((8, 0x12091122, ((0xB0, 0x4280D00),)),
+               (6, 0x12061127, ((0xB0, 0xF6000A00), (0xB0, 0xA000A00),
+                                (0xC0, 0xA0008E0), (0x90, 0xF60008E0))),
+               (3, 0x120D112B, ((0x90, 0xF60008E0),)),
+               (0, 0x120C112E, ()))          # vel 用 sin(寿命*40) 现场算，再 not 发第二发
+P4_448230_C = ((3, 0x12081123, ((0xB0, 0x1000),)),
+               (3, 0x12061128, ((0xB0, 0xFA000C00),)),
+               (7, 0x120C112C, ()),          # vel 随机
+               (4, 0x120A112F, ((0xB0, 0xF000),)))
+P4_448230_BLINK = (0x286, 0x28E, 0x216, 0x39D)   # 0x448991
+
+
+def _beh_448230(self, e) -> bool:
+    """`0x448230`（type 10 后半）：按键字段闸门 + 四段寿命窗口 × 四相位激光 + 闪烁尾（§16.206/16.207）。
+
+    ```
+    0x448242 0x4019C9→0x45AFC0(0x4AB5B0, 0xC000) 取 bits14-15
+    0x44824C if ([ent+0x20] != 该字段) return 0
+    寿命 [ent+0x1C] 分段： A [0,0x5A) / B [0x78,0xD2) / C [0xF0,0x14A) / D [0x180,0x220)
+    每段按 [ent+0x20] (0..3) 查表发射，帧门是 idiv 取余或 test cl,mask
+    0x44898B 闪烁尾：节点 [+4] = ([ent+0x1C] & 2) ? 0 : 0x30
+    0x4489E2 收尾：按 ebx 放音效，[ent+0x1C] 自增，>= 0x39C 归零，返回 1
+    ```
+    """
+    ph = e.g32(0x20)                                     # 0x44823F
+    if ph != ((self.keys.bits & 0xC000) >> 14):           # 0x448242..0x44824C
+        return False
+    life = e.s32(0x1C)                                   # 0x44825B
+    ebx = 0xFF                                           # 0x448263
+    if ph <= 3:                                          # 0x448271
+        if life < 0x5A:                                  # 0x44825F
+            if self._p4_448230_fire(e, ph, life, P4_448230_A):
+                ebx = 0
+        elif 0x78 <= life < 0xD2:                        # 0x44843F
+            if self._p4_448230_fire(e, ph, life, P4_448230_B):
+                ebx = 0
+        elif 0xF0 <= life < 0x14A:                       # 0x44873E
+            if self._p4_448230_fire(e, ph, life, P4_448230_C):
+                ebx = 0
+        elif 0x180 <= life < 0x220 and (life & 0xF) == 0:  # 0x44892D
+            y = 0xA0 if (life & 0x10) else 0x28          # 0x448942..0x44895D
+            self.spawn(self._p4_q("ui46c"), 0x2300001A, 0xB0, y)
+            ebx = 0
+        # 0x44898B 闪烁尾（ph>3 时原作越界读栈，不实现）
+        node = e.p.get("node")
+        if node is not None:
+            lo = P4_448230_BLINK[ph]                      # 0x4489AD movsx word[esp+ph*2+0x24]
+            if lo <= life < lo + 0x1C:                   # 0x4489B2..0x4489BB
+                v = 0 if (life & 2) else 0x30            # 0x4489C0..0x4489C6
+                node.d32(0x04, v)
+                node.d32(0x08, v)                        # 0x4489CC 同法（用 dl）
+    if ebx != 0xFF:                                      # 0x4489E2
+        self.p4_se_pan(ebx, 0)                           # 0x4489F2 0x450350(0x4AB4B0, ebx, 0)
+    n = e.s32(0x1C) + 1                                  # 0x448A09
+    if n >= 0x39C:                                       # 0x448A02
+        n = 0                                            # 0x448A19..0x448A1C
+    e.d32(0x1C, n)                                       # 0x448A0E
+    return True                                          # 0x448A0C al = 1
+
+
+def _p4_448230_fire(self, e, ph: int, life: int, tbl, y: int = 0x78) -> bool:
+    """按相位表发射一轮；返回是否真的发了（决定 `ebx` 是否被清 0）。"""
+    mod, t, recs = tbl[ph]
+    if mod:
+        if life % mod:                                   # idiv + test edx,edx
+            return False
+    if not recs:                                         # 只有 B[3] 与 C[2] 走这里
+        if t == 0x120C112E:                              # 0x4486D2：sin 现场算 vel
+            a = (life * 40) & 0xFFFFFFFF                 # 0x4486D5 lea [eax+eax*4] / shl 3
+            v = ((p4_sin_q(a, "sin") << 0x13) & 0xFFFF0000) | 0x0400   # 0x4486FB / 0x4486E9
+            self.spawn(self._p4_q("ui46c"), t, 0xB0, y, v)
+            self.spawn(self._p4_q("ui46c"), t, 0xB0, y, (~v) & 0xFFFFFFFF)   # 0x4486C1 not
+        else:                                            # 0x120C112C：随机 vel（0x44887F..0x44889D）
+            r = (_random.randrange(0x2000) << 0x10) & 0xFFFFFFFF
+            r = ((r - 0xFFE0001) & 0xFFFFFFFF) & 0xFFFF0400
+            r |= 0x0400
+            self.spawn(self._p4_q("ui46c"), t, 0xB0, y, r)
+        return True
+    for xx, v in recs:
+        self.spawn(self._p4_q("ui46c"), t, xx, y, v)
+    return True
+
+
 def _beh_447F90(self, e) -> bool:
     """`0x40116D` → `0x447F90`（type 10 行为）：**三向旋转散射**（§16.200/§16.201）。
 
@@ -1997,6 +2085,7 @@ P4_BEH: dict[int, object] = {
     0x448C70: _beh_10000001,
     0x447F90: _beh_447F90,
     0x447640: _beh_447640,
+    0x448230: _beh_448230,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
     0x40EAF0: _beh_23000009,

@@ -1260,8 +1260,23 @@ def main():
           [u16(0x448991 + 2 + 2 * k) for k in range(0)] == []
           and img[0x448991 - ib:0x44899F - ib] == bytes([0x66, 0xC7, 0x44, 0x24, 0x24, 0x86, 0x02,
                                                          0x66, 0xC7, 0x44, 0x24, 0x26, 0x8E, 0x02]), "")
-    check("0x448230 未登记进 P4_BEH（§16.206 三段窗口未读全）",
-          0x448230 not in page4.P4_BEH, "")
+    check("0x448230 已登记进 P4_BEH（§16.207 落地）",
+          0x448230 in page4.P4_BEH and page4.P4_BEH[0x448230] is page4._beh_448230, "")
+    check("窗口 C 跳表 0x448A50 = 448766/4487BC/44886D/4488D9 且与转写表逐项一致",
+          [u32(0x448A50 + 4 * k) for k in range(4)] == [0x448766, 0x4487BC, 0x44886D, 0x4488D9]
+          and [t for _m, t, _r in page4.P4_448230_C] == [0x12081123, 0x12061128, 0x120C112C, 0x120A112F], "")
+    check("三张相位表的模数与 type 与反汇编一致",
+          [m for m, _t, _r in page4.P4_448230_A] == [6, 6, 5, 7]
+          and [m for m, _t, _r in page4.P4_448230_B] == [8, 6, 3, 0]
+          and [m for m, _t, _r in page4.P4_448230_C] == [3, 3, 7, 4]
+          and [t for _m, t, _r in page4.P4_448230_A]
+          == [0x120B1121, 0x12071126, 0x120F112A, 0x120E112D]
+          and [t for _m, t, _r in page4.P4_448230_B]
+          == [0x12091122, 0x12061127, 0x120D112B, 0x120C112E], "")
+    check("窗口 B 相位的四发 x 偏移 0xB0/0xB0/0xC0/0x90 与 vel 序列一致",
+          page4.P4_448230_B[1][2] == ((0xB0, 0xF6000A00), (0xB0, 0xA000A00),
+                                     (0xC0, 0xA0008E0), (0x90, 0xF60008E0))
+          and page4.P4_448230_BLINK == (0x286, 0x28E, 0x216, 0x39D), "")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
