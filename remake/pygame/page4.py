@@ -768,6 +768,39 @@ def p4_atan2(a: int, b: int) -> int:
 
 _P4_BG_TIER = (0, 6, 0x0A, 0x10, 0x18, 0x20, 0x30, 0x48, 0x6C, 0xA0, 0xF0, 0)
 
+# `0x457938` 的 256 字节一级表（`build_p4_kindmap.py` 导出到 p4_kindmap.json）。
+# 只有上表 _P4_BG_TIER 的 11 个值有专属分支，其余一律 0xB（无操作）。
+_P4_KIND_LAYER = {0: None, 6: 3, 10: 4, 16: 5, 24: 6, 32: 7,
+                  48: 8, 72: 9, 108: 0xA, 160: 0xB, 240: 0xC}
+
+
+def p4_bg_kind_layer(kind: int):
+    """`0x4577DF`：`kind` → (渲染层号 | None)。
+
+    一级表 `0x457938[kind]` 给出分支号，二级表 `0x457908` 跳到分支体；
+    各分支体做的都是 `[[band+0x2C]] = N`：
+
+    ```
+    kind   0 → 分支 0  (0x4577EC)：把渲染对象可见位清 0（隐藏）
+    kind   6 → 分支 1  (0x4577F5)：层 3
+    kind  10 → 分支 2  (0x457800)：层 4
+    kind  16 → 分支 3  (0x45780B)：层 5
+    kind  24 → 分支 4  (0x457816)：层 6
+    kind  32 → 分支 5  (0x457821)：层 7
+    kind  48 → 分支 6  (0x45782C)：层 8
+    kind  72 → 分支 7  (0x457837)：层 9
+    kind 108 → 分支 8  (0x457842)：层 0xA
+    kind 160 → 分支 9  (0x45784D)：层 0xB
+    kind 240 → 分支 10 (0x457858)：层 0xC
+    其它     → 分支 11 (0x457861)：无操作（直接进尾部）
+    ```
+
+    层号 = `3 + 档位`，档位就是 `_P4_BG_TIER` 的序号（1 起）。
+    198 个未列出的 kind 值在表里都是 0xB，故返回 `None` 表示"不改层"。
+    """
+    return _P4_KIND_LAYER.get(int(kind) & 0xFF, None)
+
+
 
 def p4_bg_kind_ladder(grid, count: int, ratio: int, acc: int) -> int:
     """`0x457050`：按累积量给每条分配「层级/带型」（写第 3 个 dword），返回新累积量。
