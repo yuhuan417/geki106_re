@@ -1686,6 +1686,28 @@ def main():
           and _t5.get(0x445EC9) == ("jmp", "0x446237")
           and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
                                      0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
+    _o447 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x447AA5 - ib:0x447AD0 - ib], 0x447AA5)}
+    _c2d = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x447C2D - ib:0x447C42 - ib], 0x447C2D)}
+    _a447 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x45ABB0 - ib:0x45ABC0 - ib], 0x45ABB0)}
+    check("0x447C2D 公共尾：环绕角 = ([+0x20]&0x1F)*113（113×32≈3600 ⇒ 32 帧一圈），"
+          "再经 0x45ABB0/0x45AAF0 两个三角函数（内部按 0x384=900 取象限）乘半径/2；"
+          "0x447AA5 的 0xA000 状态：node 宽为 0 → 状态 -=0x1000 回 0x9000，否则每 4 帧收缩 0x30",
+          _c2d.get(0x447C30) == ("and", "eax, 0x1f")
+          and _c2d.get(0x447C33) == ("lea", "esi, [eax*8]")
+          and _c2d.get(0x447C3A) == ("sub", "esi, eax")
+          and _c2d.get(0x447C3C) == ("shl", "esi, 4")
+          and _c2d.get(0x447C3F) == ("add", "esi, eax")
+          and _o447.get(0x447AAB) == ("cmp", "dword ptr [eax], 0")
+          and _o447.get(0x447AB0) == ("add", "edx, 0xfffff000")
+          and _o447.get(0x447AB9) == ("test", "bl, 3")
+          and _a447.get(0x45ABB8) == ("mov", "esi, 0x384")
+          and page4.Page4Mixin.p4_447c2d_angle(0) == 0
+          and page4.Page4Mixin.p4_447c2d_angle(1) == 113
+          and page4.Page4Mixin.p4_447c2d_angle(0x20) == 0
+          and page4.Page4Mixin.p4_447c2d_angle(0x3F) == 31 * 113, "")
     _d8000 = bytes(img[0x447DA0 - ib:0x447DA0 - ib + 15])
     _j8000 = [int.from_bytes(img[0x447D90 - ib + 4 * k:0x447D90 - ib + 4 * k + 4], "little")
               for k in range(4)]

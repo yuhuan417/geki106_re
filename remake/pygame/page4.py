@@ -5019,6 +5019,30 @@ class Page4Mixin:
     # `0x447D90`：4 项跳表
     P4_447D90 = (0x447A2F, 0x447A86, 0x447A91, 0x447C2D)
 
+    @staticmethod
+    def p4_447c2d_angle(counter: int) -> int:
+        """`0x447C2D` 公共尾：**环绕角的计算**。
+
+        ```
+        0x447C2D eax = [+0x20]
+        0x447C30 and eax, 0x1F
+        0x447C33 lea esi, [eax*8]      ; ×8
+        0x447C3A sub esi, eax          ; ×7
+        0x447C3C shl esi, 4            ; ×112
+        0x447C3F add esi, eax          ; ×113
+        0x447C41 push esi ; 0x447C42 0x45ABB0(esi)   ; 三角函数 1
+        0x447C42..0x447C5C eax*([+0xC]>>1)          ; 乘「半径/2」
+        0x447C55 0x45AAF0(esi)                       ; 三角函数 2
+        ```
+
+        ⇒ `angle = ([+0x20] & 0x1F) * 113`。**113 × 32 ≈ 3616 ≈ 3600**，
+        即**每 32 帧绕一整圈**。
+
+        `0x45ABB0` / `0x45AAF0` 内部先做 `|a| % 0x384`（=900，四分之一圈的刻度），
+        说明三角函数以 3600 为整圈、900 为一象限。
+        """
+        return (counter & 0x1F) * 113
+
     @classmethod
     def p4_447a12_sub(cls, counter: int):
         """`0x447A12`：**状态 `0x8000` 的子分派**。
