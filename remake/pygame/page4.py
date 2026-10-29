@@ -394,6 +394,64 @@ def _beh_23000001(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
 
 
+def _beh_10000001(self, e) -> bool:
+    """`0x401E06` → `0x448C70`（自机，类型 0x10000001）。
+
+    ```
+    0x448C78 t = ++[ent+0x1C]
+    0x448C87 if ([node+4] == 0) goto 激活流程         ; 显示矩形左边界为 0 ⇒ 隐藏中
+    0x448C8C   if ((t & 0xF) == 0) 0x45A790(node+4,-0x20,0,-0x20,0)   ; 每 16 帧换动画帧
+    0x448CA5   if ([node+8] == 0) 0x45AF60(0x56CCC0,1)
+    0x448CBC   return 1
+    激活：0x448CC1 if (0x45AFF0(0x56CCC0,7)) return 1  ; 开始键未按就等
+           x=[0x4AB59C]; y=[0x4AB5A0]; [ent+4]=x; [ent+8]=y
+           if (x>0x1BE) x=0x1BE, 0x44E470(0x4AB454,x,y)   ; 钳 446
+           if (y>0x190) y=0x190, 0x44E470(...)            ; 钳 400
+           [0x56CC8C] = 0x401753(x,y); node.dst = 0x401753(x+0x40,y)
+           if ([0x4AB594] && !0x45AFF0(0x56CCC0,0x10))
+               生成 0x1B000001 于 (x+0x13, y) 入 0x4AD46C
+           if ([ent+0x18]) return 1
+           if (--[ent+0x20]) { 生成 0x0B000001 于 (200,200) 入 0x4AD40C; return 0 }
+           else { 0x45AF30(0x56CCC0,0x40); return 0 }
+    ```
+    """
+    e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    e.d32(0x1C, e.g32(0x1C))
+    hidden = getattr(e, "rect_left", 0) == 0
+    if not hidden:                                   # 已显示：原地待机
+        if e.s32(0x1C) & 0xF == 0 and e.node is not None:
+            self.p4_anim_step(e)                     # 0x45A790
+        if e.g32(0x24) == 0:
+            self.p4_key_reset(1)                     # 0x45AF60(0x56CCC0,1)
+        return True
+    if self.p4_key_test(7):                          # 0x45AFF0(0x56CCC0,7) 开始键
+        return True
+    x, y = self.p4_ptr()
+    if x > 0x1BE:                                    # 0x448CE5 钳 446
+        x = 0x1BE
+        self.p4_ptr_set(x, y)                        # 0x44E470
+    if y > 0x190:                                    # 0x448D00 钳 400
+        y = 0x190
+        self.p4_ptr_set(x, y)
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    self.p4_player_pos = (x, y)                      # 0x56CC8C
+    if e.node is not None:
+        e.node.dst = (x + 0x40, y)
+        e.node.visible = 1
+    if self.p4_btn_attack() and not self.p4_key_test(0x10):
+        self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
+    if e.g32(0x18):
+        return True
+    n = (e.s32(0x20) - 1) & 0xFFFFFFFF              # 0x448DAE 剩余重生次数
+    e.d32(0x20, n)
+    if n:
+        self.spawn(self._p4_q("ui40c"), 0x0B000001, 200, 200)      # 0x448DB9
+        return False
+    self.p4_key_raw_set(0x40)                        # 0x448DFB → 0x45AF30(0x56CCC0,0x40)
+    return False
+
+
 def _beh_23000004(self, e) -> bool:
     """`0x40118B` → `0x40E460`（类型 0x23000004）：加速直线运动 + 定时打一发。"""
     acc = e.s32(0x20)
@@ -479,6 +537,7 @@ P4_BEH: dict[int, object] = {
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
+    0x448C70: _beh_10000001,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
@@ -881,6 +940,42 @@ class Page4Mixin:
         self.tick_ui(self.ui4fc)                  # 0x4AD4FC
         self.tick_ui(self.ui52c)                  # 0x4AD52C
         # 0x4AD55C 发射器 / 0x4CD484 序列引擎：待 VM 规格落地后实现
+
+    # ---- 自机输入/队列辅助（0x448C70 用）----------------------------------
+    def p4_ptr(self):
+        """`[0x4AB59C]`/`[0x4AB5A0]`：指针坐标（0x44E660 Poll 写、0x44EB60 记录）。"""
+        return int(self.inp.x), int(self.inp.y)
+
+    def p4_ptr_set(self, x: int, y: int) -> None:
+        """`0x44E470`（钳位后回写指针）。"""
+        self.inp.x, self.inp.y = int(x), int(y)
+
+    def p4_key_test(self, mask: int) -> bool:
+        """`0x45AFF0(0x56CCC0, mask)`：测输入旗标位。"""
+        return bool(self.keys.test(mask))
+
+    def p4_key_reset(self, mask: int) -> None:
+        """`0x45AF60(0x56CCC0, mask)`：清位。"""
+        self.keys.bits &= ~mask
+
+    def p4_key_raw_set(self, mask: int) -> None:
+        """`0x45AF30(0x56CCC0, mask)`：置位。"""
+        self.keys.bits |= mask
+
+    def p4_btn_attack(self) -> bool:
+        """`[0x4AB594]`：btn0（C/左键=攻击）当前状态。"""
+        return bool(self.keys.test(1))
+
+    def p4_anim_step(self, e) -> None:
+        """`0x45A790(节点+4, -0x20, 0, -0x20, 0)`：按 16 帧周期切自机动画帧。"""
+        e.d32(0x28, (e.s32(0x28) + 1) & 3)
+
+    def _p4_q(self, name: str) -> list:
+        q = getattr(self, name, None)
+        if q is None:
+            q = []
+            setattr(self, name, q)
+        return q
 
     # ---- 背景槽 0x4AD55C -------------------------------------------------
     def p4_bg_record(self, op: int, ch: int, block: bytes, flags: int, rep: int = 0) -> None:
