@@ -735,6 +735,45 @@ def main():
           and img[0x42CC71 - ib:0x42CC77 - ib] == bytes([0x83, 0xF8, 0x05, 0x0F, 0x8E, 0x92]),
           img[0x42CC71 - ib:0x42CC77 - ib].hex())
 
+    print("== 11x. 十二行为共用骨架与发射间隔（§16.181）")
+    ents12 = [0x42C810, 0x42CC50, 0x42D070, 0x42D370, 0x42C8F0, 0x42CD70,
+              0x42D150, 0x42D4A0, 0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0]
+    want_iv = {0x42C810: [5], 0x42CC50: [5], 0x42D070: [4], 0x42D370: [6],
+               0x42C8F0: [7], 0x42CD70: [5], 0x42D150: [3], 0x42D4A0: [9],
+               0x42CA70: [2, 3, 5], 0x42CEF0: [2, 3, 5], 0x42D260: [6],
+               0x42D6A0: [3]}
+    no_btn0, no_clr, no_pan, bad_iv = [], [], [], {}
+    for a in ents12:
+        win = img[a - ib:a - ib + 0x160]
+        if bytes.fromhex("8a0d94b54a00") not in win:
+            no_btn0.append(hex(a))
+        if not (bytes.fromhex("c7431c00000000") in win
+                or bytes.fromhex("c7451c00000000") in win):
+            no_clr.append(hex(a))
+        if not (bytes.fromhex("8b0d8ccc5600") in win
+                or bytes.fromhex("8b158ccc5600") in win):
+            no_pan.append(hex(a))
+        k = win.find(bytes.fromhex("8a0d94b54a00"))
+        got = []
+        if k >= 0:
+            for ins in md32.disasm(win[k:k + 0x28], a + k):
+                if ins.mnemonic == "cmp" and ins.op_str.startswith("eax"):
+                    got.append(int(ins.op_str.split(",")[1].strip(), 16))
+        if got != want_iv[a]:
+            bad_iv[hex(a)] = got
+    check("12/12 都有 btn0 门槛", not no_btn0, f"{no_btn0}")
+    check("12/12 都有计数清零（实体寄存器为 ebx 或 ebp）", not no_clr, f"{no_clr}")
+    ebp_style = [hex(a) for a in ents12
+                 if bytes.fromhex("c7451c00000000") in img[a - ib:a - ib + 0x1a0]
+                 and bytes.fromhex("c7431c00000000") not in img[a - ib:a - ib + 0x1a0]]
+    check("三个用 ebp 作实体寄存器的槽（0x42D370/0x42C8F0/0x42D4A0）",
+          sorted(ebp_style) == ["0x42c8f0", "0x42d370", "0x42d4a0"], f"{ebp_style}")
+    check("12/12 都有玩家声像计算", not no_pan, f"{no_pan}")
+    check("12/12 的发射间隔阈值符合定案表", not bad_iv, f"{bad_iv}")
+    check("只有组 C 槽 0/1 是三档（2/3/5）",
+          [hex(a) for a, v in want_iv.items() if len(v) == 3]
+          == ["0x42ca70", "0x42cef0"], "")
+
     print("== 13. 目标书条目覆盖表（地址可达性 × 文档定案）")
     doc = (HERE.parent / "ANALYSIS.md").read_text(encoding="utf-8")
     items = [
