@@ -218,6 +218,22 @@ def main():
           and img[0x430434 - ib] == 0xF3,
           "")
 
+    print("== 11c. 子弹×敌机回调的类型分派集合（§16.158）")
+    import capstone as _cs
+    md32 = _cs.Cs(_cs.CS_ARCH_X86, _cs.CS_MODE_32)
+    seen = []
+    for ins in md32.disasm(img[0x43C508 - ib:0x43CA00 - ib], 0x43C508):
+        if ins.mnemonic == "cmp" and ins.op_str.startswith("eax, 0x"):
+            v = int(ins.op_str.split("0x")[1], 16)
+            if v not in seen:
+                seen.append(v)
+    want_t = [0x12061128, 0x10142214, 0x10008041, 0x10008431, 0x00000014,
+              0x10FF0053, 0x12081123, 0x120C112C, 0x1B000001]
+    check("0x43C508 起比较链 == 9 个类型", seen == want_t, f"{[hex(x) for x in seen]}")
+    check("0x43C49D 用 0x7000 掩码取特效模式",
+          img[0x43C49D - ib:0x43C4A2 - ib] == bytes([0x25, 0x00, 0x70, 0x00, 0x00]),
+          img[0x43C49D - ib:0x43C4A2 - ib].hex())
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
