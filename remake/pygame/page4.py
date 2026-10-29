@@ -157,12 +157,18 @@ class ScriptVM:
             if self.owner is not None:
                 self.owner.p4_vm_entity(op, rec)
         elif op == 0x6:                                          # 0x460554 立即触发
-            self.out[6].append((int.from_bytes(body[0:4], "little"), body[4:0x54],
-                                int.from_bytes(body[0x54:0x58], "little")))
+            rec = (int.from_bytes(body[0:4], "little"), body[4:0x54],
+                   int.from_bytes(body[0x54:0x58], "little"))
+            self.out[6].append(rec)
+            if self.owner is not None:
+                self.owner.p4_bg_record(6, *rec, 0)              # 0x457C00
         elif op == 0x7:                                          # 0x460574 只改参数
-            self.out[7].append((int.from_bytes(body[0:4], "little"), body[4:0x54],
-                                int.from_bytes(body[0x54:0x58], "little"),
-                                int.from_bytes(body[0x58:0x5C], "little")))
+            rec = (int.from_bytes(body[0:4], "little"), body[4:0x54],
+                   int.from_bytes(body[0x54:0x58], "little"),
+                   int.from_bytes(body[0x58:0x5C], "little"))
+            self.out[7].append(rec)
+            if self.owner is not None:
+                self.owner.p4_bg_record(7, *rec)                 # 0x457C40
         elif op == 0x8:                                          # 0x4605C6 停通道
             self.out[8].append(int.from_bytes(body[0:4], "little"))
         elif op == 0x9:                                          # 0x460512 变长表
@@ -237,6 +243,75 @@ ENT23_BEH_THUNK = {
     0x401C44: 0x40E070, 0x401FF0: 0x40E100, 0x401B1D: 0x40E230, 0x40118B: 0x40E460,
     0x401BD1: 0x40E520, 0x402180: 0x40E790, 0x401528: 0x40E8C0, 0x401181: 0x40EAF0,
 }
+
+
+import random as _random
+
+rng = _random.Random(0x4593C2)     # 原作用的是 CRT rand()，复刻侧固定种子以便无头复现
+
+BG_LADDER = (6, 10, 16, 24, 32, 48, 72, 108, 160, 240)   # 0x457050 栈上阶梯表
+
+# `0x457938`：241 字节 kind → 阶梯序号表（非阶梯值一律 0x0B = 不改层；0 = 隐藏）
+BG_KIND_IDX = [0x0B] * 241
+for _k, _i in ((0, 0), (6, 1), (10, 2), (16, 3), (24, 4), (32, 5),
+               (48, 6), (72, 7), (108, 8), (160, 9), (240, 10)):
+    BG_KIND_IDX[_k] = _i
+
+
+class BgBand:
+    """背景带（`0x457540` ctor；链表 next = `[band+0x30]`）。"""
+
+    __slots__ = ("slot", "pos", "jit_x", "jit_y", "kind", "w", "h", "row",
+                 "layer", "src", "dst", "visible")
+
+    def __init__(self, slot, idx):
+        self.slot = slot
+        self.pos = idx            # +0x0C 位置（格单位）
+        prm = slot.params
+        self.jit_x = rng.randrange(prm[8] + 1) if prm[8] >= 0 else 0   # +0x14
+        self.jit_y = rng.randrange(prm[9] + 1) if prm[9] >= 0 else 0   # +0x18
+        self.kind = -1            # +0x1C
+        self.w = 0                # +0x20
+        self.h = 0                # +0x24
+        # +0x10 行号：param[0x3C]/[0x40]/[0x44]/[0x48]（块 dword 15..18）加权随机
+        wts = [max(0, prm[15]), max(0, prm[16]), max(0, prm[17]), max(0, prm[18])]
+        tot = sum(wts)
+        if tot > 0:
+            r = rng.randrange(tot)
+            acc = 0
+            self.row = 0
+            for i, wv in enumerate(wts):
+                acc += wv
+                if r < acc:
+                    self.row = i
+                    break
+        else:
+            self.row = 0
+        self.layer = 0            # 节点 [+0]
+        self.src = (0, 0, 0, 0)   # 节点 [+4..]
+        self.dst = (0, 0)         # 节点 [+0x14]/[+0x18]
+        self.visible = 0          # 节点 [+0x1C]
+
+
+class BgSlot:
+    """`0x4AD55C` 的 12 个背景槽之一（元素 0x2A98 字节，`0x457B60` → `0x463C4F`）。"""
+
+    __slots__ = ("params", "rates", "grid", "bands", "rem", "flags", "active", "acc")
+
+    def __init__(self):
+        self.params = [0] * 20     # +0x30（0x456D50 拷入）
+        self.rates = [0] * 20      # +0x80（0x457330 拷入）
+        self.grid = []             # +0xD0：每条 3 dword {x, y, kind}
+        self.bands = []            # +0x04 带链表
+        self.rem = 0               # +0x2A88 速率剩余帧
+        self.flags = 0             # +0x2A8C 分发位
+        self.active = 0            # +0x2A90
+        self.acc = 0               # +0x2A94 滚动累加
+
+    # +0x58 = 格数；+0x64 = 阈值；+0x68 = 每帧滚动量
+    @property
+    def count(self) -> int:
+        return self.params[10]
 
 
 class DNode:
@@ -614,7 +689,9 @@ class Page4Mixin:
         self.p4_frames += 1                       # S15 0x451442
         self.band_draw()                          # S16 0x451457 0x4562A0
         self.p4_collide()                         # S17-S20 0x451461..0x4514A6
+        self.p4_bg_update()                       # S21 第一条 0x458E75 → 0x457BD0
         self.p4_dispatch()                        # S21 0x4514AD 0x458E70
+        self.p4_bg_draw()                         # S22 第一条 0x458EF5 → 0x457CB0
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
         self.band_advance()                       # 0x456270（0x458EF0 内尾调）
         self._p4_dbg()
@@ -711,6 +788,7 @@ class Page4Mixin:
         self.p4_intro_gate = False
         self.p4_skip = 0
         self.sysf2 = Flags()          # 0x4AB5CC
+        self.p4_bg = [BgSlot() for _ in range(12)]   # 0x4AD55C：12 槽 × 0x2A98
         self.sysb8 = Flags()          # 0x56CCB8
         self.replay_mode = False      # [0x56CCB5]
         self.stage_no = 0             # [0x4AB5C8]（关，0 基）
@@ -782,6 +860,160 @@ class Page4Mixin:
         self.tick_ui(self.ui52c)                  # 0x4AD52C
         # 0x4AD55C 发射器 / 0x4CD484 序列引擎：待 VM 规格落地后实现
 
+    # ---- 背景槽 0x4AD55C -------------------------------------------------
+    def p4_bg_record(self, op: int, ch: int, block: bytes, flags: int, rep: int = 0) -> None:
+        """op06 `0x457C00`（立即触发）/ op07 `0x457C40`（只改参数）。
+        `ch >= 0xC` ⇒ 对 12 个槽广播；block 是记录的 20 个 dword（记录 +8 起）。"""
+        vals = [int.from_bytes(block[4 * i:4 * i + 4], "little", signed=True) for i in range(20)]
+        targets = range(12) if ch >= 12 else [ch]
+        for i in targets:
+            slot = self.p4_bg[i]
+            if op == 6:                                  # 0x4572E0
+                slot.flags = flags & 0xFFFFFFFF          # +0x2A8C
+                slot.rem = 0                             # +0x2A88
+                slot.active = 1                          # +0x2A90
+                slot.params = list(vals)                 # 0x456D50 直拷 20 dword
+                self._bg_dispatch(slot)                  # 0x456EB0
+            else:                                        # 0x457330
+                if not slot.active:
+                    continue
+                slot.flags = flags & 0xFFFFFFFF
+                slot.rem = rep                           # +0x2A88
+                slot.rates = list(vals)                  # +0x80
+
+    def _bg_dispatch(self, slot) -> None:
+        """`0x456EB0`：按 `[+0x2A8C]` 的 5 个位分别调 5 个分支。"""
+        f = slot.flags
+        if f & 0x0001:
+            self._bg_shift(slot, 0)                      # 0x456F30（x）
+        if f & 0x0100:
+            self._bg_shift(slot, 2)                      # 0x456FB0
+        if f & 0x0010:
+            self._bg_shift(slot, 1)                      # 0x456F70（y）
+        if f & 0x1000:
+            self._bg_shift(slot, 3)                      # 0x457000
+        if f & 0x10000:
+            self._bg_grid(slot)                          # 0x457050
+
+    def _bg_grid(self, slot) -> None:
+        """`0x457050`：填每格 kind。`[slot+0x58]`=格数、`[+0x38]`=起始尺寸、`[+0x44]`=增长率。"""
+        count = slot.params[10]
+        if count <= 0 or count > 894:                    # 0x2A98-0xD0 容量上限
+            return
+        grid = slot.grid
+        while len(grid) < count:
+            grid.append([0, 0, 0])
+        del grid[count:]
+        cur = slot.params[2]
+        growth = slot.params[5]
+        for i in range(count):
+            kind = BG_LADDER[0]
+            k = 1
+            while cur >= (kind << 6) and k < len(BG_LADDER):
+                kind = BG_LADDER[k]
+                k += 1
+            grid[i][2] = kind
+            cur += (growth * cur) >> 6
+
+    def _bg_shift(self, slot, axis: int) -> None:
+        """`0x456F30`（axis=0，x/+0xD0）与 `0x456F70`（axis=1，y/+0xD4）：
+        整表平移 `delta = (params[axis]>>6) - grid[0][axis]`；`0x456FB0`/`0x457000` 同构。"""
+        n = slot.params[10]
+        if n <= 0 or not slot.grid:
+            return
+        col = axis
+        if col > 1:                                      # 0x456FB0/0x457000 的分支形式
+            col = axis - 2
+        delta = (slot.params[col] >> 6) - slot.grid[0][col]
+        for g in slot.grid[:n]:
+            g[col] = (g[col] + delta) & 0xFFFFFFFF
+
+    def _bg_spawn_band(self, slot, idx: int) -> None:
+        """`0x457120`：按格索引建一条带并挂到 `[+0x04]` 链表头。"""
+        slot.bands.append(BgBand(slot, idx))
+
+    def _bg_band(self, band) -> bool:
+        """`0x457750`：位置推进 → 可见性 → 出界判据 → kind/w/h → 层号 → 节点矩形。
+        返回 0 表示出界该摘链（`0x457210`）。"""
+        slot = band.slot
+        prm = slot.params
+        # `0x45775D mov ecx,[eax+0x38]`，eax = [band+8] = &slot[0x30] ⇒ 偏移 0x38 = 块内第 2 个 dword
+        band.pos = (band.pos + prm[2]) & 0xFFFFFFFF
+        pos = band.pos if band.pos < 0x80000000 else band.pos - 0x100000000
+        # 可见窗 [param[0x2C], param[0x30]] 且 param[0x4C] != 0
+        lo, hi, vis = prm[11], prm[12], prm[19] & 0xFF
+        band.visible = 1 if (lo <= pos <= hi and vis) else 0
+        if pos < 0 or pos >= prm[10]:                         # param[0x28] = 格数
+            return False
+        grid = slot.grid
+        kind = grid[pos][2] if pos < len(grid) else 0
+        if kind != band.kind:
+            band.w = (band.jit_x * kind) >> 6                # [+0x20]
+            band.h = (band.jit_y * kind) >> 6                # [+0x24]
+            band.kind = kind
+            if kind > 0xF0:
+                layer = band.layer
+            else:
+                idx = BG_KIND_IDX[kind] if kind < len(BG_KIND_IDX) else 0x0B
+                if idx == 0:                             # 0x4577EC：隐藏
+                    band.visible = 0
+                elif idx != 0x0B:                        # 0x4577F5..：层号 = 2 + 序号
+                    band.layer = idx + 2
+        # 源矩形 (0, row*kind, kind-1, (row+1)*kind-1)；目标 = 格内 (x,y) + 抖动
+        gx = grid[pos][0] if pos < len(grid) else 0
+        gy = grid[pos][1] if pos < len(grid) else 0
+        band.src = (0, band.row * kind, kind - 1, (band.row + 1) * kind - 1)
+        band.dst = (gx + band.w - (kind >> 1), gy + band.h - (kind >> 1))
+        return True
+
+    def _bg_update(self, slot) -> None:
+        """`0x457380`：速率生效 → 参数+=速率 → 分发 → 遍历带 → 滚动累加补带。"""
+        if not slot.active:
+            return
+        if slot.rem:
+            for i in range(20):                              # 0x456D80
+                slot.params[i] = (slot.params[i] + slot.rates[i]) & 0xFFFFFFFF
+            slot.params[19] = (slot.params[19] & ~0xFF) | (slot.rates[19] & 0xFF)
+            slot.rem -= 1
+            self._bg_dispatch(slot)
+        alive = []
+        for band in slot.bands:
+            if self._bg_band(band):
+                alive.append(band)
+        slot.bands = alive                                   # 0x457210 摘链
+        step = slot.params[14]                               # [slot+0x68]
+        slot.acc = (slot.acc + step) & 0xFFFFFFFF
+        acc = slot.acc if slot.acc < 0x80000000 else slot.acc - 0x100000000
+        thresh = slot.params[13]                             # [slot+0x64]
+        if abs(acc) < thresh:
+            return
+        if step >= 0:
+            slot.acc = (acc - thresh) & 0xFFFFFFFF
+            self._bg_spawn_band(slot, acc - thresh)
+        else:
+            slot.acc = (acc + thresh) & 0xFFFFFFFF
+            self._bg_spawn_band(slot, slot.params[10] + acc - 1)
+
+    def p4_bg_update(self) -> None:
+        """S21 第一条 `0x458E75` → `0x457BD0` → 12× `0x457380`。"""
+        for slot in self.p4_bg:
+            self._bg_update(slot)
+
+    def p4_bg_draw(self) -> None:
+        """S22 第一条 `0x458EF5` → `0x457CB0` → 12× `0x457490`（add ecx,0xC → 0x45A170 → 0x44D010）。"""
+        c = self.canvas
+        for slot in self.p4_bg:
+            if not slot.active:
+                continue
+            for band in slot.bands:
+                if not band.visible or band.kind <= 0 or band.kind > 0xF0:
+                    continue
+                lay = self.layers.tab.get(band.layer)
+                if lay is None:
+                    continue
+                l, t, r, b = band.src
+                c.blit(lay.buf, (l, t, r + 1, b + 1), band.dst, key=lay.ckey)
+
     def p4_render_ents(self) -> None:
         """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），
         源矩形先按 (0,0,640,480) 裁剪窗裁（`0x459F70` 给的整屏）。"""
@@ -820,7 +1052,14 @@ class Page4Mixin:
               f"pal={self.pal[:3].tolist() if hasattr(self,'pal') else None} "
               f"ui52c={len(self.ui52c)} out={ {k:len(v) for k,v in self.vm.out.items() if v} } "
               f"pal_now0={None if getattr(self,'pal_now',None) is None else self.pal_now[:3].tolist()} "
-              f"canvas0={self.canvas.buf[0,:6].tolist()}", flush=True)
+              f"canvas0={self.canvas.buf[0,:6].tolist()} "
+              f"bg_act={sum(1 for x in self.p4_bg if x.active)} "
+              f"bg_cnt={[x.params[10] for x in self.p4_bg[:3]]} "
+              f"bg_grid={[len(x.grid) for x in self.p4_bg[:3]]} "
+              f"bg_band={[len(x.bands) for x in self.p4_bg[:6]]} "
+              f"bg_layer={sorted({b.layer for x in self.p4_bg for b in x.bands})} "
+              f"bg_flags={[hex(x.flags) for x in self.p4_bg[:8]]} "
+              f"bg_kind0={[x.grid[0][2] if x.grid else None for x in self.p4_bg[:8]]}", flush=True)
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。
