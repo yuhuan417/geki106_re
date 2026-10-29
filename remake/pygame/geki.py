@@ -3521,6 +3521,8 @@ class Pages(Page4Mixin):
             lt = self.layers.tab.get(1)
             if lt is not None:
                 c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
+        if getattr(self, "p4_q43c", None):
+            self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
             self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）

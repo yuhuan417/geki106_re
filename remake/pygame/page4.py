@@ -219,6 +219,28 @@ ENT23_INIT = {
 }
 
 
+# `0x498000`：每型 10 字节属性记录（索引 = type & 0xFF，1 基），`0x43AC30` 读它填公共字段：
+#   u16 +0 = 半径、u16 +2 = 存活门（写 [+0x18]）、u16 +4 = 写 [+0x58]、
+#   u16 +6 = 源矩形 left、u16 +8 = 源矩形 top（矩形宽高都是 0x30，0x43AC8E 的 lea 用 *2-1 算右下）
+ENT_PROP = {
+    0x01: (24, 1, 0x200, 0x00, 0), 0x02: (24, 1, 0x180, 0x30, 0),
+    0x03: (24, 0x14, 0x200, 0x00, 0), 0x04: (24, 0x140, 0xFD80, 0x180, 0),
+    0x05: (24, 0x48, 0x00, 0xC0, 0), 0x06: (24, 1, 0x1C0, 0xF0, 0),
+    0x07: (24, 1, 0x00, 0x90, 0), 0x08: (24, 0x64, 0x00, 0x120, 0),
+    0x09: (24, 0x28, 0x2C0, 0x150, 0),
+}
+
+
+class DNode:
+    """显示节点（`[ent+0x38]` 指向它；`0x45A0E0` 是节点池取节点）。"""
+
+    def __init__(self, layer: int, l: int, t: int):
+        self.layer = layer            # [+0]（0x43ACC3 = 2）
+        self.rect = (l, t, l + 0x2F, t + 0x2F)   # [+4..+0x10]
+        self.dst = (0, 0)             # [+0x14]/[+0x18]
+        self.active = 1               # [+0x1C]
+
+
 class Ent:
     """0x5C 字节实体；`[+0x34]` 存活字节、`[+0x40]` 行为指针、`[+0x14]` 类型。"""
 
@@ -235,7 +257,16 @@ class Ent:
         self.m[0x34] = 1                  # 0x430486 存活
         self.d32(0x40, 0)
         self.beh = 0
+        self.node: DNode | None = None
         if (typ & 0x2F000000) == 0x23000000:      # 0x40D940 0x23 族
+            prop = ENT_PROP.get(typ & 0xFF)       # 0x43AC30 的 0x498000 记录
+            if prop is not None:
+                self.d32(0x0C, prop[0])           # 半径
+                self.d32(0x18, prop[1])           # 存活门
+                self.d32(0x58, prop[2])
+                self.m[0x10] = 1                  # 0x43ACC0 参与碰撞
+                self.node = DNode(2, prop[3], prop[4])   # 0x43ACC3 层号恒 2
+                self.node.dst = (self.s32(4) - 0x18, self.s32(8) - 0x18)
             info = ENT23_INIT.get(typ)
             if info is not None:
                 self.beh = info["beh"]
@@ -259,6 +290,34 @@ class Ent:
 
     def __repr__(self) -> str:
         return f"<Ent 0x{self.g32(0x14):08X} beh=0x{self.beh:06X} a={self.g32(4)} b={self.g32(8)} d={self.g32(0x1C)}>"
+
+def _beh_23000002(self, e) -> bool:
+    """`0x401FF0` → `0x40E100`（类型 0x23000002，36 个/关；四段互斥时间窗改速度）。"""
+    t = e.s32(0x2C)
+    if 0x14 <= t < 0x28:
+        e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    elif 0x28 <= t < 0x3C:
+        e.d32(0x28, (e.s32(0x28) - e.s32(0x20)) & 0xFFFFFFFF)
+    elif 0x8C <= t < 0x9C:
+        e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
+        e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    elif 0x9C <= t < 0xAC:
+        e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
+        e.d32(0x28, (e.s32(0x28) - e.s32(0x20)) & 0xFFFFFFFF)
+    # x += (vy+2)>>2 ; y += (v28+2)>>2（sar 3 步算术右移）
+    vx = (e.s32(0x24) + 2) >> 2
+    vy = (e.s32(0x28) + 2) >> 2
+    x = e.s32(0x04) + vx
+    y = e.s32(0x08) + vy
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if x == 0x190 and e.s32(0x1C) == 1:        # 0x40E1xx → 0x43B070(ent,0)
+        self.p4_43B070(e, 0)
+    e.d32(0x2C, (t + 1) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)       # [+0x14]/[+0x18]
+    return e.g32(0x18) != 0 and x < 0x2A8       # 存活判据
+
 
 def _beh_23000003(self, e) -> bool:
     """`0x401B1D` → `0x40E230`（类型 0x23000003，10 个/关）。
@@ -292,7 +351,7 @@ def _beh_23000003(self, e) -> bool:
 # `0x40E2F0`：243 项字节表（x-0xF0 索引 → case 选择子，`0x40E2E0` 为 4 项跳表）
 ENT23_SW03 = [0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
 
-P4_BEH: dict[int, object] = {0x40E230: _beh_23000003}     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
+P4_BEH: dict[int, object] = {0x40E100: _beh_23000002, 0x40E230: _beh_23000003}     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
 
 class Page4Mixin:
@@ -680,6 +739,27 @@ class Page4Mixin:
         self.tick_ui(self.ui4fc)                  # 0x4AD4FC
         self.tick_ui(self.ui52c)                  # 0x4AD52C
         # 0x4AD55C 发射器 / 0x4CD484 序列引擎：待 VM 规格落地后实现
+
+    def p4_render_ents(self) -> None:
+        """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），
+        源矩形先按 (0,0,640,480) 裁剪窗裁（`0x459F70` 给的整屏）。"""
+        c = self.canvas
+        for e in self.p4_q43c:
+            nd = e.node
+            if nd is None or not nd.active or e.g32(0x14) & 0x2F000000 != 0x23000000:
+                continue
+            lay = self.layers.tab.get(nd.layer)
+            if lay is None:
+                continue
+            l, t, r, b = nd.rect
+            dx, dy = nd.dst
+            c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+
+    def p4_43B070(self, e, arg: int) -> None:
+        """`0x43B070`：朝 `[0x56CC8C]/[0x56CC90]` 生成一枚实体进 **0x4AD49C** 队列
+        （类型由 `0x43B020` 按族算出，0x23 族 → `0x31000001`）。四个几何子函数未定案，先只登记。"""
+        self.p4_other.setdefault(0x4AD49C, []).append(
+            (0x31000001, e.s32(0x04), e.s32(0x08), arg))
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。
