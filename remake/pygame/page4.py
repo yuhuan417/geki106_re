@@ -766,6 +766,35 @@ def p4_atan2(a: int, b: int) -> int:
     return int(t["atan"][a & 0xFF, b & 0xFF])
 
 
+def p4_bg_place_axis(slot, axis: int, count: int) -> None:
+    """`0x456F30`（x 轴，`+0x30`→`+0xD0`）/ `0x456F70`（y 轴，`+0x34`→`+0xD4`）。
+
+    ```
+    0x456F30  edx = [this+0x30]        ; (y 版 0x456F70 读 +0x34)
+    0x456F33  eax = this+0xD0          ; (y 版 +0xD4)
+    0x456F3B  esi = [eax]              ; 第 0 条的当前值
+    0x456F3D  edi = [this+0x58]        ; 条数 N
+    0x456F40  edx = sar edx,6          ; 基准 = 参数 >> 6
+    0x456F43  edx -= esi               ; delta = 基准 - 第0条的当前值
+    0x456F47  if (N <= 0) return
+    0x456F4B  loop: edi=[eax]; eax+=0xC; edi+=edx; i++; [eax-0xC]=edi
+    0x456F56         edi = [this+0x58]（每轮重读）; if (i < edi) 继续
+    ```
+
+    含义：把 `N` 条记录（**步长 0xC = 3 dword**）在某一轴上整体平移，
+    使第 0 条正好落在 `参数 >> 6`。x 版写每条的第 1 个 dword、y 版写第 2 个
+    ⇒ 记录布局 = `{x, y, kind}`（与 `BgSlot.grid` 注释一致）。
+    `sar` 是算术右移，Python 的 `>>` 对负数同义。
+    """
+    n = min(int(count), len(slot.grid))
+    if n <= 0:
+        return
+    base = int(slot.params[axis]) >> 6            # 0x456F40
+    delta = base - int(slot.grid[0][axis])        # 0x456F43
+    for k in range(n):                            # 0x456F4B..0x456F5B
+        slot.grid[k][axis] = int(slot.grid[k][axis]) + delta
+
+
 def p4_queue_sweep(self, head, unlink=None):
     """`0x430220` / `0x4353A0` 等 6 个队列扫描函数的**统一骨架**。
 
