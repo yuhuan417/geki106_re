@@ -1259,8 +1259,33 @@ class Page4Mixin:
         self.p4_stat[0x45E020] = self.p4_stat.get(0x45E020, 0) + 1
 
     def p4_hud_layout(self, h) -> None:
-        """`0x45E340`：HUD 数字排版（待展开）。"""
-        self.p4_stat[0x45E340] = self.p4_stat.get(0x45E340, 0) + 1
+        """`0x45E340`：血条/能量条排版。
+
+        ```
+        0x45E347 v = s16[+0x26]
+        0x45E34B if (v < 0xA0) {                      ; 未满：分段小格
+                    i = v >> 4
+                    node[+0xDC].src = (i*0x18, 0x1E0, i*0x18+0x17, 0x1F7);  return }
+        0x45E3A6 if (node[+0xDC].src.top != 0x1C8) {   ; 首次满格
+                    node.src = (0x48, 0x1C8, 0x5F, 0x1DF); [+0xE0] = 0 }
+        0x45E3FD [+0xE0] = (node.src.left == 0)
+        0x45E41A [+0xE0] ? 0x45A790(node, 0x18,0,0x18,0) : 0x45A790(node,-0x18,0,-0x18,0)
+        ```
+        """
+        v = h.s16(0x26)
+        if v < 0xA0:                                       # 0x45E34B
+            i = (v >> 4) & 0xF
+            x = i * 0x18
+            if h.node is not None:
+                h.node.src = (x, 0x1E0, x + 0x17, 0x1F7)
+            return
+        if h.node is not None and h.node.src[1] != 0x1C8:  # 0x45E3A6
+            h.node.src = (0x48, 0x1C8, 0x5F, 0x1DF)
+            h.d32(0xE0, 0)
+        if h.node is not None:
+            h.d32(0xE0, 1 if h.node.src[0] == 0 else 0)    # 0x45E3FD 至 0x45E40E
+            d = 0x18 if h.g32(0xE0) else -0x18             # 0x45E41A / 0x45E435
+            self.p4_anim_step(h)
 
     def p4_hud_update(self, e) -> None:
         """`0x460A90`：把数字矩形写进显示节点 `[+0x2C]+4`，再 `0x4011FE` 推进渲染表。"""
