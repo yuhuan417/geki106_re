@@ -260,6 +260,9 @@ class Ent:
     def __repr__(self) -> str:
         return f"<Ent 0x{self.g32(0x14):08X} beh=0x{self.beh:06X} a={self.g32(4)} b={self.g32(8)} d={self.g32(0x1C)}>"
 
+P4_BEH: dict[int, object] = {}     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
+
+
 class Page4Mixin:
     # ---- 0x4505B0 参数块 -----------------------------------------------
     @staticmethod
@@ -590,6 +593,7 @@ class Page4Mixin:
         self.p4_seq = None            # 0x4CD484 序列引擎
         self.p4_q43c: list = []       # 0x4AD43C 主实体队列（所有实体类型共用）
         self.p4_n43c = 0
+        self.p4_beh_missing: dict[int, int] = {}
         self.p4_other: dict[int, list] = {}   # op1/3/4/5 的记录（ctor 未实现）
         # 0x56CC4C 脚本流状态机 + 资源表（0x45DDA0/0x45DDE0）
         from pathlib import Path
@@ -637,7 +641,7 @@ class Page4Mixin:
         会被后排队列当帧 tick 到）。页13 已按同一顺序实现，这里沿用。"""
         self.tick_ui(self.actorq)                 # 0x4AD40C
         self.tick_ui(self.ui46c)                  # 0x4AD46C
-        self._tick_posq()                         # 0x4AD43C
+        self._p4_tick_ents()                      # 0x4AD43C（页4 实体队列）
         self.tick_ui(self.p4_ui49c)               # 0x4AD49C
         self._tick_wipe4f()                       # 0x4AD4CC
         self._tick_spark4cc()                     # 0x4AD4CC
@@ -749,6 +753,33 @@ class Page4Mixin:
     def vm_restart(self, arg: int) -> None:
         """`0x4602D0(0x56CC4C, 9)`：命令 0 的另一条路 => 进链 9（[60]）。"""
         self.vm.load_chain(arg)
+
+    def _p4_tick_ents(self) -> None:
+        """`0x445A30`（0x4AD43C 队列行为遍）：从 `[queue+0x28]` 沿 `[ent+0x44]` 遍历；
+        `[ent+0x34]` 为 0（死）→ `0x4018D4` 摘链；否则 `0x4012AD`→`0x446450 = jmp [ent+0x40]`，
+        行为返回 0 → `[ent+0x34]=0` 且 `[[ent+0x38]+0x1C]=0`（隐藏显示节点）。"""
+        q = self.p4_q43c
+        i = 0
+        while i < len(q):
+            e = q[i]
+            if e.m[0x34] == 0:
+                del q[i]
+                continue
+            if not self.p4_call_behaviour(e):
+                e.m[0x34] = 0
+                node = e.g32(0x38)
+                if node:
+                    self.p4_stat[node + 0x1C] = 0
+            i += 1
+
+    def p4_call_behaviour(self, e: "Ent") -> bool:
+        """`0x446450 = jmp [ent+0x40]`：按行为指针分派。未实现的行为先返回"存活"并计数，
+        绝不假装完成——实现一个就在 `P4_BEH` 里登记一个。"""
+        fn = P4_BEH.get(e.beh)
+        if fn is None:
+            self.p4_beh_missing[e.beh] = self.p4_beh_missing.get(e.beh, 0) + 1
+            return True
+        return fn(self, e)
 
     def p4_vm_entity(self, op: int, rec: tuple) -> None:
         """op1..op5 → 五个队列原语（`0x448FF0`/`0x43BDC0`/`0x43A3C0`/`0x44B140`/`0x445AA0`）。
