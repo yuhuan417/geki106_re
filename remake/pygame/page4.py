@@ -1381,6 +1381,51 @@ class Page4Mixin:
             return False
         return (self.p4_frames % f) != 0
 
+    def p4_replay_frame(self) -> None:
+        """`0x45134B`/`0x45135F`：每帧的回放录制或回放。
+
+        ```
+        ; [0x56CCB5] == 0（录制）
+        0x451337 0x4010A5→0x44EB60(0x4AB454, 0x4AB594, 0x56CC8C)   ; BuildRecord
+        0x45134B 0x402310→0x45D1D0(0x4CD5D8, 0x4AB594)             ; 记一帧
+        ; [0x56CCB5] != 0（回放）
+        0x45135F 0x402405→0x45D2B0(0x4CD5D8, &tmp)                 ; 取一帧
+        0x451372 0x44EB60(0x4AB454, 0x4AB594, 0x56CC8C, &tmp)     ; 用回放帧建记录
+        0x451387 if (byte[tmp+2]) App[0x2C4]++                      ; [0x4AB596] 加速
+        0x451396 if (byte[tmp+3]) App[0x2C4] = 0                    ; [0x4AB597] 停
+        0x4513A9 tmp[0..5] 复制到 [0x4AB594..0x4AB599]
+        ```
+        """
+        rp = getattr(self, "p4_replay", None)
+        if rp is None:
+            rp = P4Replay()
+            self.p4_replay = rp
+        rec = self.inp.rec
+        if self.replay_mode:                                  # 0x45135F
+            tmp = bytearray(0x20)
+            rp.play(tmp)                                      # 0x45D2B0
+            rec.b0 = bool(tmp[0] & 1)                         # 0x4513A9 起 6 字节
+            rec.b1 = bool(tmp[1] & 1)
+            rec.e0 = bool(tmp[2] & 1)
+            rec.e1 = bool(tmp[3] & 1)
+            rec.r0 = bool(tmp[4] & 1)
+            rec.r1 = bool(tmp[5] & 1)
+            rec.dx = int.from_bytes(tmp[0x10:0x14], "little", signed=True)
+            rec.dy = int.from_bytes(tmp[0x14:0x18], "little", signed=True)
+            if tmp[2]:
+                self.p4_speed += 1                            # 0x451390
+            if tmp[3]:
+                self.p4_speed = 0                             # 0x45139F
+            rp.pos += 1
+        else:                                                 # 0x45134B
+            frame = bytearray(0x20)
+            frame[0] = 1 if rec.b0 else 0
+            frame[1] = 1 if rec.b1 else 0
+            frame[0x10:0x14] = (rec.dx & 0xFFFFFFFF).to_bytes(4, "little")
+            frame[0x14:0x18] = (rec.dy & 0xFFFFFFFF).to_bytes(4, "little")
+            rp.record(frame)                                  # 0x45D1D0
+            rp.pos += 1
+
     def p4_seq_tick(self) -> None:
         """`0x451457 0x402036 → 0x4562A0(0x4CD484)`：**色带引擎**（不是"序列引擎"）。
 
