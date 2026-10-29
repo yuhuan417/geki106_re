@@ -3212,6 +3212,26 @@ class Page4Mixin:
             return False
         return (b - t) + y > 0                   # 0x430674 0x45A730 高
 
+    def p4_45f530(self, obj, ax: int) -> None:
+        """`0x45F530`（`ret 4`）：连击/计分计数器。
+
+        ```
+        0x45F530 ax = 实参低 16 位
+        0x45F535 if (ax == 0) { byte[obj+0x2A] = 0; return }     ; 0x45F54E
+        0x45F53A word[obj+0x26]++                                 ; 累计命中数
+        0x45F53E dl = byte[obj+0x2A]
+        0x45F541 test al, 7 ; sete al                             ; 低 3 位为 0 ⇒ 1
+        0x45F546 dl |= al ; byte[obj+0x2A] = dl                   ; 0x45F548
+        ```
+
+        `obj` 是计分对象（`0x4CD4A0` 一族的演出/HUD 对象），字段 `+0x26` 是 16 位计数、
+        `+0x2A` 是"每 8 次置一次"的标记位。"""
+        if not (ax & 0xFFFF):                   # 0x45F538
+            obj.f2a = 0                          # 0x45F54E
+            return
+        obj.f26 = (getattr(obj, "f26", 0) + 1) & 0xFFFF   # 0x45F53A
+        obj.f2a = (getattr(obj, "f2a", 0) | (1 if not (ax & 7) else 0)) & 0xFF  # 0x45F546/0x45F548
+
     def p4_rand(self) -> int:
         """`0x45AD00`：LCG，状态 `[0x5D3E38]`；`st = (st*0x19660D + 0x3C6EF35F) & 0x7FFFFFFF`。"""
         st = (int(getattr(self, "_p4_rand_st", 0x12345678)) * 0x19660D + 0x3C6EF35F) & 0x7FFFFFFF
