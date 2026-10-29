@@ -1751,6 +1751,25 @@ def main():
           and page4.Page4Mixin._p4_div3(9) == 3
           and page4.Page4Mixin._p4_div3(-9) == -3
           and page4.Page4Mixin._p4_div3(8) == 2, "")
+    _ctor = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x43D785 - ib:0x43D7A8 - ib], 0x43D785)}
+    _free = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x4435D0 - ib:0x443606 - ib], 0x4435D0)}
+    _init = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x454A6A - ib:0x454A9E - ib], 0x454A6A)}
+    check("开场链条：ctor `0x43D785` 里 `0x6B000001` → `[ent+0x40] = 0x4020EF`（thunk→`0x4435C0`）；"
+          "`0x4435C0` 是 10 状态机（`[+0x1C]` 低 28 位=计数、高 4 位=状态，`byte[0x44408C+状态]` "
+          "选 `[0x44407C]` 的 4 个处理函数，状态 0..9 → 0,1,1,1,1,1,1,1,2,3）；"
+          "页面机 `0x45952C` → `0x401B4F` → `0x454950` 里在 (0,0) 造 `0x6B000001` 进 **0x4AD52C**",
+          _ctor.get(0x43D785) == ("cmp", "edx, 0x6b000001")
+          and _ctor.get(0x43D791) == ("mov", "dword ptr [esi + 0x40], 0x4020ef")
+          and _free.get(0x4435D7) == ("sar", "ebx, 0x1c")
+          and _free.get(0x4435DD) == ("and", "ebp, 0xfffffff")
+          and _free.get(0x4435F9) == ("mov", "cl, byte ptr [edi + 0x44408c]")
+          and _free.get(0x4435FF) == ("jmp", "dword ptr [ecx*4 + 0x44407c]")
+          and _init.get(0x454A6C) == ("push", "0x6b000001")
+          and _init.get(0x454A93) == ("mov", "ecx, 0x4ad52c")
+          and list(img[0x44408C - ib:0x44408C - ib + 10]) == [0, 1, 1, 1, 1, 1, 1, 1, 2, 3], "")
     _rs = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x44370A - ib:0x4437A6 - ib], 0x44370A)}
     check("0x44370A：自机复活/生成点——`ebp == 0xF0` 且 `byte[0x4AB596]`（btn0 按下沿）非 0 时，"
