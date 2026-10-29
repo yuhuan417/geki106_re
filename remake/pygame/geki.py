@@ -817,6 +817,38 @@ class Flags:
             return 0
         return b & (-b)
 
+    def or_andnot(self, mask: int, value: int) -> None:
+        """`0x40114A` → **`0x45B0A0`**（双参 or / and-not）：value 非 0 → `|= mask`，
+        否则 `&= ~mask`。`0x45B0A0..0x45B0CA` 实证：`test value,value` / `jz` 走 andnot 分支。"""
+        if value:
+            self.bits |= mask
+        else:
+            self.bits &= ~mask & 0xFFFFFFFF
+
+    def field_get(self, mask: int) -> int:
+        """`0x4019C9` → **`0x45AFC0`**（位段取值）：把 mask 锁定的字段右移到最低置位处。
+        mask 为单 bit 时返回 0/1；mask==0 或无命中返回 0。"""
+        if mask == 0:
+            return 0
+        shift = (mask & -mask).bit_length() - 1
+        return (self.bits & mask) >> shift
+
+    def field_write(self, mask: int, value: int) -> None:
+        """`0x401636` → **`0x45B0E0`**（位段写入）：mask 与其最低置位同步左移、value 同步左移，
+        再 `[+4] = ([+4] and-not mask) or (mask and value<<shift)` ⇒ 整体替换该字段。"""
+        if mask == 0:
+            return
+        shift = (mask & -mask).bit_length() - 1
+        m = mask
+        v = value << shift
+        self.bits = (self.bits & ~m & 0xFFFFFFFF) | (m & v & 0xFFFFFFFF)
+
+    def rev_test(self, mask: int) -> bool:
+        """`0x40145B` → **`0x45B030`**（反向测试）：mask==0 时返回"非空"。"""
+        if mask == 0:
+            return self.bits != 0
+        return (self.bits & mask) == 0
+
 
 # ---------------------------------------------------------------------------- UI 实体
 @dataclass
