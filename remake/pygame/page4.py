@@ -5457,7 +5457,7 @@ class Page4Mixin:
             count = slot.params[10] or len(grid)         # +0x58（0 时退回实际条数）
             if period <= 0:
                 continue
-            acc = slot.acc + step                        # 0x4573F0
+            orig_acc = acc = slot.acc + step              # 0x4573F0
             # 32 位有符号归一（exe 里 acc 是 int32，绕回只减去一个周期）
             acc = ((acc + 0x80000000) & 0xFFFFFFFF) - 0x80000000
             if abs(acc) >= period:                       # 0x457408 → 本帧发生绕回
@@ -5470,8 +5470,12 @@ class Page4Mixin:
                 # 0x45741D `0x457120(slot, acc)`：为 0x34 字节的"带状体"做 operator new
                 # （`push 0x34; call 0x47C7C0`），本复刻尚未读定它如何写 [+0xC]，先不臆造
                 self.p4_457120(slot, acc)
-            # 0x457760 `add edi, ecx`：索引每帧**无条件**推进 step（初值＝槽内存清零＝0）
-            slot._t = getattr(slot, "_t", 0) + step
+            # 0x457760 `add edi, ecx`：索引每帧推进一步；绕回时由带状体 ctor
+            # `0x457598 [band+0xC] = acc` 把索引重置为**归一后的 acc**
+            if abs(orig_acc) >= period:
+                slot._t = acc
+            else:
+                slot._t = getattr(slot, "_t", 0) + step
             slot.acc = acc                               # 0x4573FB
             t = slot._t
             if t < slot.params[11] or t > slot.params[12]:   # 0x45776A 窗口
