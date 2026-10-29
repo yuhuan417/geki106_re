@@ -6188,6 +6188,27 @@ thunk 解析：`0x4020BD→0x447640`、`0x4015FF→0x447410`、`0x401E06→0x448
 又是 `0x44E4A0/0x44E620` 的**头像 sprite 播放器** —— 同一个全局对象，`+0x4C` 起存当前帧矩形、
 `+0x14/+0x18` 存光标坐标。早期把它只记成 "DirectInput 管理器" 是不完整的，特此更正。
 
+#### 16.137 `0x45C710` 字段语义 + `0x45AFF0` 位测试口径
+
+```
+0x45AFF0(bit)                       ; ret 4，ecx = 标志对象
+  0x45AFF4 test bit,bit ; je 0x45B006
+  0x45AFF8 eax = dword[ecx+4] & bit ; 0x45AFFD neg/sbb/neg ⇒ (非 0 → 1)
+  0x45B006 (bit==0 时) eax = (dword[ecx+4] == 0) ? 1 : 0   ; "没有任何位置起"
+```
+⇒ 返回 0/1；`bit == 0` 是"标志全清"查询，不是"第 0 位"。
+
+```
+0x45C710(arg1, arg2)                ; ret 8，ecx = 目标对象
+  0x45C718 al = (arg1 != 0) ; setne
+  0x45C71D byte[ecx+4] = al          ; 归一化成 0/1
+  0x45C720 byte[ecx+5] = byte(arg2)  ; 原样低字节
+```
+⇒ `0x4AB5CC+4` / `+5` 是**两个独立字节**，不是位掩码。
+调用侧（`0x458DEC`..`0x458E0B`）push 序为 `push bit1结果` → 再算 bit2 → `push bit2结果`，
+故 **arg1 = KeyMgr bit2、arg2 = KeyMgr bit1**：
+`byte[+4] = (bit2 != 0)`、`byte[+5] = bit1`。
+
 #### 16.136 全局复位 `0x458D60` 的完整序列（`ret 0x10`，4 个参数）
 
 ```

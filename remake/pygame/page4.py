@@ -1438,7 +1438,13 @@ class Page4Mixin:
         self.replay_advance()                     # 0x458DE2 0x40160E → 0x45D110
         # 0x458DF3/0x458E00 `0x45C710(0x4AB5CC, bit0, bit1)`：记录流两档标志
         # （0x45C710 的字段语义待 §12 细读；此处按"两档位"写入）
-        self.sysf2.bits = (1 if self.keys.test(1) else 0) | (2 if self.keys.test(2) else 0)
+        # 0x458DF3 `0x45AFF0(0x4AB5B0,1)` → arg2；0x458E00 `0x45AFF0(0x4AB5B0,2)` → arg1；
+        # 0x458E0B `0x401D7A→0x45C710(ecx=0x4AB5CC, arg1, arg2)`：
+        #   0x45C71A setne ⇒ byte[+4] = (arg1 != 0)
+        #   0x45C720        ⇒ byte[+5] = byte(arg2)
+        # 是两个**独立字节**，不是位掩码。
+        self.sysf2.b4 = 1 if self.keys.test(2) else 0     # byte[0x4AB5CC+4]
+        self.sysf2.b5 = 1 if self.keys.test(1) else 0     # byte[0x4AB5CC+5]
         self.stream_reset()                       # 0x458E15 0x402081 → 0x459A80(0x56B95C)
         self.sysf.clear()                         # 0x458E1C 0x45AF10(0x56CC84,0)
 
