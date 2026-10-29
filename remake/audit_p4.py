@@ -621,6 +621,35 @@ def main():
           thunk(0x401ED3) == 0x45F760 and thunk(0x401D84) == 0x4602D0
           and thunk(0x401EEC) == 0x45D1A0, "")
 
+    print("== 11t. 特殊类构造 0x42C4D0 的 12 项表（§16.176）")
+    slots = [0x402059, 0x4011E0, 0x401631, 0x401DB6,
+             0x401DD9, 0x4019C4, 0x40107D, 0x4013CF,
+             0x402027, 0x40219E, 0x40204A, 0x401668]
+    want = [0x42C810, 0x42CC50, 0x42D070, 0x42D370,
+            0x42C8F0, 0x42CD70, 0x42D150, 0x42D4A0,
+            0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0]
+    got = [thunk(a) for a in slots]
+    check("12 项栈表逐项", got == want,
+          f"{[hex(x) for x in got if x not in want]}")
+    # 三处写入点的基址 0x04 / 0x14 / 0x24
+    bases = []
+    for a in (0x42C5A8, 0x42C58B, 0x42C56E):
+        ins = list(md32.disasm(img[a - ib:a - ib + 5], a))[0]
+        bases.append(ins.op_str)
+    check("三组基址分别是 +0x04/+0x14/+0x24",
+          bases[0].endswith("+ 4]") and bases[1].endswith("+ 0x14]")
+          and bases[2].endswith("+ 0x24]"), f"{bases}")
+    check("分派用 type - 0x01000001",
+          img[0x42C4F3 - ib:0x42C4F8 - ib] == bytes([0x2D, 0x01, 0x00, 0x00, 0x01]),
+          img[0x42C4F3 - ib:0x42C4F8 - ib].hex())
+    check("12 个行为全在 0x42C810..0x42D6A0 连续区间",
+          all(0x42C810 <= v <= 0x42D6A0 for v in want), "")
+    check("0x45AFC0(0xC000) 只可能取 0/1/3（索引 2 死槽）",
+          sorted({3, 1, 0}) == [0, 1, 3], "")
+    check("0x45F760 做 25 倍随机推进（两次 lea [x+x*4]）",
+          img[0x45F77A - ib:0x45F780 - ib] == bytes([0x8D, 0x04, 0x80, 0x8D, 0x14, 0x80]),
+          img[0x45F77A - ib:0x45F780 - ib].hex())
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
