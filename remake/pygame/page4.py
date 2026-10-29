@@ -394,6 +394,27 @@ def _beh_23000001(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
 
 
+def _beh_23000004(self, e) -> bool:
+    """`0x40118B` → `0x40E460`（类型 0x23000004）：加速直线运动 + 定时打一发。"""
+    acc = e.s32(0x20)
+    if acc:
+        acc = (acc + 1) & 0xFFFFFFFF
+        e.d32(0x20, acc)
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t == e.s32(0x24):                       # 0x40E47C 到点打一发
+        self.p4_43B070(e, 0)
+    elif (t + 1) == 0x168:                     # 0x40E489 360 帧时加速计数复位 1
+        e.d32(0x20, 1)
+    acc = e.s32(0x20)
+    x = (e.s32(0x04) + (acc >> 1)) & 0xFFFFFFFF   # 0x40E49E x += [+0x20]>>1
+    e.d32(0x04, x)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    alive = (acc <= 0 or e.s32(0x04) < 0x298) and e.g32(0x18) != 0
+    return bool(alive)
+
+
 def _beh_23000002(self, e) -> bool:
     """`0x401FF0` → `0x40E100`（类型 0x23000002，36 个/关；四段互斥时间窗改速度）。"""
     t = e.s32(0x2C)
@@ -457,6 +478,7 @@ ENT23_SW03 = [0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 
 P4_BEH: dict[int, object] = {
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
+    0x40E460: _beh_23000004,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
