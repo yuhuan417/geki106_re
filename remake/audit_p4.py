@@ -43,6 +43,13 @@ def main():
     def thunk(a):
         return a + 5 + int.from_bytes(img[a + 1 - ib:a + 5 - ib], "little", signed=True)
 
+    def deep(a):
+        """跟随 jmp 蹦床（.text 里 0x401xxx..0x4026xx 多为 `E9 rel32` 蹦床）。"""
+        t = thunk(a)
+        while 0x401000 <= t <= 0x4026FF and img[t - ib] == 0xE9:
+            t = thunk(t)
+        return t
+
     print("== 1. 三张三角函数表（§16.135）")
     import page4
     tabs = page4.p4_tables()
@@ -159,6 +166,43 @@ def main():
     check("p4_bg_kind_ladder(384, ratio=64) 种类", [r[2] for r in g] == [32, 32, 32, 48, 72],
           f"实得 {[r[2] for r in g]}")
     check("p4_bg_kind_ladder 末态 acc 12288", acc == 12288, f"实得 {acc}")
+
+    print("== 9. 页4 骨架四处（§2/§10.7）")
+    skeleton = [
+        ("进场 0x4593C4 → 0x4505B0", 0x4593C4, 0x4505B0),
+        ("每帧 0x4593CF → 0x451110", 0x4593CF, 0x451110),
+        ("每帧 0x4593DA → 0x451110（循环回边）", 0x4593DA, 0x451110),
+        ("收尾 0x4593E5 → 0x451C50", 0x4593E5, 0x451C50),
+        ("泵 0x451171 → 0x458B80", 0x451171, 0x458B80),
+        ("色带 0x45145C → 0x4562A0", 0x45145C, 0x4562A0),
+    ]
+    for name, site, want in skeleton:
+        got = deep(site)
+        check(name, got == want, f"实得 {got:#x}")
+
+    print("== 10. 三组碰撞判定（§16）")
+    coll = [("0x451465 → 0x43BF60", 0x451465, 0x43BF60),
+            ("0x451480 → 0x43BFD0", 0x451480, 0x43BFD0),
+            ("0x451493 → 0x43C060", 0x451493, 0x43C060),
+            ("0x4514A6 → 0x43C0F0", 0x4514A6, 0x43C0F0)]
+    for name, site, want in coll:
+        got = deep(site)
+        check(name, got == want, f"实得 {got:#x}")
+
+    print("== 11. 菱形命中判定式 0x4306C0")
+    body = img[0x4306C0 - ib:0x4306C0 - ib + 0x50]
+    # 0x4306C0 mov al,[ecx+0x10] / 0x4306C3 test al,al / 0x4306C5 je
+    check("0x4306C0 先读激活位 +0x10",
+          body[:4] == bytes([0x8A, 0x41, 0x10, 0x84]), body[:6].hex())
+    # cdq(0x99) / xor edi,edx(0x33 FA) / sub edi,edx(0x2B FA) 取 |dx|
+    check("0x4306C0 用 cdq/xor/sub 取 |dx|",
+          img[0x4306D1 - ib] == 0x99 and img[0x4306D8 - ib] == 0x33
+          and img[0x4306DA - ib] == 0x2B,
+          f"cdq={img[0x4306D1-ib]:#x} xor={img[0x4306D8-ib]:#x} sub={img[0x4306DA-ib]:#x}")
+
+    print("== 12. 回放三数组布局（§12）")
+    check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
+    check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
 
     print()
     if fails:
