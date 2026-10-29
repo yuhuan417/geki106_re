@@ -740,8 +740,8 @@ def p4_tables():
             import numpy as np
             f = pathlib.Path(__file__).resolve().parent.parent / "p4_tables.npz"
             z = np.load(f)
-            _P4TAB["sin"] = z["sin1800"]
-            _P4TAB["cos"] = z["cos1800"]
+            _P4TAB["sin"] = z["sin900"]
+            _P4TAB["cos"] = z["cos900"]
             _P4TAB["isqrt"] = z["isqrt65536"]
             _P4TAB["atan"] = z["atan256"]
         except Exception:
@@ -825,15 +825,13 @@ def p4_sin_q(arg: int, which: str = "sin") -> int:
     `0x45ABB0(angle)` 的结果当**余弦分量**写回 x、把 `0x45AAF0(angle)` 当**正弦分量**写回 y，
     并做四舍五入定点乘 `(v*scale + 0x80) >> 8`。
 
-    **`0x45ABB0`（`which="cos"`，读 0x5D3E3C 那张表）已数值验证**：
-    在整个 3600 步（0..3599）上与 `round(255*sin(arg*0.1°))` 逐点比对，
-    **超差 >2 的帧数为 0**。即它其实是**正弦发生器**（名字里的 cos 来自
-    `0x45AC70` 的用法，那里角度轴与屏幕 y 轴对齐，故 sin 分量落在 x 槽）。
+    **两张表各 900 项、都是纯第一象限**（`0x45A7E5 xor esi,esi`；`dec esi`；
+    `(esi+0x383) >= 0` ⇒ 900 次）：`表[k] = trunc(trig(k*0.1°)*255)`，k=0..899。
+    - `0x45AAF0` 读基址 **`0x5B3AB4`**（镜像 `0x5B3E37`）= **sin 表** ⇒ `which="sin"`
+    - `0x45ABB0` 读基址 **`0x5D3E3C`**（镜像 `0x5D41BF`）= **cos 表** ⇒ `which="cos"`
 
-    另一半 `0x45AAF0`（读 0x5B3AB4 表）按调用点对称性应是余弦发生器，但用当前
-    `build_p4_tables.py` 生成的 `sin1800` 数组复现不出 `255*cos`（超差 3578/3600），
-    说明填表循环里第二个 `fcos` 的**输入**不是原角度（`0x45A812` 的 `fmul 255`
-    发生在 `fcos` 之前），该段需重读 —— 在修正前不要把这张表用于计算。
+    两者对 3600 个整周步逐点验证：`cos` 槽 vs `round(255*cos(a*0.1°))`、
+    `sin` 槽 vs `round(255*sin(a*0.1°))` 全部超差 ≤1。
 
     **返回的是补码字节（0..255）**：表按 `mov byte[..], al` 只存低字节，`-180` 存成 `0x4C=76`，
     故 `arg=450` 返回 76 而不是 180 —— 这**不是**映射错误，是原件的行为（调用方需自行带符号解释）。
@@ -847,14 +845,18 @@ def p4_sin_q(arg: int, which: str = "sin") -> int:
     idx = (a // 900) & 3
     rem = a % 900
     tab = t["cos"] if which == "cos" else t["sin"]
-    if idx == 0:
-        v = int(tab[rem])                      # 0x45ABEA / 0x45AB2D  +表首+rem
-    elif idx == 1:
-        v = int(tab[899 - rem])                # 0x45ABF4 / 0x45AB37  +镜像
-    elif idx == 2:
-        v = -int(tab[rem])                     # 0x45AC03 / 0x45AB44  -表首+rem
+    # 两个函数各自的跳表顺序不同（cos 在 0x45AC24、sin 在 0x45AB6C）：
+    #   cos: [+base+rem, -镜像, -base+rem, +镜像]
+    #   sin: [+base+rem, +镜像, -base+rem, -镜像]
+    if which == "cos":
+        neg = (1, -1, -1, 1)
     else:
-        v = -int(tab[899 - rem])               # 0x45AC0F / 0x45AB50  -镜像
+        neg = (1, 1, -1, -1)
+    mirror = (0, 1, 0, 1)
+    if mirror[idx]:
+        v = neg[idx] * int(tab[899 - rem])
+    else:
+        v = neg[idx] * int(tab[rem])
     if arg < 0:                                # 0x45AB63 test edi,edi / 0x45AB69 neg eax
         v = -v
     return v
