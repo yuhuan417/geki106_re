@@ -30,6 +30,26 @@
 - 大件不入库（`.gitignore`）：`remake/godot/assets/`（252MB 编译产物）、`remake/godot/.godot/`（导入缓存）、
   `.godot_home/`、`__pycache__/`。需要时用 `python3 remake/build_assets.py` 重建。
 
+### 冻结区：页1/2/3/13（用户明确要求，2026-10-29 起）
+
+页1/2/3/13 的视觉已定案，**后续任何改动都不得破坏它们**（它们和页4 共享
+`Layers.load` / `draw()` 合成顺序 / 色键 / 表面尺寸等代码，极易被顺手改坏）。
+
+规矩：
+
+- 动 `remake/pygame/geki.py` 的**共享**部分（`Layers.*`、`draw()`、`present()`、
+  `begin_frame()`、`Canvas.*`）之前，先想清楚对页1/2/3/13 的影响。
+- 每次提交前跑护栏：
+  `python3 remake/regress_pages.py` —— 16 张金标截图 sha256 逐一比对，不一致就 exit 1
+  并列出"页X@fN 期望/实得"。
+- 只有在**确认页1/2/3/13 视觉确实变好**时才重打金标：`python3 remake/regress_pages.py --update`，
+  并在提交信息里写明为什么允许它们变化。
+- 金标 = `remake/golden_pages.json`（页1: f30/60/120/240/290；页2: f20/60/470/600/780；
+  页3: f60/120/240；页13: f60/120/240）。
+
+已经踩过的三个坑（都属"共享状态被顺手改坏"）见 §16.333/§16.334/§16.335：
+整屏填充盖掉本帧文字、`Layer` 重建丢色键、`Layer` 重建丢表面尺寸。
+
 ## 文档地图
 
 | 文件 | 内容 | 地位 |
