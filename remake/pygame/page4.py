@@ -607,6 +607,55 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
 _P4TAB = {}
 
 
+def p4_hud_keys(self):
+    """`0x4993C4` 全局键表（256 个 dword，`build_p4_hudkeys.py` 导出）。
+
+    每项是「高位标志 + 低位字符码」的打包值（低位 0x41='A'、0x4F='O'、0x25='%' …），
+    即 HUD 文本/字形描述表。
+    """
+    tab = getattr(self, "_p4_hudkeys", None)
+    if tab is None:
+        try:
+            import json
+            import pathlib
+            f = pathlib.Path(__file__).resolve().parent.parent / "p4_hudkeys.json"
+            tab = json.loads(f.read_text(encoding="utf-8"))["keys"]
+            self._p4_hudkeys = tab
+        except Exception:
+            return None
+    return tab
+
+
+def p4_hud_get(self, key: int):
+    """`0x45EF50`：HUD 键 → 描述字（None 表示该键不产出值）。
+
+    ```
+    0x45EF56  ecx = [h+0xEC]                     ; 按 kind 的表
+    0x45EF5C  if (ecx == 0) → 直接返回
+    0x45EF64  if (key == 0x28000015) → 直接返回   ; 该键被显式排除
+    0x45EF6D  if ((key & 0xFF000000) == 0x21000000)
+    0x45EF84      val = dword[0x4993C4 + (key & 0xFF)*4]   ; 全局表
+    0x45EF94  else val = dword[ecx + (key & 0xFF)*4]        ; 按 kind 表
+    0x45EF9D  0x4020D6→0x45DFB0(&out, val)                  ; 转换（待解）
+    0x45EFA9  if (key & 4) → 跳过写回
+    0x45EFBA  0x401451→0x45E670(h, &out, 1, 0, 0)           ; 写回（待解）
+    ```
+
+    本函数只做「选表 + 取第 `key & 0xFF` 项」（0x45EF50 的取值段）。
+    """
+    h = getattr(self, "p4_hud", None)
+    if h is None:
+        return None
+    if h.g32(0xEC) == 0 or key == 0x28000015:   # 0x45EF5C / 0x45EF64
+        return None
+    idx = key & 0xFF
+    if (key & 0xFF000000) == 0x21000000:        # 0x45EF73
+        tab = p4_hud_keys(self)
+        return None if tab is None else tab[idx]
+    vals = getattr(self, "_p4_hud_kindvals", None)   # 0x45EF94 的按 kind 表
+    return None if not vals else vals[idx]
+
+
 def p4_tables():
     """按 `0x45A7E7`/`0x45A82E`/`0x45A863` 的填表代码生成的定点表（`build_p4_tables.py`）。"""
     if not _P4TAB:
