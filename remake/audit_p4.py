@@ -1115,6 +1115,23 @@ def main():
           "def p4_45f570(" in _src and "def p4_45f660(" in _src
           and "self.p4_45f570()" in _src, "")
 
+    # ---- §16.198 0x460C00 死亡链（未落地，防止误登记） ----
+    _c0 = img[0x460C00 - ib:0x460D84 - ib]
+    check("0x460C00 尚未登记进 P4_BEH（未落地就不许登记）",
+          0x460C00 not in page4.P4_BEH, "")
+    check("0x460C00 栈帧 sub esp,0x44 且以 ret 收尾（0x460D83）",
+          img[0x460C00 - ib:0x460C06 - ib] == bytes([0x66, 0xA1, 0xB0, 0xCC, 0x56, 0x00])
+          and img[0x460D83 - ib] == 0xC3, img[0x460C00 - ib:0x460C06 - ib].hex())
+    check("0x460C00 生成的五个类型立即数齐备（0x41000001 push / 0x4100000E·0x41000004 mov / 0x51000002 push）",
+          bytes([0x68, 0x01, 0x00, 0x00, 0x41]) in _c0
+          and bytes([0xC7, 0x44, 0x24, 0x1C, 0x0E, 0x00, 0x00, 0x41]) in _c0
+          and bytes([0xC7, 0x44, 0x24, 0x1C, 0x04, 0x00, 0x00, 0x41]) in _c0
+          and bytes([0x68, 0x02, 0x00, 0x00, 0x51]) in _c0, "")
+    check("0x460C00 的抖动是 (rand&0x7F)−0x3F（83 E0 7F / 83 E8 3F 各两次）",
+          _c0.count(bytes([0x83, 0xE0, 0x7F])) == 2
+          and _c0.count(bytes([0x83, 0xE8, 0x3F])) == 2,
+          f"{_c0.count(bytes([0x83, 0xE0, 0x7F]))}/{_c0.count(bytes([0x83, 0xE8, 0x3F]))}")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
