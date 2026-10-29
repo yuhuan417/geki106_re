@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import math
 import os
@@ -3179,6 +3180,7 @@ class Page4Mixin:
                   f"vmframe={self.vm.frame} "
                   f"zero_beh_types={sorted({e.g32(0x14) for e in self.p4_q43c if e.g32(0x40) == 0})[:8]} "
                   f"q4cc={[(hex(e.g32(0x14)), e.beh, e.node.dst if e.node else None) for e in self._p4_q('ui4cc') if hasattr(e,'tick')][:6]} "
+                  f"q4cc_types={dict(collections.Counter(hex(e.g32(0x14)) for e in self._p4_q('ui4cc') if hasattr(e,'tick')))} "
                   f"miss={(getattr(self, 'p4_beh_missing_types', {}) and
                             [(hex(b), hex(t), c) for (b, t), c in sorted(self.p4_beh_missing_types.items(),
                              key=lambda kv: -kv[1])[:3]]) or []}",
@@ -3479,6 +3481,12 @@ class Page4Mixin:
     def p4_spawn42(self, x: int, y: int, typ: int, prm: int) -> None:
         """`0x43A3C0(0x4AD4CC, &rec)` → ctor `0x4355E0` 的 0x42 分支。"""
         e = Ent42(int(x), int(y), int(typ), int(prm), owner=self)
+        if os.environ.get("P4_SPAWNTRACE"):
+            c = self.p4_stat.setdefault("spawn_counts", {})
+            c[hex(typ)] = c.get(hex(typ), 0) + 1
+            if self.p4_frames % 60 == 0 or c[hex(typ)] <= 3:
+                print(f"[spawn] f={self.p4_frames} type={hex(typ)} prm={prm} "
+                      f"at=({x},{y}) total={c[hex(typ)]}", flush=True)
         self._p4_q("ui4cc").append(e)
 
     # ---- 0x51 族（死亡→继续→结算演出）：0x44B140 → 0x449150 → 0x422EF0 ----
@@ -6044,6 +6052,9 @@ class Page4Mixin:
                 slot.flags = flags & 0xFFFFFFFF
                 slot.rem = rep                           # +0x2A88
                 slot.rates = list(vals)                  # +0x80
+                if _os.environ.get("P4_OP7TRACE"):
+                    print(f"[op7] ch={ch} flags=0x{flags:X} rep={rep} "
+                          f"rates[0:8]={vals[0:8]} rates[10:16]={vals[10:16]}", flush=True)
 
     def _bg_dispatch(self, slot) -> None:
         """`0x456EB0`：按 `[+0x2A8C]` 的 5 个位分别调 5 个分支。"""

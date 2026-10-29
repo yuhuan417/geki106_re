@@ -1,0 +1,60 @@
+; func 0x4358b4  (57 insns)
+
+0x004358b4  mov     eax, dword ptr [esi + 0x38]
+0x004358b7  mov     dword ptr [esi + 0x40], 0x401ce9
+0x004358be  mov     dword ptr [esi + 0x1c], ebx
+0x004358c1  mov     dword ptr [esi + 0x20], ebx
+0x004358c4  push    0xc000
+0x004358c9  mov     ecx, 0x4ab5b0
+0x004358ce  mov     dword ptr [eax], ebx
+0x004358d0  call    0x4019c9   ; → 0x45afc0
+0x004358d5  lea     ecx, [eax + eax*2]
+0x004358d8  shl     ecx, 4
+0x004358db  add     ecx, 0x2f
+0x004358de  push    ecx
+0x004358df  push    0x2f
+0x004358e1  push    0xc000
+0x004358e6  mov     ecx, 0x4ab5b0
+0x004358eb  call    0x4019c9   ; → 0x45afc0
+0x004358f0  lea     edx, [eax + eax*2]
+0x004358f3  lea     eax, [esp + 0xb0]
+0x004358fa  shl     edx, 4
+0x004358fd  push    edx
+0x004358fe  push    ebx
+0x004358ff  push    eax
+0x00435900  call    0x40238d   ; → 0x45a750
+0x00435905  mov     edi, eax
+0x00435907  mov     ebx, dword ptr [esi + 0x38]
+0x0043590a  add     ebx, 4
+0x0043590d  mov     eax, dword ptr [edi]
+0x0043590f  mov     ecx, dword ptr [edi + 4]
+0x00435912  mov     edx, dword ptr [edi + 8]
+0x00435915  mov     edi, dword ptr [edi + 0xc]
+0x00435918  mov     dword ptr [ebx], eax
+0x0043591a  mov     dword ptr [ebx + 4], ecx
+0x0043591d  mov     dword ptr [ebx + 8], edx
+0x00435920  mov     dword ptr [ebx + 0xc], edi
+0x00435923  mov     ecx, dword ptr [esi + 8]
+0x00435926  mov     edx, dword ptr [esi + 4]
+0x00435929  sub     ecx, 0x18
+0x0043592c  sub     edx, 0x18
+0x0043592f  push    ecx
+0x00435930  push    edx
+0x00435931  jmp     0x43703d
+loc_43703d:
+0x0043703d  call    0x401753   ; → 0x45a690
+0x00437042  add     esp, 0x1c
+0x00437045  mov     ecx, dword ptr [esi + 0x38]
+0x00437048  mov     dword ptr [ecx + 0x14], eax
+0x0043704b  mov     dword ptr [ecx + 0x18], edx
+0x0043704e  mov     edx, dword ptr [esi + 0x38]
+0x00437051  mov     byte ptr [edx + 0x1c], 1
+0x00437055  mov     ecx, dword ptr [esp + 0x3a8]
+0x0043705c  mov     eax, esi
+0x0043705e  pop     edi
+0x0043705f  pop     esi
+0x00437060  pop     ebp
+0x00437061  pop     ebx
+0x00437062  mov     dword ptr fs:[0], ecx
+0x00437069  add     esp, 0x3a4
+0x0043706f  ret     4

@@ -2747,8 +2747,8 @@ def main():
         def __init__(self):
             self.pushed = None
             self.scrolled = None
-        def band_push(self, table, count, start, scroll):
-            self.pushed = (list(table), count, start, scroll)
+        def band_push(self, table, count, start, scroll, overflow=b""):
+            self.pushed = (list(table), count, start, scroll, overflow)
         def band_scroll_for(self, speed, frames):
             self.scrolled = (speed, frames)
     _bop9 = _BO()
