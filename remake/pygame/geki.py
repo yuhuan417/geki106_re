@@ -880,6 +880,26 @@ class UiEntity:
     bgc: int = -1
     aux: int = 0
     texts: list = field(default_factory=list)
+    # 字节视图：页4 有几个队列（如 0x4AD52C）装的是字节模型实体，
+    # 行为函数按 [+0x1C] 之类的偏移读写，所以这里给一份 0x5C 的 raw。
+    raw: bytearray = field(default_factory=lambda: bytearray(0x5C))
+
+    def g32(self, off: int) -> int:
+        return int.from_bytes(self.raw[off:off + 4], "little")
+
+    def s32(self, off: int) -> int:
+        v = self.g32(off)
+        return v - 0x100000000 if v & 0x80000000 else v
+
+    def d32(self, off: int, v: int) -> None:
+        self.raw[off:off + 4] = (int(v) & 0xFFFFFFFF).to_bytes(4, "little")
+
+    def g16(self, off: int) -> int:
+        return self.raw[off] | (self.raw[off + 1] << 8)
+
+    def d16(self, off: int, v: int) -> None:
+        self.raw[off] = int(v) & 0xFF
+        self.raw[off + 1] = (int(v) >> 8) & 0xFF
 
 
 # ---------------------------------------------------------------------------- 页机
@@ -1676,6 +1696,12 @@ class Pages(Page4Mixin):
     def tick_ui(self, queue: list) -> None:
         for e in queue:
             if not e.alive:
+                continue
+            if hasattr(e, "m"):                       # 页4：字节模型实体（0x5C，走 [+0x40] 行为）
+                self.p4_call_behaviour(e)
+                continue
+            if callable(e.beh):                       # 页4：行为直接是函数对象
+                e.alive = bool(e.beh(self, e))
                 continue
             if e.beh == "open_timeline":
                 self._open_timeline(e)

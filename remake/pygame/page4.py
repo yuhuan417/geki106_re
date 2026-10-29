@@ -367,6 +367,22 @@ class Ent:
 
     SZ = 0x5C
 
+    # 队列渲染/文字路径用的是 UiEntity 的接口名，这里给字节模型实体补两个别名
+    texts: tuple = ()
+
+    @property
+    def disp(self):
+        return self.node
+
+    @property
+    def alive(self) -> bool:
+        """`[+0x34]` 存活字节（`0x430486` 置 1）；队列 tick 用统一的 `.alive` 接口。"""
+        return self.m[0x34] != 0
+
+    @alive.setter
+    def alive(self, v) -> None:
+        self.m[0x34] = 1 if v else 0
+
     def g16(self, off: int) -> int:
         return self.m[off] | (self.m[off + 1] << 8)
 
@@ -2544,6 +2560,13 @@ class Page4Mixin:
               f"intro_gate={self.p4_intro_gate}", flush=True)
 
 
+        # 0x454A6A：`0x454950` 末尾把开场状态机实体生成到 **0x4AD52C**（ui52c）。
+        # 行为 = `0x4435C0`（ctor `0x43D791` 直接写 `[+0x40] = 0x4020EF`）。
+        from geki import UiEntity as _Ui       # 延迟导入：geki 反过来 import 本模块
+        _intro = _Ui(type_word=0x6B000001)
+        _intro.beh = _beh_6B000001
+        self.ui52c.append(_intro)
+
     def p4_write_state(self, b: bytearray) -> None:
         """`0x450A3D..0x450A83`：参数块 → 状态字四个位段。
 
@@ -2616,6 +2639,7 @@ class Page4Mixin:
             print(f"[p4diag] f={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)} "
                   f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
                   f"ent0={[(hex(e.g32(0x14)), e.node.layer, e.node.rect) for e in self.p4_q43c[:3] if e.node]} "
+                  f"actor={[(hex(x.g32(0x14)), x.s32(0x04), x.s32(0x08)) for x in self.actorq]} "
                   f"other={ {k: len(v) for k, v in getattr(self, 'p4_other', {}).items()} } "
                   f"chain={getattr(self.vm, 'chain', None)} q={self.vm.queue[:6]} "
                   f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
@@ -5116,6 +5140,18 @@ class Page4Mixin:
                        ox + dx, oy + dy, v)            # 0x42C6A0 / 0x42C75C
 
 
+    def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,
+                     beh: int | None = None):
+        """把字节模型 `Ent` 放进**任意**队列（`0x448FF0` 这类"进队列"入口的统一写法）。
+
+        与 `_p4_ent43c` 的区别只是队列可指定：自机要进 **0x4AD40C**（`actorq`），不是 0x4AD43C。
+        """
+        e = Ent(x, y, typ, a3)
+        if beh is not None:
+            e.beh = beh
+        queue.append(e)
+        return e
+
     def _p4_443606(self, e, ebp: int) -> bool:
         """`0x443606`：状态 0 —— 计数 0 时建三块 UI、0xF0 时等按键并生成自机。
 
@@ -5164,7 +5200,9 @@ class Page4Mixin:
             clear = getattr(q, "clear", None)
             if clear is not None:
                 clear()                                    # 0x44371F
-            self.spawn(self._p4_q("ui40c"), 0x0B000001, 0xC8, 0xC8, 3)   # 0x443767
+            # 自机的 ctor 把 `[+0x40]` 写成 thunk `0x401E06` → `0x448C70`（见 §10.3）
+            self._p4_ent_into(self.actorq, 0x0B000001, 0xC8, 0xC8, 3,
+                              beh=0x448C70)                            # 0x448FF0(0x4AD40C)
             return True
         if self.p4_btn1_edge():                            # 0x443779
             self.flags.set(0x200)
