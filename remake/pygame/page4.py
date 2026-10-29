@@ -1195,6 +1195,73 @@ class Page4Mixin:
         x = d * 0x18                                      # 0x460AA9
         return (x, 0x150, x + 0x17, 0x167)
 
+    class HudObj:
+        """HUD 对象：`0x45EF10` 要写 `+0xEC`，比 0x5C 的实体大，故独立缓冲。"""
+
+        def __init__(self) -> None:
+            self.buf = bytearray(0x100)
+
+        def d32(self, off: int, v: int) -> None:
+            self.buf[off:off + 4] = (v & 0xFFFFFFFF).to_bytes(4, "little")
+
+        def g32(self, off: int) -> int:
+            return int.from_bytes(self.buf[off:off + 4], "little")
+
+        def s32(self, off: int) -> int:
+            v = self.g32(off)
+            return v - 0x100000000 if v >= 0x80000000 else v
+
+        def s16(self, off: int) -> int:
+            v = int.from_bytes(self.buf[off:off + 2], "little")
+            return v - 0x10000 if v >= 0x8000 else v
+
+    # HUD 对象 `0x4A4B64` 的种类表（`0x45EF2C mov edx,[eax*4+0x4A4B64]`）
+    P4_HUD_KIND = (0x0, 0x4993CC, 0x499438, 0x499480, 0x4994B0,
+                   0x499514, 0x49955C, 0x4995C0)
+
+    def p4_hud_ctor(self, h, kind: int) -> None:
+        """`0x45EF10(ret 4)`：HUD 对象构造。
+
+        ```
+        0x45EF10 edx = ecx+0x14; eax = 0
+        0x45EF15 [edx..edx+0xC] 清 4 个 dword
+        0x45EF20 ax = arg(word); [ecx+0x24] = ax
+        0x45EF2C edx = [eax*4 + 0x4A4B64]     ; 种类表
+        0x45EF33 [ecx+0xEC] = edx
+        ```
+        """
+        if isinstance(h, int) or h is None:
+            h = self.HudObj()
+        for i in range(4):
+            h.d32(0x14 + 4 * i, 0)
+        h.d32(0x24, kind & 0xFFFF)                       # 0x45EF25
+        h.d32(0xEC, self.P4_HUD_KIND[kind & 0xFF] if (kind & 0xFF) < len(self.P4_HUD_KIND) else 0)
+        return h
+
+    def p4_hud_draw(self, h) -> None:
+        """`0x45EED0`：HUD 每帧入口。
+
+        ```
+        0x45EED3 if ([h+0xE1]) { 0x401203→0x45E020(h); [h+0xE1] = 0 }
+        0x45EEEB 0x401695→0x45E340(h)
+        0x45EEF3 0x4011FE→0x45A170(h+0x64)      ; 渲染显示表
+        ```
+        `0x45E020`（一次性重建）与 `0x45E340`（数字排版）尚未逐条展开，先按序调用占位统计。
+        """
+        if h.g32(0xE1):
+            self.p4_hud_rebuild(h)                   # 0x45E020
+            h.d32(0xE1, 0)
+        self.p4_hud_layout(h)                        # 0x45E340
+        self.p4_stat[0x45A170] = self.p4_stat.get(0x45A170, 0) + 1   # 0x45EEF3 渲染 h+0x64
+
+    def p4_hud_rebuild(self, h) -> None:
+        """`0x45E020`：HUD 一次性重建（待展开）。"""
+        self.p4_stat[0x45E020] = self.p4_stat.get(0x45E020, 0) + 1
+
+    def p4_hud_layout(self, h) -> None:
+        """`0x45E340`：HUD 数字排版（待展开）。"""
+        self.p4_stat[0x45E340] = self.p4_stat.get(0x45E340, 0) + 1
+
     def p4_hud_update(self, e) -> None:
         """`0x460A90`：把数字矩形写进显示节点 `[+0x2C]+4`，再 `0x4011FE` 推进渲染表。"""
         if e.node is not None:
