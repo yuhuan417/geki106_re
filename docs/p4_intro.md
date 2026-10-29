@@ -497,3 +497,20 @@ type 1/5 的 16 个行为尚未实现（下一步）。
 0x446CB0 if ([ebx+0x20] == 0) → 0x446CF6
 0x446CB7 al = byte[0x4AB599]        ; 输入记录 +5
 ```
+
+已读定的第二段（`0x446AD0`，type 5 / idx 5 —— "跟随光标"）：
+
+```
+0x446AD0 esi = this
+0x446AD3 0x446600(this) ; if (al == 0) return 0
+0x446ADE eax = [0x4AB59C]   ; 输入记录 +8  = 指针 x
+0x446AE3 [esi+4] = eax
+0x446AE6 ecx = [0x4AB5A0]   ; 输入记录 +0xC = 指针 y
+0x446AEE [esi+8] = ecx
+0x446AF1 push y; push x; call 0x45A690        ; 恒等（原样返回）
+0x446AF8 [0x56CC8C] = x ; [0x56CC90] = y      ; 光标位置全局
+0x446B03 edx = [esi+4]-0x18 ; ecx = [esi+8]-0x18
+0x446B11 0x45A690 → node 宽 = x-0x18、高 = y-0x18
+0x446B1C [node+0x14] = w ; [node+0x18] = h
+0x446B24 return ([esi+0x18] != 0)
+```
