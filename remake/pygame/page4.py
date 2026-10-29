@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import os
+
 _P4_BLOCK: dict | None = None
 
 # 0x450BBD..0x450D59：`0x40127B` = `0x450140(0x4AB4B0, slot, wav)` 共 21 条（**音效槽装载**，
@@ -2447,6 +2449,13 @@ class Page4Mixin:
 
     # ---- 0x451110 -------------------------------------------------------
     def p4_step(self) -> bool:
+        if os.environ.get("P4_DIAG") and self.p4_frames % 120 == 0:
+            print(f"[p4diag] f={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)} "
+                  f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
+                  f"other={ {k: len(v) for k, v in getattr(self, 'p4_other', {}).items()} } "
+                  f"chain={getattr(self.vm, 'chain', None)} q={self.vm.queue[:6]} "
+                  f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
+                  f"vmframe={self.vm.frame}", flush=True)
         """页4 每帧（S1..S25）。返回 `0x45AFF0(0x4AB5C0,0)`：旗标空 ⇒ 继续。"""
         skip = False
         # S1-S2（0x45112B `eax=[App+0x2C4]`；`je 0x451156` 时走"常速"）：只有 [App+0x2C4]!=0
@@ -2531,6 +2540,12 @@ class Page4Mixin:
     # ---- 0x451C50 -------------------------------------------------------
     def p4_finish(self) -> None:
         """页收尾：三条快退旗标直接返回；否则存盘 → 填 0xB4 + present ×2 → 释放层 → 页号映射。"""
+        if os.environ.get("P4_DIAG"):
+            print(f"[p4diag] frames={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)} "
+                  f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
+                  f"other_ops={ {k: len(v) for k, v in getattr(self, 'p4_other', {}).items()} } "
+                  f"vm_chain={getattr(self.vm, 'chain', None)} vm_queue={self.vm.queue[:6]}",
+                  flush=True)
         if self.audio is not None:
             self.audio.stop_bgm()
         if not self.timer.kill():                     # 0x451C62 0x45A510
