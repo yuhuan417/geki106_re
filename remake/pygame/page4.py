@@ -3018,6 +3018,10 @@ class Page4Mixin:
         o.d16(0x0A + n * 2, 0)                          # 0x460315
         self.p4_4600f0(o)                               # 0x46031C
 
+    def p4_460800(self, o) -> int:
+        """`0x460800(obj)` = `mov ax,[ecx+0x2A]; ret` —— 取当前字形队列 id（`0x4602D0` 存的那个）。"""
+        return o.g16(0x2A)
+
     def p4_4600f0(self, o) -> bool:
         """`0x4600F0(this)`：取走队首字形 id、左移字符串、并把该资源的位图拷进 `[+0x2C]`。
 
