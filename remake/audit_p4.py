@@ -1604,6 +1604,23 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _setf = page4.Page4Mixin.p4_45b0e0_set
+    _xorf = page4.Page4Mixin.p4_45af90_xor
+    _bd = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45AF90 - ib:0x45AFA2 - ib], 0x45AF90)}
+    _bs = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45B0E0 - ib:0x45B112 - ib], 0x45B0E0)}
+    check("位域 API 补全：0x45AF90 = word^=mask(ret 4)、0x45B0E0 = "
+          "word=(word&~mask)|((value<<低位序号)&mask)(ret 8)",
+          _xorf(0, 0x40) == 0x40 and _xorf(0x40, 0x40) == 0
+          and _setf(0, 0xFE000000, 5) == 5 << 25
+          and _setf(0xABCD, 0x18, 3) == 0xABDD
+          and _setf(0xFFFFFFFF, 0x18, 0) == 0xFFFFFFE7
+          and _bd.get(0x45AF97) == ("xor", "edx, eax")
+          and _bd.get(0x45AF9E) == ("ret", "4")
+          and _bs.get(0x45B102) == ("and", "edx, edi")
+          and _bs.get(0x45B106) == ("or", "edx, eax")
+          and _bs.get(0x45B10D) == ("ret", "8"), "")
     _step = page4.Page4Mixin.p4_4590_step
     _dec = {i.address: (i.mnemonic, i.op_str)
             for i in _mdk.disasm(img[0x4590DC - ib:0x4591E6 - ib], 0x4590DC)}

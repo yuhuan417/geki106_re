@@ -4997,6 +4997,37 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_45b0e0_set(word: int, mask: int, value: int) -> int:
+        """`0x45B0E0(obj, mask, value)`：**位域写入**（`0x45AFC0` 的写入对应件）。
+
+        ```
+        45B0E4 edx = 1 ; esi = value
+        45B0EE 循环：while !(mask & edx): edx <<= 1 ; esi <<= 1
+                 ⇒ 把 value 左移到 mask 的最低位，等价于 value << 最低位序号
+        45B0FB edi = [ecx+4]
+        45B100 edx = ~mask & edi          ; 清掉掩码内原有的位
+        45B104 eax = mask & (esi 已移位)  ; 新值对齐到掩码
+        45B106 word = edx | eax
+        45B10D ret 8                      ; 2 个栈参数
+        ```
+
+        ⇒ `word' = (word & ~mask) | ((value << lowest_bit(mask)) & mask)`。
+        """
+        if mask == 0:
+            return word
+        sh = (mask & -mask).bit_length() - 1              # mask 最低位序号
+        return ((word & ~mask) | ((value << sh) & mask)) & 0xFFFFFFFF
+
+    @staticmethod
+    def p4_45af90_xor(word: int, mask: int) -> int:
+        """`0x45AF90(obj, mask)`：`word ^= mask`，**返回新值**（`ret 4`）。
+
+        与 `0x45AF30`(`|=`)、`0x45AF60`(`&= ~`)、`0x45AFF0`(测)、`0x45B030`(全清) 并列，
+        是这套位域 API 里的**异或切换**；页4 的键 17/18/19/24 都用它切换一个开关位。
+        """
+        return (word ^ mask) & 0xFFFFFFFF
+
+    @staticmethod
     def p4_4590_step(v: int, delta: int) -> int:
         """`0x4590DC`/`0x45911F`/`0x45915E`/`0x4591E0`：对比/亮度字段的 ±10 循环步进。
 
