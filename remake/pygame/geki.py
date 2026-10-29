@@ -3556,8 +3556,14 @@ class Pages(Page4Mixin):
                 c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
         if getattr(self, "p4_bg", None):
             self.p4_bg_draw()                           # 0x458EF5 → 0x457CB0（12 槽，最先绘制）
+        # 0x458EF0 的六条队列顺序：ui4cc → ui43c → ui49c → 0x4AD40C → ui46c → ui4fc
+        if getattr(self, "p4_q4cc", None) is None:
+            self.p4_q4cc = self._p4_q("ui4cc")
+        self._render_queue(c, self.p4_q4cc)             # 0x4AD4CC 页4 4CC 队列
         if getattr(self, "p4_q43c", None):
             self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
+        self._render_queue(c, self._p4_q("ui49c"))      # 0x4AD49C
+        self._render_queue(c, self._p4_q("ui4fc"))      # 0x4AD4FC
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
             self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）
