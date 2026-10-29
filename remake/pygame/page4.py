@@ -1097,6 +1097,10 @@ class Page4Mixin:
 
     # ---- 自机输入/队列辅助（0x448C70 用）----------------------------------
     # ---- 碰撞（0x451461..0x4514A6 三组）------------------------------
+    def p4_sys_bits(self) -> int:
+        """`0x56CCB8`：页4 系统状态位图（`0x43BFD4` 用它做碰撞总开关）。"""
+        return int(getattr(self, "_p4_sys", 0))
+
     def p4_hit_test(self, e, x: int, y: int, r: int) -> bool:
         """`0x4306C0(ent, x, y, r)`：菱形（L1）判定。
 
@@ -1121,7 +1125,7 @@ class Page4Mixin:
         """`0x43BFD0(qa, qb)`：外层取 arg2 的 `[+0x28]` 链表、内层取 arg1 的，
         对每对 (a,b) 做 `0x4306C0(b, a[4], a[8], a[0xC])`，命中则 `0x43C170(this, b, a)`。"""
         hits = 0
-        if self.p4_key_test(2):                       # 0x43BFD4 0x45AFF0(0x56CCB8,2)
+        if self.p4_sys_bits() & 2:                    # 0x43BFD4 0x45AFF0(0x56CCB8,2)
             return 0
         for a in list(qa):
             if not a.g32(0x10):
@@ -1212,17 +1216,30 @@ class Page4Mixin:
         """`0x44E470`（钳位后回写指针）。"""
         self.inp.x, self.inp.y = int(x), int(y)
 
+    def p4_in_bits(self) -> int:
+        """`0x56CCC0`：页4 输入状态位图（**与 `0x4AB5B0` 键位管理器是两个对象**）。
+
+        `0x45AFF0(0x56CCC0, mask)` 才是"攻击/暂停/无敌"这类运行期位；`0x4AB5B0` 存的是模式选择
+        （bit0 鍛錬 / bit1 操作器），两者的写入点完全不同（见 `0x45060A` vs `0x451423`）。
+        """
+        if not hasattr(self, "_p4_in"):
+            self._p4_in = 0
+        return self._p4_in
+
+    def p4_in_set(self, bits: int) -> None:
+        self._p4_in = bits & 0xFFFFFFFF
+
     def p4_key_test(self, mask: int) -> bool:
-        """`0x45AFF0(0x56CCC0, mask)`：测输入旗标位。"""
-        return bool(self.keys.test(mask))
+        """`0x45AFF0(0x56CCC0, mask)`：测输入状态位。"""
+        return bool(self.p4_in_bits() & mask)
 
     def p4_key_reset(self, mask: int) -> None:
         """`0x45AF60(0x56CCC0, mask)`：清位。"""
-        self.keys.bits &= ~mask
+        self.p4_in_set(self.p4_in_bits() & ~mask)
 
     def p4_key_raw_set(self, mask: int) -> None:
         """`0x45AF30(0x56CCC0, mask)`：置位。"""
-        self.keys.bits |= mask
+        self.p4_in_set(self.p4_in_bits() | mask)
 
     def p4_player_y(self) -> int:
         """`[0x56CC90]`：自机缓存 y（`0x448D2D` 写）。"""
@@ -1231,7 +1248,7 @@ class Page4Mixin:
 
     def p4_btn_attack(self) -> bool:
         """`[0x4AB594]`：btn0（C/左键=攻击）当前状态。"""
-        return bool(self.keys.test(1))
+        return bool(self.p4_in_bits() & 1)
 
     def p4_anim_step(self, e) -> None:
         """`0x45A790(节点+4, -0x20, 0, -0x20, 0)`：按 16 帧周期切自机动画帧。"""
