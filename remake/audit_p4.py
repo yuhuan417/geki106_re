@@ -2608,14 +2608,81 @@ def main():
           and _a5a and _a5b and not _a5c, "")
     _g51.p4_stat[0x4CD4A0 + 0x04] = 1000
     _g51.p4_stat[0x4CD4A0 + 0x14] = 0
-    _g51.p4_stat[0x4CD4A0 + 0x18] = 0
+    _g51.p4_stat[0x4CD4A0 + 0x18] = 100
     _g51.p4_stat[0x4CD4A0 + 0x20] = 200
-    _g51.p4_stat[0x4CD4A0 + 0x1C] = 100
+    _g51.p4_stat[0x4CD4A0 + 0x1C] = 50
     _g51.p4_45f710()
-    check("0x45F710：TS/TA 比率（0x45F9D0/0x45FA00 = 0x45E7A0(&0xFFFF)）各 ×200 加进 "
-          "[0x4CD4A0+4]/[+0x14] 并置 byte[+0xE1]、调 0x45E7F0",
-          _g51.p4_stat.get("45e7f0_calls", 0) >= 1
-          and _g51.p4_stat[0x4CD4A0 + 0xE1] == 1, "")
+    check("0x45F710：TS/TA 比率（0x45F9D0 = 1000*[+0x18]/[+0x20]、0x45FA00 = 1000*[+0x1C]/[+0x18]，"
+          "&0xFFFF）各 ×200 加进 [0x4CD4A0+4]/[+0x14] 并置 byte[+0xE1]、调 0x45E7F0(0)",
+          _g51.p4_stat[0x4CD4A0 + 0x04] == 1000 + 200 * 500 + 200 * 500
+          and _g51.p4_stat[0x4CD4A0 + 0x14] == 200 * 500 + 200 * 500
+          and _g51.p4_stat[0x4CD4A0 + 0xE1] == 1
+          and "---Stage0---" in _g51.p4_stat["result_txt"], "")
+    _g51.p4_stat[0x4CD4A0 + 0x50] = 12
+    _g51.p4_stat[0x4CD4A0 + 0x54] = 3
+    _g51.p4_stat[0x4CD4A0 + 0x58] = 7
+    _g51.p4_stat[0x4CD4A0 + 0x5A] = 9
+    _g51.p4_stat[0x4CD4A0 + 0x5C] = 150
+    _g51.p4_stat[0x4CD4A0 + 0x5E] = 11
+    _g51.p4_stat[0x4CD4A0 + 0x60] = 4
+    _g51.p4_stat[0x4CD4A0 + 0x30] = 25
+    _g51.p4_stat[0x4CD4A0 + 0x24] = 5
+    _g51.p4_stat[0x56CCB0] = 5
+    _g51.p4_stat[0x4CD590 + 0x34] = 2
+    _g51.p4_stat[0x4CD590 + 0x40] = 1
+    _t_pre = _g51.p4_stat["result_txt"]
+    _g51.p4_45e7f0(0)
+    _r0 = _g51.p4_stat["result_txt"][len(_t_pre):].split("\r\n")
+    _t_mid = _g51.p4_stat["result_txt"]
+    _g51.p4_45e7f0(1)
+    _r1x = _g51.p4_stat["result_txt"][len(_t_mid):].split("\r\n")
+    check("0x45E7F0 result.txt 报告：Stage 段（edi=+0x50/ebp=+0x14，行序与格式串原文一致，"
+          "Score %9d0 的字面 0 尾缀、ShootRate = 45F9D0/10）；头部升级使 Total 段 "
+          "Broken=+0x3C(+0x50 已并入)、尾清 +0x50..+0x60、MissCount/Continue 按 variant 取源",
+          _r0[0:13] == ["---Stage5---",
+                        "BrokenEnemy              %4d" % 12,
+                        "BrokenEnemy(Laser)       %4d" % 3,
+                        "Capture                   %3d" % 7,
+                        "MaxLaserHit               %3d" % 9,
+                        "MaxRate                  x%3d" % 150,
+                        "SHOU                      %3d" % 11,
+                        "KUN                       %3d" % 4,
+                        "SHOUBonus             %3d0000" % 25,
+                        "Score              %9d0" % 200000,
+                        "ShootRate                %4d%%" % 50,
+                        "ShootRate(Laser)         %4d%%" % 50,
+                        "Level                    %4d" % 5]
+          and _r0[13:15] == ["MissCount                 %3d" % 0,
+                             "Continue                  %3d" % 0]
+          and _r1x[0] == "---Total---"
+          and _r1x[1] == "BrokenEnemy              %4d" % 12
+          and _r1x[3] == "Capture                   %3d" % 7
+          and _r1x[9] == "Score              %9d0" % (1000 + 200 * 500 * 2)
+          and _r1x[13] == "MissCount                 %3d" % 2
+          and _g51.p4_stat[0x4CD4A0 + 0x50] == 0
+          and _g51.p4_stat[0x4CD4A0 + 0x38] == 1
+          and _g51.p4_stat[0x4CD590 + 0x38] == 0,
+          "r0=" + repr(_r0[:16]) + " r1x=" + repr(_r1x[:16]))
+    _fmts = {0x4A4D20: b"BrokenEnemy              %4d",
+             0x4A4CFC: b"BrokenEnemy(Laser)       %4d",
+             0x4A4CD8: b"Capture                   %3d",
+             0x4A4CB4: b"MaxLaserHit               %3d",
+             0x4A4C90: b"MaxRate                  x%3d",
+             0x4A4C6C: b"SHOU                      %3d",
+             0x4A4C48: b"KUN                       %3d",
+             0x4A4C24: b"SHOUBonus             %3d0000",
+             0x4A4C08: b"Score              %9d0",
+             0x4A4BE0: b"ShootRate                %4d%%",
+             0x4A4BB8: b"ShootRate(Laser)         %4d%%",
+             0x4A4B94: b"Level                    %4d",
+             0x4A4D44: b"---Stage%d---",
+             0x4A4D54: b"---Total---",
+             0x4A4D98: b"MissCount                 %3d",
+             0x4A4D74: b"Continue                  %3d",
+             0x4A4D64: b"result.txt",
+             0x4A48C0: b"\r\n"}
+    check("0x45E7F0 引用的 18 个格式串/文件名/行尾常量与映像逐字节一致",
+          all(bytes(img[va - ib:va - ib + len(t)]) == t for va, t in _fmts.items()), "")
     _gp = _G51()
     _gp.p4_423690(0xE, 0x108, 0x90)
     _gp.p4_423690(5, 0x200, 0x100)

@@ -313,6 +313,21 @@ except Exception:                                       # 文件缺失时按恒�
     P4_REMAP_A = bytes(range(256))
 
 
+def _p4_trunc10(v: int) -> int:
+    """0x45E988/0x45E9FA 的 0x66666667×sar2 魔数 = 向零截断除 10。"""
+    return v // 10 if v >= 0 else -((-v) // 10)
+
+
+def _p4_s16(v: int) -> int:
+    v &= 0xFFFF
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def _p4_s32(v: int) -> int:
+    v &= 0xFFFFFFFF
+    return v - 0x100000000 if v & 0x80000000 else v
+
+
 class BgBand:
     """背景带（`0x457540` ctor；链表 next = `[band+0x30]`）。"""
 
@@ -3551,9 +3566,11 @@ class Page4Mixin:
                               self.p4_stat.get(0x4CD4A0 + 0x20, 0)) & 0xFFFF
 
     def p4_45fa00(self) -> int:
-        """`0x45FA00`：`0x45E7A0([ecx+0x18], [ecx+0x1C]) & 0xFFFF`（TA 比率）。"""
-        return self.p4_45e7a0(self.p4_stat.get(0x4CD4A0 + 0x18, 0),
-                              self.p4_stat.get(0x4CD4A0 + 0x1C, 0)) & 0xFFFF
+        """`0x45FA00`：`0x45E7A0([ecx+0x1C], [ecx+0x18]) & 0xFFFF`（TA 比率）。
+        ★ push 序：eax=[+0x18] 先进栈、edx=[+0x1C] 后进栈 ⇒ arg1=[+0x1C]、arg2=[+0x18]
+        （§16.106：1000*[+0x1C]/[+0x18]——旧实现两参写反，本轮以映像 push 序修正）。"""
+        return self.p4_45e7a0(self.p4_stat.get(0x4CD4A0 + 0x1C, 0),
+                              self.p4_stat.get(0x4CD4A0 + 0x18, 0)) & 0xFFFF
 
     def p4_45eea0(self, n: int) -> None:
         """`0x45EEA0(obj, n)`：`[+4] += n`、`[+0x14] += n`、`byte[+0xE1] = 1`（0x4CD4A0）。"""
@@ -3579,10 +3596,121 @@ class Page4Mixin:
         self.p4_45e7f0(1)
 
     def p4_45e7f0(self, variant: int) -> None:
-        """`0x45E7F0(obj, variant)`：结算画面 HUD 缓冲重建（0x45E8AF/0x45E9C8 两布局）。
-        主体是 9 段 0x455720 数值拼串 + 0x455090 文本，属结果面板子系统，
-        本轮只登记调用次数——不臆造布局。"""
-        self.p4_stat["45e7f0_calls"] = self.p4_stat.get("45e7f0_calls", 0) + 1
+        """`0x45E7F0(obj, variant)`：**result.txt 报告**（不是屏幕 HUD——
+        0x455090 以 "result.txt" 做名字登记，0x455720 = sprintf + 追加行，0x4A48C0 = "\\r\\n"）。
+
+        头部把单关计数**升级**进累计区（每次调用都做；尾部清零使第二次调用加 0）：
+        ```
+        0x45E81D dword[ +0x3C] += [ +0x50]   BrokenEnemy
+        0x45E822 word [ +0x44] += [ +0x58]   Capture
+        0x45E826 dword[ +0x40] += [ +0x54]   BrokenEnemy(Laser)
+        0x45E843 word [ +0x46] = max([+0x46], [+0x5A])（jg = 带符号取大）MaxLaserHit
+        0x45E856 word [ +0x48] = max([+0x48], [+0x5C])                    MaxRate
+        0x45E85E word [ +0x4C] += [ +0x5C]、[ +0x4A] += [ +0x5E]          SHOU/KUN
+        ```
+        打印基址：Total → edi = +0x3C / ebp = +0x4；Stage → edi = +0x50 / ebp = +0x14
+        （`0x45E8AA lea ebp,[esi+4]`、`0x45E8C2 lea ebp,[esi+0x14]`、`0x45E8C5 mov edi,ebx`）。
+        行序（格式串原文，0x4A4D20..0x4A4B94）：
+        ```
+        "---Total---" / "---Stage%d---"(word[+0x24])
+        "BrokenEnemy              %4d"  dword[edi]     "+0x3C"/"+0x50"
+        "BrokenEnemy(Laser)       %4d"  dword[edi+4]   "+0x40"/"+0x54"
+        "Capture                   %3d"  word[edi+8]    "+0x44"/"+0x58"
+        "MaxLaserHit               %3d"  word[edi+0xA]  "+0x46"/"+0x5A"
+        "MaxRate                  x%3d"  word[edi+0xC]  "+0x48"/"+0x5C"
+        "SHOU                      %3d"  word[edi+0xE]  "+0x4A"/"+0x5E"
+        "KUN                       %3d"  word[edi+0x10] "+0x4C"/"+0x60"
+        "SHOUBonus             %3d0000"  dword[+0x30]   （两 section 共用）
+        "Score              %9d0"        dword[ebp]     "+0x4"/"+0x14"
+        "ShootRate                %4d%%"  Total: 0x45E7A0([+8],[+0x10])&0xFFFF /10
+                                           Stage: 0x45F9D0()&0xFFFF /10
+        "ShootRate(Laser)         %4d%%"  Total: 0x45E7A0([+0xC],[+8])&0xFFFF /10
+                                           Stage: 0x45FA00()&0xFFFF /10
+        "Level                    %4d"  word[0x56CCB0]
+        ```
+        （/10 = 0x66666667×sar2 魔数 = 截断除 10。）
+        尾部：`0x460B20(0x4CD590, variant, word[+0x24])` 追加 MissCount/Continue 两行
+        （variant≠0 取 [0x4CD590+0x34]/[+0x40]，否则 [+0x38]/[+0x44]；随后清 [+0x38]/[+0x44]）；
+        清 [ebx=+0x50..+0x60] 五个 dword；`byte[0x4CD4A0+0x38] = 1`。
+
+        落盘：exe 经 CRT 写 result.txt（0x46388F/0x4638BE 的 CRT 包装未逐条辨认，按
+        "行 + \\r\\n" 组合语义实现）；复刻把同样文本累积到 `p4_stat["result_txt"]`，
+        设 `P4_RESULT_FILE` 时才落盘（无头测试不产文件）。"""
+        st = self.p4_stat
+        base = 0x4CD4A0
+
+        def _g(off: int) -> int:
+            return st.get(base + off, 0)
+
+        def _w16(off: int) -> int:
+            v = _g(off) & 0xFFFF
+            return v - 0x10000 if v & 0x8000 else v
+
+        def _s32(off: int) -> int:
+            v = _g(off) & 0xFFFFFFFF
+            return v - 0x100000000 if v & 0x80000000 else v
+
+        # 头部：单关 → 累计（0x45E80D..0x45E862）
+        st[base + 0x3C] = (_g(0x3C) + _g(0x50)) & 0xFFFFFFFF          # 0x45E826
+        st[base + 0x44] = (_g(0x44) + _g(0x58)) & 0xFFFF              # 0x45E822 word
+        st[base + 0x40] = (_g(0x40) + _g(0x54)) & 0xFFFFFFFF          # 0x45E831
+        if not (_w16(0x46) > _w16(0x5A)):                              # 0x45E838 jg
+            st[base + 0x46] = _g(0x5A) & 0xFFFF
+        if not (_w16(0x48) > _w16(0x5C)):                              # 0x45E84B jg
+            st[base + 0x48] = _g(0x5C) & 0xFFFF
+        st[base + 0x4C] = (_g(0x4C) + _g(0x5C)) & 0xFFFF              # 0x45E85E word
+        st[base + 0x4A] = (_g(0x4A) + _g(0x5E)) & 0xFFFF              # 0x45E862 word
+
+        if variant:                                                    # 0x45E894
+            edi, ebp = 0x3C, 0x04
+            lines = ["---Total---"]                                    # 0x45E89C
+        else:
+            edi, ebp = 0x50, 0x14
+            lines = ["---Stage%d---" % _w16(0x24)]                     # 0x45E8AF
+        lines += [
+            "BrokenEnemy              %4d" % _s32(edi),                # 0x45E8C7
+            "BrokenEnemy(Laser)       %4d" % _s32(edi + 4),            # 0x45E8D8
+            "Capture                   %3d" % _w16(edi + 8),           # 0x45E8EA
+            "MaxLaserHit               %3d" % _w16(edi + 0xA),         # 0x45E8FD
+            "MaxRate                  x%3d" % _w16(edi + 0xC),         # 0x45E910
+            "SHOU                      %3d" % _w16(edi + 0xE),         # 0x45E923
+            "KUN                       %3d" % _w16(edi + 0x10),        # 0x45E936
+            "SHOUBonus             %3d0000" % _s32(0x30),              # 0x45E949
+            "Score              %9d0" % _s32(ebp),                     # 0x45E95B
+        ]
+        if variant:                                                    # 0x45E976
+            r1 = self.p4_45e7a0(_g(0x08), _g(0x10)) & 0xFFFF
+            r2 = self.p4_45e7a0(_g(0x0C), _g(0x08)) & 0xFFFF
+        else:                                                          # 0x45E9C8
+            r1 = self.p4_45f9d0() & 0xFFFF
+            r2 = self.p4_45fa00() & 0xFFFF
+        lines += [
+            "ShootRate                %4d%%" % _p4_trunc10(r1),        # 0x45E9A4/0x45E9E7
+            "ShootRate(Laser)         %4d%%" % _p4_trunc10(r2),        # 0x45EA10/0x45EA0F
+            "Level                    %4d" % _p4_s16(st.get(0x56CCB0, 0)),   # 0x45EA1A
+        ]
+        # 0x460B20(0x4CD590, variant, word[+0x24])：MissCount/Continue 两行
+        m = 0x4CD590
+        if variant:
+            miss, cont = st.get(m + 0x34, 0), st.get(m + 0x40, 0)
+        else:
+            miss, cont = st.get(m + 0x38, 0), st.get(m + 0x44, 0)
+        lines += [
+            "MissCount                 %3d" % _p4_s32(miss),         # 0x460B75
+            "Continue                  %3d" % _p4_s32(cont),         # 0x460B90
+        ]
+        st[m + 0x38] = 0                                               # 0x460B9D
+        st[m + 0x44] = 0                                               # 0x460BA4
+        # 0x45EA57..0x45EA62：5 个 **dword** 清零（+0x50..+0x63），覆盖
+        # Broken/Laser/Capture/MaxLaserHit/MaxRate/SHOU/KUN 七个字段键
+        for off in (0x50, 0x54, 0x58, 0x5A, 0x5C, 0x5E, 0x60):
+            st[base + off] = 0
+        st[base + 0x38] = 1                                            # 0x45EA69 byte
+        text = st.get("result_txt", "")
+        st["result_txt"] = text + "".join(ln + "\r\n" for ln in lines)
+        if os.environ.get("P4_RESULT_FILE"):
+            with open("result.txt", "a", encoding="cp932", newline="") as fh:
+                fh.write("".join(ln + "\r\n" for ln in lines))
 
     def p4_44d060(self, src_layer: int, dst_xy: tuple[int, int],
                   dst_layer: int, src_rect: tuple[int, int, int, int]) -> None:

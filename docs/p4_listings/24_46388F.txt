@@ -1,0 +1,20 @@
+; func 0x46388f  (18 insns)
+
+0x0046388f  push    ebp
+0x00463890  mov     ebp, esp
+0x00463892  push    esi
+0x00463893  push    dword ptr [ebp + 0x14]
+0x00463896  call    0x468c4c   ; call 0x468c4c
+0x0046389b  push    dword ptr [ebp + 0x14]
+0x0046389e  push    dword ptr [ebp + 0x10]
+0x004638a1  push    dword ptr [ebp + 0xc]
+0x004638a4  push    dword ptr [ebp + 8]
+0x004638a7  call    0x4638be   ; call 0x4638be
+0x004638ac  push    dword ptr [ebp + 0x14]
+0x004638af  mov     esi, eax
+0x004638b1  call    0x468c9e   ; call 0x468c9e
+0x004638b6  add     esp, 0x18
+0x004638b9  mov     eax, esi
+0x004638bb  pop     esi
+0x004638bc  pop     ebp
+0x004638bd  ret     

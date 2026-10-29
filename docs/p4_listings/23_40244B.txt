@@ -1,0 +1,3 @@
+; func 0x40244b  (1 insns)
+
+0x0040244b  jmp     0x454ef0
