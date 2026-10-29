@@ -1453,7 +1453,23 @@ def _p4_slot_vel_rand_d150(self) -> int:
     return (((rng.randrange(0x2000) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF
 
 
-# 0x42D4A0（sin/cos）、0x42D260、0x42D6A0 的速度来源仍未定案，不登记。
+def _p4_slot_vel_trig_d4a0(self, owner) -> int:
+    """`0x42D4A0` 的速度：由**发射者 `[+0x24]`** 决定方向（§16.185）。
+
+    ```
+    0x42D4CA eax = [ebp+0x24] ; ×25 ; shl 3   ⇒ arg = [+0x24] * 200（0.1° 单位 = ×20°）
+    0x42D4D9 0x45ABB0(arg) ; shl 3 ; esi = eax & 0xFFFF      ; 低 16 = cos×8
+    0x42D4F6 0x45AAF0(arg) ; shl 0x13 ; and 0xFFFF0000       ; 高 16 = sin×8
+    0x42D50A or esi, eax                                     ; vel
+    ```
+    """
+    arg = (owner.s32(0x24) * 200) & 0xFFFFFFFF
+    lo = (p4_sin_q(arg, "cos") * 8) & 0xFFFF
+    hi = ((p4_sin_q(arg, "sin") * 8) << 16) & 0xFFFF0000
+    return (hi | lo) & 0xFFFFFFFF
+
+
+# 0x42D6A0 的速度来源仍未定案，不登记。
 P4_SPAWN_SLOTS = {
     0x42C810: (5, ((0x120B1121, 0x00000E00, 0x10),), "single"),
     0x42CC50: (5, ((0x12071126, 0xF4000A00, 0x10),
@@ -1467,6 +1483,8 @@ P4_SPAWN_SLOTS = {
                    (0x12061127, 0x0A0008E0, 0x10),
                    (0x12061127, 0xF60008E0, 0x10)), "single"),
     0x42D150: (3, ((0x120D112B, _p4_slot_vel_rand_d150, 0x10),), "single"),
+    0x42D260: (6, ((0x120C112C, _p4_slot_vel_rand_d150, 0x10),), "single"),
+    0x42D4A0: (9, ((0x120C112E, _p4_slot_vel_trig_d4a0, 0x10),), "single"),
     0x42CA70: (5, ((0x12081123, 0x00001000, 0x10),), "cadence3"),
     0x42CEF0: (5, ((0x12061128, 0xFA000C00, 0x10),
                    (0x12061128, 0x06000C00, 0x10)), "cadence3"),
@@ -2495,7 +2513,13 @@ class Page4Mixin:
         `0x42C83A` 记录 =(速度, 弹型, y=[owner+8], x=[owner+4]+dx)；
         记录 +0xC 是速度字段（§16.180 由"槽 0 该位为 0xE00、槽 1 改成镜像值"实证）。
         """
-        v = vel(self) if callable(vel) else vel
+        if callable(vel):
+            try:
+                v = vel(self, owner)
+            except TypeError:
+                v = vel(self)
+        else:
+            v = vel
         self.spawn(self._p4_q("ui46c"), type_word,
                    owner.s32(0x04) + dx, owner.s32(0x08), v)
 

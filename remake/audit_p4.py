@@ -809,8 +809,8 @@ def main():
             if e != ((((r & 0x1FFF) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF:
                 return False
         return True
-    check("复刻侧登记了 9 个槽（其余 3 槽速度来源未定案，不登记）",
-          len(slots) == 9, f"{len(slots)}")
+    check("复刻侧登记了 11 个槽（仅 0x42D6A0 速度来源未定案，不登记）",
+          len(slots) == 11, f"{len(slots)}")
     all12 = [0x42C810, 0x42CC50, 0x42D070, 0x42D370, 0x42C8F0, 0x42CD70,
              0x42D150, 0x42D4A0, 0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0]
     all12.sort()
@@ -884,6 +884,17 @@ def main():
           and img[0x42D190 - ib:0x42D195 - ib] == bytes([0x25, 0x00, 0x04, 0xFF, 0xFF]),
           img[0x42D17D - ib:0x42D19C - ib].hex())
     check("0x42D150 速度公式与 exe 全输入一致", _p4_vel_d150_ok(), "")
+
+    check("0x42D260 与 0x42D150 用同一随机速度式（同字节序列）",
+          img[0x42D28D - ib:0x42D2B0 - ib] == img[0x42D17D - ib:0x42D1A0 - ib], "")
+    check("0x42D4A0 的三角速度序列：×25 ×25 shl3 / shl3 / shl 0x13 / and 0xFFFF0000",
+          img[0x42D4CF - ib:0x42D4D6 - ib] == bytes([0x8D, 0x04, 0x80, 0x8D, 0x04, 0x80, 0xC1])
+          and img[0x42D4DE - ib:0x42D4E1 - ib] == bytes([0xC1, 0xE0, 0x03])
+          and img[0x42D502 - ib:0x42D50A - ib] == bytes([0xC1, 0xE0, 0x13, 0x25, 0x00, 0x00, 0xFF, 0xFF]),
+          img[0x42D4CF - ib:0x42D4D6 - ib].hex())
+    check("0x42D4A0 的 arg 是 [+0x24]×200（20° 一步）",
+          img[0x42D4D5 - ib:0x42D4D8 - ib] == bytes([0xC1, 0xE0, 0x03])
+          and (25 * 8) == 200, img[0x42D4D5 - ib:0x42D4D8 - ib].hex())
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
