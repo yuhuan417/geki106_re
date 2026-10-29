@@ -310,8 +310,13 @@ class Layers:
         if lay is None or p is None:
             return False
         w, h, px = ggd_load(p)
-        h = min(h, lay.h); w = min(w, lay.w)
-        lay.buf[0:h, 0:w] = px[0:h, 0:w]
+        # 0x44C640 → 0x44BE10：层表面**按资源尺寸**建立，不是固定 640×480。
+        # bm_cm48 是 240×528（页13 层0），旧版把它裁到 480 行 ⇒ y≥0x1E0 的精灵
+        # （如 0x120D112B 的 (0x78,0x1F8,0x8F,0x20F)）永远贴不出来。
+        if lay.w != w or lay.h != h:
+            lay = Layer(int(w), int(h))
+            self.tab[n] = lay
+        lay.buf[0:h, 0:w] = px
         lay.bind_id = ggd_id          # 记录“这一层当前装的是哪个 GGD”
         lay.dirty = True
         return True
@@ -613,6 +618,10 @@ class Input:
     def set_pos(self, x: int, y: int) -> None:
         """0x44E470：直接写虚拟指针 [mgr+0x14]/[mgr+0x18]（不钳位）。"""
         self.x, self.y = int(x), int(y)
+
+    speed = 0          # 预设记录 byte4（[mgr+0x50]）；0 = 未设预设，用下面的默认值
+    KBD_STEP = 0x80
+    RADIUS = 5
 
     def set_preset(self, preset: int, flag: int = 0) -> None:
         """0x44E620(mgr, preset, x, y) → 0x44E4A0(mgr, preset, flag)：把预设记录
