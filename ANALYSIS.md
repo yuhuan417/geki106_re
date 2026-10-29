@@ -7375,6 +7375,37 @@ B 族 `0x43A381` 同样在 `je 0x43A381` 分支调用 unlink），摘链后碰�
 它是数字渲染（`0x45E4A0` 用 `idiv 10` 反复取位、最多 4 位、把数值拆成数字实体）；
 以及 `p4_43c0f0` 的**调用点**（哪个队列对用这条链）尚未定位。
 
+#### 16.250 弹幕/背景发射器 `0x457380` 的累加器语义（抽出可单测的纯函数）
+
+`0x457380(band)` 的骨架（`esi` = 带对象，步长 `0x2A98`）：
+
+```
+0x457385 [esi+0x2a90] == 0 → 整条返回            ; 未启用
+0x457393 [esi+0x2a88] != 0 → 0x456D80(params,rates) 19 项 dword 加法
+                              → [esi+0x2a88]-- → 0x456EB0
+0x4573C3 遍历 [esi+4] 链：0x457750 测活 / 0x457210 摘链
+0x4573ED 累加器（见下）
+```
+
+**累加器（`0x4573ED..0x457441`）—— 这是带滚动的亚像素推进**：
+
+```
+acc += [esi+0x68]                                   ; step
+|acc| = cdq / xor eax,edx / sub eax,edx             ; 三指令取绝对值（对 INT_MIN 也成立）
+if (|acc| < [esi+0x64]) return                      ; thresh，未到就整条返回
+if (step >= 0)  acc -= thresh ; 0x457120(this, acc - thresh)
+else            acc += thresh ; 0x457120(this, [esi+0x58] + acc - 1)
+```
+
+**正负两条回绕不对称**：正方向吐 `acc - thresh`，负方向吐 `[+0x58] + acc - 1`。
+这不是笔误 —— 负速时带是倒着卷的，起始相位要落到末尾那一格。
+
+`params` 数组基址 `+0x30`（`0x456D80` 加 19 项），故 `params[i] = [band+0x30+4i]`：
+`step = params[14]`（`+0x68`）、`thresh = params[13]`（`+0x64`）、`[+0x58] = params[10]`。
+
+复刻侧已抽成纯函数 `p4_457380_acc(acc, step, thresh, p58) → (phase | None, new_acc)`，
+`_bg_update` 调它，审计单测四种情形（未触发 / 正触发 / 等于阈值 / 负触发回绕）。
+
 #### 16.249 脚本 VM `0x460350` 的 opcode 跳表与「op→队列」全表（含 op 0xE 是空操作）
 
 **跳表在 `0x4606D4`，15 项**（`0x4603A1 cmp eax,0xE; 0x4603A4 ja 0x4603EE; 0x4603A6 jmp [eax*4+0x4606D4]`）：

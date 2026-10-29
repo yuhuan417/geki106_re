@@ -1562,6 +1562,15 @@ def main():
     _ra = _ta.p4_445c00(_tae, (0, 0, 0, 7))
     _jt = [int.from_bytes(img[0x4606D4 - ib + i * 4:0x4606D8 - ib + i * 4], "little")
            for i in range(15)]
+    _ac = page4.Page4Mixin.p4_457380_acc
+    check("0x457380 累加器：acc += step；|acc| < 阈值 不触发；"
+          "step>=0 → 相位 acc-阈值、acc-=阈值；step<0 → acc += 阈值 且相位 = [+0x58]+acc-1（32 位回绕）",
+          _ac(0, 3, 10, 0) == (None, 3)
+          and _ac(7, 5, 10, 0) == (2, 2)
+          and _ac(0, 10, 10, 0) == (0, 0)
+          and _ac(7, -20, 10, 5) == (1, 0xFFFFFFFD)
+          and img[0x457403 - ib:0x457408 - ib] == bytes([0x99, 0x33, 0xC2, 0x2B, 0xC2])
+          and img[0x45740E - ib] == 0x7C, "")
     check("0x4606D4 = 15 项 opcode 跳表；op 1..5 分别入 ui40c/ui43c/ui4cc/ui4fc/ui52c；op 0xE 只跳过 0x14",
           _jt == [0x460686, 0x46044F, 0x4603AD, 0x460411, 0x460490,
                   0x4604D1, 0x460554, 0x460574, 0x4605C6, 0x460512,
