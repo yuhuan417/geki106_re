@@ -319,6 +319,28 @@ def main():
           f"448FF0={img[0x448FF0-ib:0x449060-ib].count(tail)} "
           f"43A3C0={img[0x43A3C0-ib:0x43A430-ib].count(tail)}")
 
+    print("== 11h. 实体生成器 0x445C00 骨架（§16.164）")
+    check("0x445C41 设 vtable 0x4987E0",
+          img[0x445C41 - ib] == 0xC7 and u32(0x445C43) == 0x4987E0, "")
+    check("0x445C51 置 [ebx+0x18]=1、0x445C4D 清 +0x10",
+          u32(0x445C54) == 1 and img[0x445C4D - ib:0x445C51 - ib] == bytes([0xC6, 0x43, 0x10, 0x00]),
+          img[0x445C51 - ib:0x445C58 - ib].hex())
+    check("0x445CC4 cmp eax,8 后 ja（类型 >8 走通用尾部）",
+          img[0x445CC1 - ib:0x445CC4 - ib] == bytes([0x83, 0xF8, 0x08])
+          and img[0x445CC4 - ib:0x445CC6 - ib] == bytes([0x0F, 0x87]),
+          img[0x445CC1 - ib:0x445CC6 - ib].hex())
+    check("类型 2 分支把行为指针 0x4020BD 写进 [ebx+0x40]",
+          img[0x445CE7 - ib] == 0xC7 and img[0x445CE7 - ib + 1] == 0x43
+          and img[0x445CE7 - ib + 2] == 0x40 and u32(0x445CEA) == 0x4020BD,
+          img[0x445CE7 - ib:0x445CEE - ib].hex())
+    check("0x445D25 置 HP = -1（C7 43 18 FF FF FF FF）",
+          img[0x445D25 - ib:0x445D2C - ib] == bytes([0xC7, 0x43, 0x18, 0xFF, 0xFF, 0xFF, 0xFF]),
+          img[0x445D25 - ib:0x445D2C - ib].hex())
+    check("0x445CA7 用 0xFF000000 掩码挑特殊类",
+          img[0x445CAA - ib:0x445CAF - ib] == bytes([0x25, 0x00, 0x00, 0x00, 0xFF])
+          and img[0x445CAF - ib] == 0x3D and u32(0x445CB0) == 0x1000000,
+          img[0x445CA7 - ib:0x445CB4 - ib].hex())
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
