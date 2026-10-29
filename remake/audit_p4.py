@@ -1686,6 +1686,32 @@ def main():
           and _t5.get(0x445EC9) == ("jmp", "0x446237")
           and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
                                      0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
+    _c21 = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x43A899 - ib:0x43A938 - ib], 0x43A899)}
+    _b21 = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x43AEB0 - ib:0x43AF4C - ib], 0x43AEB0)}
+    _e21 = page4.Ent(0x100, 0x140, 0x21000001, 0x77)
+    check("0x21000001 的 ctor(0x43A899)：[+0x40]=0x401E2E、半径 0x18、HP 1、[+0x1C]=y<<5、"
+          "[+0x24]=rec[3]，节点 src 矩形 0x45A750(0xC0,0x1B0,0xEF,0x1DF)、dst=(x-0x18,y-0x18)；"
+          "行为 0x43AEB0 每帧左移 1、纵向绕 y=0xF0 往复、x<=-0x18 或 HP=0 即亡",
+          _c21.get(0x43A8AA) == ("mov", "dword ptr [esi + 0x40], 0x401e2e")
+          and _c21.get(0x43A8B4) == ("mov", "dword ptr [esi + 0xc], 0x18")
+          and _c21.get(0x43A8C1) == ("shl", "eax, 5")
+          and _c21.get(0x43A8D0) == ("mov", "dword ptr [esi + 0x24], edx")
+          and _c21.get(0x43A934) == ("mov", "byte ptr [edx + 0x1c], bl")
+          and _b21.get(0x43AEB9) == ("cmp", "eax, 0xf0")
+          and _b21.get(0x43AED4) == ("dec", "ecx")
+          and _b21.get(0x43AEDB) == ("sar", "eax, 5")
+          and _b21.get(0x43AF38) == ("call", "0x401861")
+          and _b21.get(0x43AF46) == ("cmp", "dword ptr [ebx + 4], -0x18")
+          and _e21.g32(0x40) == 0x401E2E and _e21.beh == 0x43AEB0
+          and _e21.g32(0x0C) == 0x18 and _e21.g32(0x18) == 1
+          and _e21.g32(0x1C) == (0x140 << 5) and _e21.g32(0x24) == 0x77
+          and _e21.m[0x10] == 1
+          and _e21.node.rect == (0xC0, 0x1B0, 0xEF, 0x1DF)
+          and _e21.node.dst == (0x100 - 0x18, 0x140 - 0x18)
+          and _e21.node.active == 1
+          and 0x43AEB0 in page4.P4_BEH, "")
     _st447 = {}
     for _a0, _a1 in ((0x4478D4, 0x4478FF), (0x4478FF, 0x44792D), (0x4478A6, 0x4478BD),
                      (0x44792D, 0x447958), (0x44796F, 0x44799C), (0x44799C, 0x447A12),

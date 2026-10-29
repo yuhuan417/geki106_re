@@ -385,6 +385,26 @@ class Ent:
         self.buf2c = None                 # 0x4601CB 字形位图缓冲（0x4602D0 家族）
         self.flags38 = 0                  # 0x4602B2 标志字
         self.link24 = None                # 0x43CD77 演员链表头
+        if typ == 0x21000001:                    # 0x43A899（0x21 族里唯一有专有构造的）
+            # 0x43A8AA [e+0x40] = 0x401E2E ；0x43A8B1 byte[+0x10]=1
+            # 0x43A8B4 [+0xC]=0x18 ；0x43A8BB [+0x18]=1
+            # 0x43A8BE eax=[rec+4]<<5 → [+0x1C]      （rec[4] 就是 y ⇒ y<<5）
+            # 0x43A8CA [+0x20]=0 ；0x43A8D0 [+0x24]=rec[0xC]
+            # 0x43A8D3 0x45A750(&r,0xC0,0x1B0,0xEF,0x1DF) → 节点 src 矩形
+            # 0x43A912 0x45A690(x-0x18, y-0x18) → 节点 dst；0x43A934 byte[节点+0x1C]=1
+            self.d32(0x40, 0x401E2E)
+            self.beh = 0x43AEB0
+            self.m[0x10] = 1
+            self.d32(0x0C, 0x18)
+            self.d32(0x18, 1)
+            self.d32(0x1C, (b << 5) & 0xFFFFFFFF)
+            self.d32(0x20, 0)
+            self.d32(0x24, d & 0xFFFFFFFF)
+            # 节点层号来自 `0x43048A 0x45A0E0([+0x3C])`；`+0x3C` 取自 rec[0x10]（此处 0）
+            self.node = DNode(self.s32(0x3C), 0xC0, 0x1B0)
+            self.node.dst = (self.s32(0x04) - 0x18, self.s32(0x08) - 0x18)
+            self.node.active = 1
+            return
         if (typ & 0x2F000000) == 0x23000000:      # 0x40D940 0x23 族
             prop = ENT_PROP.get(typ & 0xFF)       # 0x43AC30 的 0x498000 记录
             if prop is not None:
@@ -418,6 +438,42 @@ class Ent:
 
     def __repr__(self) -> str:
         return f"<Ent 0x{self.g32(0x14):08X} beh=0x{self.beh:06X} a={self.g32(4)} b={self.g32(8)} d={self.g32(0x1C)}>"
+
+def _beh_43AEB0(self, e) -> bool:
+    """`0x401E2E → 0x43AEB0`（类型 `0x21000001`）：底部条带块的横向滑出 + 纵向摆动。
+
+    ```
+    0x43AEB6 eax = [+8]
+    0x43AEB9 cmp eax, 0xF0 ; jge → eax = [+0x20]-1，否则 eax = [+0x20]+1
+    0x43AEC7 edx = [+0x1C] ; ecx = [+4]
+    0x43AECD edx += eax ; [+0x1C] = edx ; [+0x20] = eax
+    0x43AED4 ecx-- ; [+4] = ecx                    ; **每帧左移 1**
+    0x43AED5 eax = edx + 0x10 ; 0x43AEDB sar eax, 5 ; [+8] = eax   ; y = (acc+16)>>5
+    0x43AEE9 节点 dst = (x-0x18, y-0x18)
+    0x43AEFD if ([+0x18] == 0) → 0x430400(rec, x, y, [+0x24], 0) → 0x435440(ui49c)
+    0x43AF3D 返回 ([+0x18] != 0) && ([+4] > -0x18)
+    ```
+
+    ⇒ 纵向是**围绕 y=0xF0 的往复**：`[+0x20]` 每帧 ±1，越过 240 就反向，
+    `[+0x1C]` 是速度累加器，`y = (acc + 16) >> 5`。横向恒速 −1/帧，
+    滑到 `x <= -0x18` 或 HP 归零即消失（死亡时吐一个 ui49c 物件）。
+    """
+    y = e.s32(0x08)                                    # 0x43AEB6
+    v = e.s32(0x20)
+    v = (v - 1) if y >= 0xF0 else (v + 1)              # 0x43AEB9/0x43AEC3/0x43AEC6
+    e.d32(0x20, v & 0xFFFFFFFF)
+    acc = (e.s32(0x1C) + v) & 0xFFFFFFFF                # 0x43AECD
+    e.d32(0x1C, acc)
+    x = (e.s32(0x04) - 1) & 0xFFFFFFFF                  # 0x43AED4
+    e.d32(0x04, x)
+    ny = (e.s32(0x1C) + 0x10) >> 5                      # 0x43AED5/0x43AEDB 有符号 sar
+    e.d32(0x08, ny & 0xFFFFFFFF)
+    if e.node is not None:                              # 0x43AEE9
+        e.node.dst = ((x - 0x18), (ny - 0x18))
+    if e.s32(0x18) == 0:                                # 0x43AEFD
+        self.spawn(self._p4_q("ui49c"), e.s32(0x24), e.s32(0x04), e.s32(0x08))
+    return e.s32(0x18) != 0 and e.s32(0x04) > -0x18     # 0x43AF3D/0x43AF46
+
 
 def _beh_23000001(self, e) -> bool:
     """`0x401C44` → `0x40E070`（类型 0x23000001，1 个/关）：计时驱动的移动。
@@ -2206,6 +2262,7 @@ P4_PLAYER_BEH = (0x4466F0, 0x4467D0, 0x446890, 0x446950,
                  0x446A10, 0x446AD0, 0x446B50, 0x446BD0)   # 0x445ED5..0x45F015
 
 P4_BEH: dict[int, object] = {
+    0x43AEB0: _beh_43AEB0,          # 类型 0x21000001（ctor 0x43A899 写 [+0x40]=0x401E2E）
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
@@ -2455,7 +2512,9 @@ class Page4Mixin:
                   f"other={ {k: len(v) for k, v in getattr(self, 'p4_other', {}).items()} } "
                   f"chain={getattr(self.vm, 'chain', None)} q={self.vm.queue[:6]} "
                   f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
-                  f"vmframe={self.vm.frame}", flush=True)
+                  f"vmframe={self.vm.frame} "
+                  f"zero_beh_types={sorted({e.g32(0x14) for e in self.p4_q43c if e.g32(0x40) == 0})[:8]}",
+                  flush=True)
         """页4 每帧（S1..S25）。返回 `0x45AFF0(0x4AB5C0,0)`：旗标空 ⇒ 继续。"""
         skip = False
         # S1-S2（0x45112B `eax=[App+0x2C4]`；`je 0x451156` 时走"常速"）：只有 [App+0x2C4]!=0
