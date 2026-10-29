@@ -1544,6 +1544,19 @@ def main():
     _cd2.p4_stat[0x4AB5B0 + 4] = 2
     _cd2_e5 = page4.Ent(0, 0, 0x5, 0)
     _cd2.p4_445c00(_cd2_e5, (0, 0, 0, 0))
+    _av = _PN()
+    _av_e = page4.Ent(0x30, 0x40, 0x0B000002, 0)
+    _av_e.node = _Nd2()
+    _av_r = _av.p4_445c00(_av_e, (0, 0, 0, 5))
+    check("0x44604E 自机头像：行为 0x401E06、半径 0x10、**构造即活**(alive=1)、HP 1、"
+          "节点 dst 的 x 偏 +0x40、frame=1、置 word[0x56CCC0] 的 bit0",
+          _av_r == "handled:0xb000002"
+          and _av_e.g32(0x40) == 0x401E06 and _av_e.g32(0x0C) == 0x10
+          and _av_e.m[0x10] == 1 and _av_e.g32(0x18) == 1 and _av_e.g32(0x20) == 5
+          and _av_e.node.dst == (0x30 + 0x40, 0x40) and _av_e.node.frame == 1
+          and _av_e.node.src == (0x80, 0x50, 0x9F, 0x6F)
+          and _av.p4_player_pos == (0x30, 0x40)
+          and (_av.p4_stat[0x56CCC0] & 1) == 1, "")
     check("0x445C00 分派：1→0x445ECE、5→0x445E47（idx 0 稳定、bit2 置位则 idx 4）、"
           "6→已处理、其它记 pending；**构造器只测 bit1 不置位**",
           _cd_r1 == "handled:1" and _cd_e1.g32(0x40) == 0x4466F0

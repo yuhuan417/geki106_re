@@ -3778,6 +3778,46 @@ class Page4Mixin:
         e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x445EBC
         e.d32(0x20, 0)                                         # 0x445EC2
 
+    def p4_44604e(self, e, rec=None) -> None:
+        """`0x44604E`：**自机头像**（type `0x0B000002`）构造器。
+
+        ```
+        0x44605E [e+0x40] = 0x401E06        ; → 0x448C70
+        0x446065 [e+0xC]  = 0x10            ; 半径 16
+        0x44606C byte[e+0x10] = 1           ; ★ 这个类型构造时就是活的
+        0x446070 [e+0x1C] = 0
+        0x446089 [e+0x20] = [rec+0xC]
+        0x44608C [e+0x18] = 1               ; HP
+        0x446094 [node+0] = 0
+        0x446096 rect = 0x45A750(&buf, 0x80, 0x50, 0x9F, 0x6F)
+        0x4460A3 [node+4..+0x10] = rect
+        0x4460BF 0x45A690([e+4] + 0x40, [e+8]) → [node+0x14]/[+0x18]   ; ★ x 偏 +0x40
+        0x4460D5 byte[node+0x1C] = 1
+        0x4460E1 0x45A690([e+4], [e+8]) → [0x56CC8C]/[0x56CC90]
+        0x4460F9 0x45AF30(0x56CCC0, 1)      ; ★ 置 0x56CCC0 的 bit0
+        0x44610D 0x44E470(0x4AB454, [rec+0], [rec+4])
+        ```
+        """
+        e.d32(0x40, 0x401E06)                                  # 0x44605E
+        e.d32(0x0C, 0x10)                                      # 0x446065
+        e.m[0x10] = 1                                          # 0x44606C
+        e.d32(0x1C, 0)                                         # 0x446070
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x20, a3 & 0xFFFFFFFF)                           # 0x446089
+        e.d32(0x18, 1)                                         # 0x44608C
+        rect = self.p4_45a750([0, 0, 0, 0], 0x80, 0x50, 0x9F, 0x6F)   # 0x446096
+        node = getattr(e, "node", None)
+        if node is not None:
+            node.src = tuple(rect)                             # 0x4460B6
+            nx, ny = p4_45A690(e.s32(0x04) + 0x40, e.s32(0x08))   # 0x4460C4
+            node.dst = (nx, ny)                                # 0x4460CC
+            node.frame = 1                                     # 0x4460D5
+        px, py = p4_45A690(e.s32(0x04), e.s32(0x08))           # 0x4460E1
+        self.p4_player_pos = (px, py)                          # 0x56CC8C / 0x56CC90
+        w = int(self.p4_stat.get(0x56CCC0, 0)) | 1             # 0x4460F9（另一组旗标字）
+        self.p4_stat[0x56CCC0] = w
+        self.p4_stat["44e470_rec"] = (rec[0], rec[1]) if (rec is not None and len(rec) >= 2) else (0, 0)
+
     def p4_445c00(self, e, rec=None) -> str:
         """`0x445C00` 的 **type 分派**（`0x445CBE eax=[e+0x14]; 0x445CC1 cmp eax,8; ja 0x44603E`）。
 
@@ -3808,6 +3848,9 @@ class Page4Mixin:
         if typ == 6:
             self.p4_stat["445c00_type6"] = self.p4_stat.get("445c00_type6", 0) + 1
             return "handled:6"
+        if typ == 0x0B000002:                                  # 0x44604E
+            self.p4_44604e(e, rec)
+            return "handled:0xb000002"
         self.p4_stat[("445c00_pending", typ)] = self.p4_stat.get(("445c00_pending", typ), 0) + 1
         return f"pending:{typ:#x}"
 
