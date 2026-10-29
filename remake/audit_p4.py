@@ -2865,6 +2865,51 @@ def main():
               f" 可达={ref} 文档={documented}")
     check(f"目标书 {len(items)} 个入口全部可达且已在文档定案", not missing, f"{missing}")
 
+    # ---- 0x451186..0x45131C 回放进度文字 ------------------------------------
+    print("\n[0x451186 回放进度文字]")
+    from page4 import Page4Mixin
+
+    class _RP:
+        count = 12345
+
+    class _DT:
+        p4_stat = {0x56CCC9: 1, 0x4AB590: 0x2710, 0x56CCD0: 0, 0x56CCCC: 0,
+                   0x56CCD4: 7}
+        replay_mode = True
+        p4_replay = _RP()
+        _p4_dbg_text = None
+
+    _dt = _DT()
+    Page4Mixin.p4_debug_text(_dt)
+    txt = _dt._p4_dbg_text
+    check("门 [0x56CCC9]=1 & 回放 ⇒ 产出文字", txt is not None, f"{txt}")
+    if txt is not None:
+        # 0x4AB590=0x2710=10000 → /1000 = 10 ⇒ "TM:%05d " → "TM:00010 "
+        # 总帧 12345 → 12 ⇒ "TS:00012 "；TA 取 [0x56CCD4]=7 ⇒ "TA:007 "
+        check("TM 段 = 已播帧/1000", txt[0].startswith("TM:00010 "), txt[0])
+        check("TS 段 = 总帧/1000", "TS:00012 " in txt[0], txt[0])
+        # 0x4511E8 先算进度：(12345*100 − 0*100) / (10000 − 0) = 123（<0x3E8 保留）
+        check("TA 段 = 0x4511E8 算出的进度", "TA:123 " in txt[0], txt[0])
+        check("进度已写回 [0x56CCD4]", _dt.p4_stat.get(0x56CCD4) == 123,
+              f"{_dt.p4_stat.get(0x56CCD4)}")
+        check("已播/总帧写回 [0x56CCCC]/[0x56CCD0]",
+              (_dt.p4_stat.get(0x56CCCC), _dt.p4_stat.get(0x56CCD0)) == (0x2710, 12345),
+              f"{(_dt.p4_stat.get(0x56CCCC), _dt.p4_stat.get(0x56CCD0))}")
+        check("位置/字号/色 = (0,0x1D4,h=0xC,fg=0xD9,bg=0xB4)",
+              txt[1:] == (0, 0x1D4, 0x0C, 0xD9, 0xB4), f"{txt[1:]}")
+
+    _dt2 = _DT()
+    _dt2.p4_stat = dict(_dt2.p4_stat)
+    _dt2.p4_stat[0x56CCC9] = 0
+    Page4Mixin.p4_debug_text(_dt2)
+    check("门 [0x56CCC9]=0 ⇒ 不产出", _dt2._p4_dbg_text is None, "")
+
+    _dt3 = _DT()
+    _dt3.p4_stat = dict(_dt3.p4_stat)
+    _dt3.replay_mode = False
+    Page4Mixin.p4_debug_text(_dt3)
+    check("非回放 ⇒ 不产出", _dt3._p4_dbg_text is None, "")
+
     print()
     if fails:
         print(f"[audit] {len(fails)} 项失败：{fails}")

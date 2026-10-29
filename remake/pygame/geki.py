@@ -3597,6 +3597,13 @@ class Pages(Page4Mixin):
         self.p2_blits = []
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
+        # 0x451316：页4 回放进度文字（`0x44D330`）画在 present 之前 ⇒ 叠在最上层。
+        # 只在 `p4_debug_text()` 真的产出内容时才有值（门 `[0x56CCC9]`&`[0x56CCB5]`）。
+        _dbg = getattr(self, "_p4_dbg_text", None)
+        if _dbg is not None:
+            self._p4_dbg_text = None
+            _s, _x, _y, _h, _fg, _bg = _dbg
+            self.text.draw(c, _s, _x, _y, _h, _fg, _bg)
         self.present()          # 0x458CB0 → 0x44D740（调色板操作 + Blt）
 
     def _render_queue(self, c: "Canvas", q) -> None:

@@ -3115,9 +3115,49 @@ class Page4Mixin:
             self.p4_stat[0x4CD484] = self.p4_stat.get(0x4CD484, 0) + 1
 
     def p4_debug_text(self) -> None:
-        """0x451186..0x45131C：调试进度文字（门 `[0x56CCC9]` & `[0x56CCB5]`）。
-        两个全局在页4 常态为 0 ⇒ 整段不执行；这里只记录门状态。"""
-        return
+        """`0x451186..0x45131C`：回放进度叠加文字（门 `byte[0x56CCC9]` 且 `byte[0x56CCB5]`）。
+
+        ```
+        0x451186 al = byte[0x56CCC9]; je 0x45131D            ; 调试开关（写点 0x45816F）
+        0x451193 al = byte[0x56CCB5]; je 0x45131D            ; 回放模式
+        0x4511A7 0x45A610(0x4AB570)   → esi = [0x4AB590]      ; 已播帧
+        0x4511B3 0x45DB00(0x4CD5D8)   → ebp = [0x4CD5D8+0x9E380]  ; 总帧
+        0x4511C1 if ([0x56CCD0] == ebp) skip
+        0x4511CB   if (esi != [0x56CCCC]):
+        0x4511E8       v = (ebp*100 - [0x56CCD0]*100) / (esi - [0x56CCCC])
+        0x4511F4       [0x56CCD4] = (v < 0x3E8) ? v : 0x3E7
+        0x451200   [0x56CCD0] = ebp ; [0x56CCCC] = esi
+        0x451228 sprintf("TM:%05d ", min(esi,0x5F5DD18)/1000)
+        0x451277 sprintf("TS:%05d ", min(ebp,0x5F5DD18)/1000)
+        0x4512BC sprintf("TA:%03d ", [0x56CCD4])
+        0x451316 0x44D330(0x4AA7B0, x=0, y=0x1D4, str, h=0x0C, fg=0xD9, bg=0xB4)
+        ```
+
+        `0x4511E8` 是**无符号** `div edi`（`edi = esi - ecx` 为 0 时会被 `0x4511CB` 的
+        `cmp/je` 挡掉，不会除零）。三段 sprintf 的结果是**拼接**成一行（`repne scasb`
+        + `rep movs` 的 strcat 序列，0x451233..0x4512F0）。"""
+        if not (self.p4_stat.get(0x56CCC9, 0) & 0xFF):      # 0x45118D
+            return
+        if not self.replay_mode:                            # 0x45119A
+            return
+        rp = getattr(self, "p4_replay", None)
+        cur = self.p4_stat.get(0x4AB590, 0) & 0xFFFFFFFF     # 0x4511A7 [0x4AB570+0x20]
+        total = (rp.count if rp is not None else 0) & 0xFFFFFFFF   # 0x4511B3
+        last_total = self.p4_stat.get(0x56CCD0, 0) & 0xFFFFFFFF     # 0x4511BA
+        if last_total != total:                             # 0x4511C1
+            last_cur = self.p4_stat.get(0x56CCCC, 0) & 0xFFFFFFFF
+            if cur != last_cur:                             # 0x4511CB
+                d = (cur - last_cur) & 0xFFFFFFFF           # 0x4511D0
+                if d:
+                    v = ((((total - last_total) & 0xFFFFFFFF) * 100) // d) & 0xFFFFFFFF
+                    self.p4_stat[0x56CCD4] = 0x3E7 if v >= 0x3E8 else v   # 0x4511F4/0x4511F6
+            self.p4_stat[0x56CCD0] = total                  # 0x451200
+            self.p4_stat[0x56CCCC] = cur                    # 0x451206
+        s = ("TM:%05d " % (min(cur, 0x5F5DD18) // 1000)      # 0x451228
+             + "TS:%05d " % (min(total, 0x5F5DD18) // 1000)  # 0x451277
+             + "TA:%03d " % (self.p4_stat.get(0x56CCD4, 0) & 0xFFFFFFFF))   # 0x4512BC
+        # 0x451316：`0x44D330` 的 7 个实参（push 序 bg,fg,h,str,y,x,a0）
+        self._p4_dbg_text = (s, 0, 0x1D4, 0x0C, 0xD9, 0xB4)
 
     def p4_collide(self) -> None:
         """0x451461..0x4514A6：`0x43BF60` 建上下文，`ctx+0x54=0`，再跑三组：
