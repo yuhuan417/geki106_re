@@ -1439,6 +1439,20 @@ def main():
     _fb.ui40c = [1, 2, 3]
     _fb.ui46c = [1]
     _fbsize = page4.Page4Mixin.p4_45fbf0(_fb)
+    import struct as _st
+    _c7 = _Z()
+    _t7 = _c7._p4_tbl4ab5cc()
+    _st.pack_into("<I", _t7, 8 + 2 * 2 * 0x54, 0x1234)      # sel=0, idx=2 → k=4
+    _c7v1 = _c7.p4_45c740(2)
+    _t7[5] = 1                                              # flag → 基址 +0x740
+    _st.pack_into("<I", _t7, 0x740 + 2 * 2 * 0x54, 0x5678)
+    _c7v2 = _c7.p4_45c740(2)
+    _t7[4] = 3                                              # sel=3 → k=3+4=7
+    _st.pack_into("<I", _t7, 0x740 + 7 * 0x54, 0x9ABC)
+    _c7v3 = _c7.p4_45c740(2)
+    check("0x45C740：索引 = byte[this+4] + idx*2，记录 0x54 字节，"
+          "byte[this+5] 选基址 +8 或 +0x740；返回记录首 dword",
+          _c7v1 == 0x1234 and _c7v2 == 0x5678 and _c7v3 == 0x9ABC, "")
     check("0x45FBF0 缓冲大小 = (A + total*8 + 0xE)*4 + 0x18；total 里 ui40c 计两次"
           "（0x430860 调了七次，最后一次仍是 0x4AD40C）",
           _fb.p4_stat["45fbf0_total"] == 7 and _fbsize == (0 + 7 * 8 + 0xE) * 4 + 0x18, "")

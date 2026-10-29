@@ -3138,10 +3138,7 @@ class Page4Mixin:
             else:
                 ax -= 1
                 self.p4_stat[m + 0xE2] = ax                          # 0x45F2C8
-                # 0x45F2D9 0x45C740(0x4AB5CC, ax, &out) 取下一档阈值：
-                # 记录 0x54 字节，索引 = byte[0x4AB5D0] + ax*2，基址 0x4AB5CC+8（或 +0x740）。
-                # 该表尚未从 exe 提取（§15），故沿用「不再重建」的哨兵值。
-                self.p4_stat[m + 0xE4] = 0xFFFFFFFF
+                self.p4_stat[m + 0xE4] = self.p4_45c740(ax)           # 0x45F2D9
         self.p4_45f2fb()                                        # 0x45F2FB
 
     def p4_45e710(self, rec, d: int) -> int:
@@ -3184,6 +3181,38 @@ class Page4Mixin:
             c = e
         self.p4_stat[m + 0x5C] = c                              # 0x45E76E
         return (e * b0) & 0xFFFFFFFF                            # 0x45E772
+
+    # `0x4AB5CC` 是**运行期对象**（exe 镜像里全 0，属 BSS），由某处构造器填充，
+    # 没有静态数据可提取（`re_dis.writes_to(0x4AB5CC)` = 0，只能经 `this` 写）。
+    P4_TBL_4AB5CC_SIZE = 0x740 + 0x40 * 0x54
+
+    def _p4_tbl4ab5cc(self) -> bytearray:
+        t = self.p4_stat.get("tbl_4ab5cc")
+        if not isinstance(t, bytearray) or len(t) != self.P4_TBL_4AB5CC_SIZE:
+            t = bytearray(self.P4_TBL_4AB5CC_SIZE)
+            self.p4_stat["tbl_4ab5cc"] = t
+        return t
+
+    def p4_45c740(self, idx: int) -> int:
+        """`0x45C740(this, idx, out)`：从 `0x4AB5CC` 拷一条 **0x54 字节**记录到 `out`。
+
+        ```
+        0x45C740 al = byte[this+5]                     ; 选基址
+        0x45C749 sel = byte[this+4]
+        0x45C755 k = sel + idx*2
+        0x45C75F..0x45C764 k*21*4 = k*0x54 ; 基址 = this+0x740（byte[+5] 非零）或 this+8
+        0x45C76B rep movsd 0x15（=0x54 字节）
+        ```
+
+        调用点 `0x45F2D9` 只取 `out[0]` 当新阈值。
+        """
+        t = self._p4_tbl4ab5cc()
+        sel = t[4] if len(t) > 4 else 0                          # 0x45C749 movsx byte[ecx+4]
+        flag = t[5] if len(t) > 5 else 0                         # 0x45C740 byte[ecx+5]
+        off = (0x740 if flag else 8) + (sel + idx * 2) * 0x54    # 0x45C764 / 0x45C792
+        if off + 4 > len(t):
+            return 0
+        return int.from_bytes(t[off:off + 4], "little")           # out[0]
 
     def p4_430860(self, q) -> int:
         """`0x430860(queue)`：队列里的实体数（`0x45FBF0` 用它算缓冲大小）。"""
