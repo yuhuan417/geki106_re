@@ -695,6 +695,42 @@ def p4_446600(self, e) -> bool:
     return True
 
 
+def p4_45A690(x: int, y: int):
+    """`0x401753 → 0x45A690`：**恒等**（`eax = arg1; edx = arg2; ret`），不是坐标变换。"""
+    return x, y
+
+
+def _beh_type1_follow_b(self, e) -> bool:
+    """`0x4467D0`（type 1 行为 B）：无条件跟随 + 把显示节点摆到左上偏移 (-0x18,-0x18)。
+
+    ```
+    0x4467D3 if (!0x446600(e)) return
+    0x4467DE dx = [0x4AB59C] - x ; dy = [0x4AB5A0] - y     ; 无 [0x4AB595] 分支
+    0x4467F3 if (dx >= 0) dx += 3 ; dx >>= 2 ; 同 dy
+    0x446802 x += dx ; 0x446816 y += dy
+    0x446819 0x401753(x, y) → [0x56CC8C] = eax, [0x56CC90] = edx     ; 恒等
+    0x44682F 0x401753(x-0x18, y-0x18)
+    0x446842 node[+0x38].dst = (x-0x18, y-0x18)                      ; 48x48 居中
+    0x44684A return [e+0x18] != 0
+    ```
+    """
+    if not p4_446600(self, e):
+        return False
+    px, py = self.p4_ptr()                                  # 0x4AB59C / 0x4AB5A0
+    dx = px - e.s32(0x04)
+    dy = py - e.s32(0x08)
+    dx = (dx + 3) >> 2 if dx >= 0 else dx >> 2              # 0x4467F3
+    dy = (dy + 3) >> 2 if dy >= 0 else dy >> 2              # 0x446802
+    e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
+    nx, ny = p4_45A690(e.s32(0x04), e.s32(0x08))            # 0x446819（恒等）
+    self.p4_player_pos = (nx, ny)                           # 0x56CC8C / 0x56CC90
+    ox, oy = p4_45A690(nx - 0x18, ny - 0x18)                # 0x44682F
+    if e.node is not None:
+        e.node.dst = (ox, oy)                               # 0x446842
+    return e.g32(0x18) != 0                                 # 0x44684A
+
+
 def _beh_type1_follow(self, e) -> bool:
     """`0x4466F0`（type 1 行为 A）：以 1/4 步进逼近自机指针位置。"""
     if not p4_446600(self, e):
@@ -867,6 +903,7 @@ P4_BEH: dict[int, object] = {
     0x40EAF0: _beh_23000009,
     0x40E520: _beh_23000005_06,
     0x4466F0: _beh_type1_follow,
+    0x4467D0: _beh_type1_follow_b,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
