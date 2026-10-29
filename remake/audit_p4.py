@@ -553,6 +553,35 @@ def main():
           img[0x446C6B - ib:0x446C6C - ib] == b"\x55"
           and u32(0x446C6D) == 0x10008041, "")
 
+    print("== 11q. 0x446470 模式选择器 + 0x446600 时间轴（§16.173）")
+    check("0x446470 以 7 为基址、操作器加 8",
+          img[0x446485 - ib:0x44648A - ib] == bytes([0x68, 0x00, 0xC0, 0x00, 0x00])
+          and img[0x44648A - ib:0x44648D - ib] == bytes([0x83, 0xE0, 0x08])
+          and img[0x446492 - ib:0x446495 - ib] == bytes([0x83, 0xC0, 0x07]),
+          img[0x446485 - ib:0x446497 - ib].hex())
+    check("0x4464A4 把方向组合左移一位（×2）",
+          img[0x4464A4 - ib:0x4464A6 - ib] == bytes([0xD1, 0xE0]), "")
+    check("两个参数经 ret 8 弹出", img[0x4464F3 - ib:0x4464F6 - ib] == bytes([0xC2, 0x08, 0x00]),
+          img[0x4464F3 - ib:0x4464F6 - ib].hex())
+    check("b 非 0 走 0x4019B0、否则走 0x40115E",
+          thunk(0x4019B0) != thunk(0x40115E) and img[0x4464CA - ib] == 0xE8
+          and img[0x4464DF - ib] == 0xE8, "")
+
+    def ss(a):
+        """返回该字节位置的符号扩展 imm8。"""
+        return int.from_bytes(img[a - ib:a - ib + 1], "little", signed=True)
+
+    check("0x446600 时间轴四点 -1 / 0x28 / 0x78 / 0x12C",
+          img[0x446610 - ib:0x446613 - ib] == bytes([0x83, 0xF8, 0xFF])
+          and img[0x44662C - ib:0x44662F - ib] == bytes([0x83, 0xF8, 0x28])
+          and img[0x446647 - ib:0x44664A - ib] == bytes([0x83, 0xF8, 0x78])
+          and img[0x446658 - ib:0x44665D - ib] == bytes([0x3D, 0x2C, 0x01, 0x00, 0x00]),
+          img[0x446658 - ib:0x44665D - ib].hex())
+    check("初始 -1 分支把 [esi+0x20] 设为 0x12D",
+          u32(0x446623) == 0x12D, hex(u32(0x446623)))
+    check("0x4023EC→0x446540、0x4011AE→0x460EA0",
+          thunk(0x4023EC) == 0x446540 and thunk(0x4011AE) == 0x460EA0, "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
