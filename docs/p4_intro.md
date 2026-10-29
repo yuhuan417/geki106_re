@@ -833,3 +833,38 @@ k=0x06/0x0A/0x18…（→ 层 3/4/6…），而**层 3/4 有内容**（res 17/18
 `0x457773 cl = [eax+0x4C]`，这里的 `eax` 还没追到是哪一层指针
 （若 `eax = slot`，则 `[slot+0x30]` 正好是 `params[0] = 33280`，显然不能当窗口上界，
 说明 `eax` 是 `slot` 的某个子对象）。
+
+### 勘误：窗口/步长的基址其实是 `[band+8] = &params`（推翻上一轮的"三点不符"）
+
+`0x457750` 是被 `0x458E70` 每帧调用的**带状体**取函数，`ecx = band`：
+
+```
+0x457750 sub esp,0x10 ; esi = ecx                       ; this = band
+0x457757 eax = [esi + 8]        ; = &[slot+0x30] = 参数块（ctor 里 [esi+8]=edi=参数块指针）
+0x45775A edi = [esi + 0xC]      ; 索引
+0x45775D ecx = [eax + 0x38]     ; step  = params[14]   ← 与 [slot+0x68] 同值
+0x457760 edi += ecx ; [esi+0xC] = edi
+0x457765 edx = [eax + 0x2C]     ; 窗口下界 = params[11]
+0x45776A if (edi < edx) → 隐藏
+0x45776E if (edi > [eax+0x30]) → 隐藏    ; 窗口上界 = params[12]
+0x457773 if (![eax + 0x4C])   → 隐藏    ; 使能位 = params[19]
+0x45777A 可见：byte[[esi+0x2C]+0x1C] = 1
+0x457786 隐藏：byte[..+0x1C] = 0
+```
+
+⇒ `[eax+0x2C]`/`[eax+0x30]` 是 `params[11]`/`params[12]`，`[eax+0x4C]` 是 `params[19]`。
+上一轮"窗口读的不是参数块"的说法**作废**；复刻侧读 `params[11]/[12]` 是对的，
+只是缺了 `params[19]` 这道使能检查（槽 0 实测值为 `0xCCCCCCCD` ⇒ `cl != 0`，通过）。
+
+带状体 ctor 的尾部还有一处写索引：
+
+```
+0x457594 edx = [esp+0x34]
+0x457598 [esi + 0xC] = edx          ; 索引的初值来自这个被 push 的实参
+0x45759B 0x45A0E0() → [esi+0x2C] = eax   ; 节点
+0x4575A5 [eax] = ebx(=0)            ; 层号 0
+```
+
+⇒ 索引初值就是 ctor 第 4 个实参；`0x4571A5` 处压栈顺序为
+`&[slot+0xC]`、`&[slot+0x30]`、`&[slot+0xD0]`、`acc`，具体哪一格落到 `[esp+0x34]`
+还需按 `esp` 偏移一一核对（下一步）。
