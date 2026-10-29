@@ -5070,56 +5070,69 @@ class Page4Mixin:
     P4_BG_K2LAYER = {0x06: 3, 0x0A: 4, 0x10: 5, 0x18: 6, 0x20: 7,
                      0x30: 8, 0x48: 9, 0x6C: 0x0A, 0xA0: 0x0B, 0xF0: 0x0C}
 
+    # k 斜坡值 → 层号（`0x457938` 0xF1 项字节表 → `0x457908` 跳表，逐个读取得出）
+    P4_BG_K2LAYER = {0x06: 3, 0x0A: 4, 0x10: 5, 0x18: 6, 0x20: 7,
+                     0x30: 8, 0x48: 9, 0x6C: 0x0A, 0xA0: 0x0B, 0xF0: 0x0C}
+
     def p4_bg_draw(self) -> None:
-        """`0x458EF5` → `0x457CB0`（12 槽，槽步长 0x2A98）→ `0x457490`（单槽）。
+        """`0x458EF5` → `0x457CB0`（12 槽，步长 0x2A98）→ `0x457490`（单槽 → `0x45A170`）。
 
-        `0x457490`：`if (![slot+0x2A90]) return; 0x45A170(slot+0xC)`，即每槽挂**一个**
-        标准显示节点（`0x457540` 里 `[obj+0x2C]` 建的那个）。节点每帧由 `0x457750` 更新：
+        每槽一个显示节点（`0x457540` 建在 `[obj+0x2C]`），节点由 `0x457750` 每帧更新：
 
         ```
-        0x457760 t = [obj+0xC] += [slot+0x38]         ; 计时器 += 步长
-        0x4577AB k = [ [obj+4] + t*12 + 8 ]           ; 第 t 条的第三 dword
-        0x4577DD jmp [byte[0x457938+k]*4 + 0x457908]  ; k ⇒ 层 3..0xC（k=0 不可见）
+        0x457760 [obj+0xC] += [param+0x38]     ; 索引 += 步长（params[14]）
+        0x45776A 窗口 [param+0x2C] .. [param+0x30]（params[11]..params[12]）
+        0x4577AB k = [[obj+4] + idx*12 + 8]    ; 第 idx 条的第三 dword
+        0x4577DD k → 层 3..0xC（k=0 不可见）
         0x45787E rect = (0, base*k, k-1, (base+1)*k-1)
-        0x4578C7 dst  = (条目x + (seedX*k>>6), 条目y + (seedY*k>>6))
+        0x4578C7 dst  = (条目x, 条目y)
         ```
+
+        索引初值来自累加器绕回（`0x457330` 的 `0x4573ED..0x457438`）：`acc += 步长`，
+        `|acc| >= 周期（params[13]）` 时绕回并重建，`idx = acc-周期`（步长≥0）
+        或 `idx = 条数 + acc - 1`（步长<0）。
         """
+        import os as _os
+        if not _os.environ.get("P4_BG_EXPERIMENT"):
+            return      # 索引/窗口/矩形都有出处，但实测仍画不出（见 §16.327），默认关闭
         c = self.canvas
-        if getattr(self, "_bgdbg0", 0) < 3:
-            self._bgdbg0 = getattr(self, "_bgdbg0", 0) + 1
-            print(f"[bgloop] slots={len(self.p4_bg)} act={[s.active for s in self.p4_bg][:4]} "
-                  f"n={[len(s.grid) for s in self.p4_bg][:4]} t={[getattr(s,'_t',None) for s in self.p4_bg][:4]}",
-                  flush=True)
         for slot in self.p4_bg:
             if not slot.active:
                 continue
             grid = getattr(slot, "grid", None)
             if not grid:
                 continue
-            import os as _os
-            if not _os.environ.get("P4_BG_EXPERIMENT"):
-                continue          # 计时器步长来源未定（见 §15），默认不画，避免出错的画面
-            t = getattr(slot, "_t", 0) + slot.params[2]        # 0x457760 step = [+0x38]
-            slot._t = t
-            if t < 0 or t >= len(grid):                        # 0x457795 播放窗口
+            step = slot.params[14]                       # +0x68
+            period = slot.params[13]                     # +0x64
+            count = slot.params[10] or len(grid)          # +0x58（为 0 时退回实际条数）
+            if period <= 0:
+                continue
+            acc = slot.acc + step                        # 0x4573F0
+            if abs(acc) >= period:                       # 0x457408
+                if step >= 0:                            # 0x457410
+                    acc -= period
+                    slot._t = acc
+                else:                                    # 0x457426
+                    acc = period + acc
+                    slot._t = count + acc - 1
+            slot.acc = acc                               # 0x4573FB
+            # 首次创建时 `[obj+0xC]` = `0x457434` 的 `条数 + acc - 1`；acc≈0 ⇒ 条数-1
+            slot._t = getattr(slot, "_t", count - 1) + step   # 0x457760
+            t = slot._t
+            if t < slot.params[11] or t > slot.params[12]:   # 0x45776A 窗口
+                continue
+            if t < 0 or t >= len(grid):                  # 0x457795
                 continue
             ent = grid[t]
             k = ent[2]
-            if getattr(self, "_bgdbg", 0) < 6:
-                self._bgdbg = getattr(self, "_bgdbg", 0) + 1
-                print(f"[bgdraw] t={t} step={slot.params[2]} n={len(grid)} k={k} "
-                      f"ent={ent} p0..3={slot.params[0:4]}", flush=True)
-            if k == 0:                                         # 0x4578B5
+            if k == 0:                                   # 0x4578B5
                 continue
             layer = self.P4_BG_K2LAYER.get(k)
-            if layer is None:                                  # 0x457861 支：不动层号
+            if layer is None:                            # 0x457861 支：不动层号
                 continue
-            base = getattr(slot, "_base", 0)                   # [obj+0x10]
+            base = getattr(slot, "_base", 0)             # [obj+0x10]，0..3 分组
             l, tp, r, b = 0, base * k, k - 1, (base + 1) * k - 1
-            # 0x4578C1/0x4578C4：种子 = rand() % ([slot+0x20]+1) / ([slot+0x24]+1)，
-            # 槽这两项本轮没读出来；若为 0 则 rand()%1 == 0，即无偏移（保持 0，不臆造）。
-            dx = ent[0]
-            dy = ent[1]
+            dx, dy = ent[0], ent[1]                      # 0x4578C7（种子本轮取 0）
             lay = self.layers.tab.get(layer)
             if lay is None:
                 continue
