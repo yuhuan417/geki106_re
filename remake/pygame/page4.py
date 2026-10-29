@@ -464,6 +464,213 @@ class Ent:
     def __repr__(self) -> str:
         return f"<Ent 0x{self.g32(0x14):08X} beh=0x{self.beh:06X} a={self.g32(4)} b={self.g32(8)} d={self.g32(0x1C)}>"
 
+
+# ---------------------------------------------------------------------------
+# 0x42 家族：页4 开场的 5 种实体（自机升空 → 入云 → 文字）
+#   ctor 分派：0x4355E0 里 `[+0x14] & 0xFF000000 == 0x42000000` → 跳表 0x437074（5 项）
+#   0x42000001..05 → 0x43567C / 0x4356E5 / 0x43571C / 0x43578A / 0x4358B4
+#   行为 0x437940 / 0x437B00 / 0x437C30 / 0x437DB0 / 0x437E50
+#   清单 docs/p4_listings/07_beh42_cases.txt、08_beh_437940/437b00/437c30/437db0/437e50.txt
+# ---------------------------------------------------------------------------
+T42_RECT = {0x42000001: (0, 0, 0x17, 0x17),      # 0x4356A8 0x45A750(&r,0,0,0x17,0x17)
+            0x42000002: (0, 0x18, 0x5F, 0x77),   # 0x435EFD 0x45A750(&r,0,0x18,0x5F,0x77)
+            0x42000003: (0x60, 0x18, 0xBF, 0x77)}  # 0x435754 0x45A750(&r,0x60,0x18,0xBF,0x77)
+T42_SIZE = (0x0C, 0x12, 0x18, 0x24, 0x36)        # 0x4357BC..0x4357D4（esp+0x10 起 5 项）
+T42_RECT4 = ((0x00, 0x78, 0x17, 0x8F), (0x18, 0x78, 0x3B, 0x9B),
+             (0x3C, 0x78, 0x6B, 0xA7), (0x6C, 0x78, 0xB3, 0xBF),
+             (0x00, 0xA8, 0x6B, 0x113))          # 0x4357FC..（16 字节步长）
+T42_THRESH4 = (0x41, 0x71, 0xA1, 0xD1, 0x101)    # 0x43795F..0x43797F
+T42_THRESH5 = (0x41, 0x71, 0xA1, 0xD1, 0x101, 0x1A4, 0x1C2)   # 0x437E65..
+T42_STEP5 = (-4, -3, -2, -1, 0, -1, 0)           # 0x437E9D..
+
+
+class Ent42(Ent):
+    """0x42 家族。`tick()` 返回 1 = 活 / 0 = 死（调用方按 0x43A36D..0x43A377 收尾）。"""
+
+    def __init__(self, x: int, y: int, typ: int, prm: int, owner=None):
+        super().__init__(x, y, typ, prm)
+        self._owner = owner
+        self.kind = typ - 0x42000001
+        p = prm & 0xFFFFFFFF
+        s32 = lambda v: v - 0x100000000 if v & 0x80000000 else v
+        self.d32(0x1C, 0)
+        self.d32(0x20, 0)
+        self.d32(0x24, 0)
+        self.d32(0x28, 0)
+        self.d32(0x2C, 0)
+        if self.kind == 0:                                   # 0x43567C
+            self.beh = 0x437940
+            self.d32(0x1C, p)
+            self.d32(0x28, p)
+            l, t, r, b = T42_RECT[typ]
+            self.node = DNode(2, l, t)
+            self.node.rect = (l, t, r, b)
+            self.node.dst = (x - 0x0C, y - 0x0C)             # 0x4356DB sub 0xC
+        elif self.kind == 1:                                 # 0x4356E5
+            self.beh = 0x437B00
+            self.d32(0x20, 0xFFFFFFB8)                       # 0x4356F6 -72
+            self.d32(0x24, 0x90)                             # 0x4356FD 0x90
+            l, t, r, b = T42_RECT[typ]
+            self.node = DNode(2, l, t)
+            self.node.rect = (l, t, r, b)
+            self.node.dst = (x - 0x30, y - 0x30)             # 0x435F26 sub 0x30
+        elif self.kind == 2:                                 # 0x43571C
+            self.beh = 0x437C30
+            self.d32(0x20, 0xFFFFFFFF)                       # 0x43572C or eax,-1
+            self.d32(0x24, 0xFFFFFFFF)
+            self.d32(0x2C, p)                                # 0x43573F = rec[3]（模式）
+            l, t, r, b = T42_RECT[typ]
+            self.node = DNode(2, l, t)
+            self.node.rect = (l, t, r, b)
+            self.node.dst = (x - 0x30, y - 0x30)             # 0x43577D sub 0x30
+        elif self.kind == 3:                                 # 0x43578A
+            self.beh = 0x437DB0
+            i = p if p < len(T42_SIZE) else 0
+            self.d32(0x1C, (p + 1) & 0xFFFFFFFF)             # 0x43579A inc eax
+            self.d32(0x0C, T42_SIZE[i])                      # 0x4357E4
+            self.d32(0x28, (p + 1) & 0xFFFFFFFF)             # 0x4357F3
+            l, t, r, b = T42_RECT4[i]
+            self.node = DNode(2, l, t)
+            self.node.rect = (l, t, r, b)
+            sz = T42_SIZE[i]
+            self.node.dst = (x - sz, y - sz)                 # 0x4378A5 用 [+0xC]
+        else:                                                # 0x4358B4
+            self.beh = 0x437E50
+            v = (owner.p4_afc0(0x4AB5B0, 0xC000) >> 14) & 3 if owner else 0
+            self.d32(0x3C, 0x4AB5B0)
+            l, t, r, b = 0, v * 0x30, 0x2F, v * 0x30 + 0x2F  # 0x4358FF 0x45A750(&r,0,v*0x30,0x2F,…)
+            self.node = DNode(0, l, t)                       # 0x4358CE [eax]=ebx=0 ⇒ 层 0
+            self.node.rect = (l, t, r, b)
+            self.node.dst = (x - 0x18, y - 0x18)             # 0x435929 sub 0x18
+        self.node.active = 1
+        self.frame = 0
+
+    # ---- 0x437940（type 1）----------------------------------------------
+    def _beh_437940(self) -> int:
+        t = (self.g32(0x1C) + 1) & 0xFFFFFFFF
+        self.d32(0x1C, t)
+        node = self.node
+        if t >= 0x102:                                       # 0x437A2D
+            self.d32(0x24, 0xFFFFFFFE if (t & 1) == 0 else 2)
+        else:
+            if t >= 0x41:                                    # 0x437989 阈值表
+                k = sum(1 for th in T42_THRESH4[1:] if t >= th)
+                self.d32(0x20, (min(k, 5) - 4) & 0xFFFFFFFF)
+            mode = self.g32(0x28)
+            if mode == 0:                                    # 0x437A1A
+                self.d32(0x24, 0xFFFFFFFF if (t & 0x40) else 1)
+            elif mode == 1:                                  # 0x437A07
+                self.d32(0x24, 1 if (t & 0x20) else 0xFFFFFFFF)
+            elif mode == 4:                                  # 0x4379B4
+                if t == 0x2D:
+                    self.d32(0x2C, 0xFFFFFFFF)
+                    self.d32(0x24, 1)
+                elif t >= 0xFB:                              # 0x4379C1 源矩形右移一格
+                    l, tt, r, b = node.rect
+                    node.rect = (l + 0x18, tt, r + 0x18, b)
+                    self.d32(0x2C, 0)
+                    self.d32(0x24, 0)
+                if t == 0xFF:                                # 0x4379F6
+                    return 0
+        dx = self.s32(0x2C) + self.s32(0x20)
+        dy = self.s32(0x24)
+        node.dst = (node.dst[0] + dx, node.dst[1] + dy)
+        if t >= 0x128:                                       # 0x437A62 再右移一格
+            l, tt, r, b = node.rect
+            node.rect = (l + 0x18, tt, r + 0x18, b)
+        return 1 if t != 0x12C else 0                        # 0x437A84 setne
+
+    # ---- 0x437B00（type 2）：t<640 静止；之后右漂，累加器归零爆出 5 个 ----------
+    def _beh_437B00(self) -> int:
+        owner = self._owner
+        t = self.g32(0x1C)
+        if t >= 0x280:                                       # 0x437B0A
+            if self.g32(0x28) == 0:                          # 0x437B21
+                dx = (self.s32(0x20) + 1) & 0xFFFFFFFF       # 0x437B2C
+                self.d32(0x20, dx)
+                self.d32(0x24, (self.s32(0x24) - 2) & 0xFFFFFFFF)
+                if dx == 0:                                  # 0x437B32 test eax,eax
+                    nx, ny = self.node.dst[0] + 0x30, self.node.dst[1] + 0x30
+                    for i in range(5):                       # 0x437B86 循环 5 次，类型 +1
+                        owner.p4_spawn42(nx, ny, 0x42000004 + i, 0)
+                    self.d32(0x28, 1)
+            else:                                            # 0x437BCF
+                self.d32(0x20, (self.s32(0x20) - 2) & 0xFFFFFFFF)
+                self.d32(0x24, (self.s32(0x24) - 1) & 0xFFFFFFFF)
+                if not owner.p4_430640(self):                # 0x437BDE
+                    return 0
+            node = self.node
+            node.dst = (node.dst[0] + (self.s32(0x20) >> 4),
+                        node.dst[1] + (self.s32(0x24) >> 4))
+        self.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+        return 1
+
+    # ---- 0x437C30（type 3）：模式 0 漂移 / 1 生成 200 片 / 2 下落 ---------------
+    def _beh_437C30(self) -> int:
+        owner = self._owner
+        mode = self.g32(0x2C)
+        node = self.node
+        if mode == 2:                                        # 0x437C46
+            node.dst = (node.dst[0] - 0x10, node.dst[1] + 0x20)
+            return 0 if node.dst[1] > 0x1E0 else 1           # 0x437C63
+        if mode == 1:                                        # 0x437C77 生成 200 片
+            for _ in range(0xC8):
+                rem1 = owner.p4_rand_mod(0x370)[1]
+                rem2 = owner.p4_rand_mod(0x3C0)[1]
+                x = rem2 + rem1 + 0x18                       # 0x437CBB
+                y = (-0x18 - rem2) << 1                      # 0x437CB0/0x437CB4
+                owner.p4_spawn42(x, y, 0x42000003, 2)
+            return 0                                         # 0x437CFE xor al,al
+        t = self.g32(0x1C)                                   # 模式 0
+        if t > 0x30:                                         # 0x437D08 jle
+            self.d32(0x24, 0)
+            old = self.g32(0x28)
+            self.d32(0x28, (old + 1) & 0xFFFFFFFF)
+            if old == 0x14:                                  # 0x437D19 cmp eax,0x14
+                self.d32(0x28, 0)
+                self.d32(0x20, (self.s32(0x20) - 1) & 0xFFFFFFFF)
+        self.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+        dx, dy = self.s32(0x20), self.s32(0x24)
+        node.dst = (node.dst[0] + dx, node.dst[1] + dy)      # 0x437D3D
+        return 0 if node.dst[0] < -0x60 else 1                # 0x437D48
+
+    # ---- 0x437DB0（type 4）------------------------------------------------
+    def _beh_437DB0(self) -> int:
+        cx = (self.g32(0x20) + 1) & 0xFFFFFFFF                # 0x437DBE
+        ax = (self.g32(0x24) - 1) & 0xFFFFFFFF                # 0x437DBF
+        self.d32(0x20, cx)
+        self.d32(0x24, ax)
+        sax = ax - 0x100000000 if ax & 0x80000000 else ax
+        x = self.s32(0x04) + (sax >> 3)                       # 0x437DC7 sar 3
+        y = self.s32(0x08) + (sax >> 4)                       # 0x437DD7 sar 4
+        self.d32(0x04, x & 0xFFFFFFFF)
+        self.d32(0x08, y & 0xFFFFFFFF)
+        size = self.g32(0x0C)                                 # 0x437DE2
+        eax = (self.s32(0x28) * ((cx - 0x100000000) if cx & 0x80000000 else cx)) << 1
+        node = self.node
+        node.dst = (x - size + eax, y - size + (eax >> 1))    # 0x437DF2/0x437DF4
+        w = node.rect[2] - node.rect[0]                       # 0x45A710
+        return 1 if (w + node.dst[0]) > 0 else 0              # 0x437E1C test/setg
+
+    # ---- 0x437E50（type 5）：竖直漂移的云带 ---------------------------------
+    def _beh_437E50(self) -> int:
+        t = (self.g32(0x1C) + 1) & 0xFFFFFFFF
+        self.d32(0x1C, t)
+        if t >= T42_THRESH5[0]:                               # 0x437EC5
+            k = sum(1 for th in T42_THRESH5[1:] if t >= th)
+            self.d32(0x20, T42_STEP5[min(k, 6)] & 0xFFFFFFFF)  # 0x437ED3
+        node = self.node
+        node.dst = (node.dst[0], node.dst[1] + self.s32(0x20))  # 0x437EE7
+        return 1 if t != 0x399 else 0                          # 0x437EED
+
+    def tick(self) -> int:
+        self.frame += 1
+        fn = {0x437940: self._beh_437940, 0x437B00: self._beh_437B00,
+              0x437C30: self._beh_437C30, 0x437DB0: self._beh_437DB0,
+              0x437E50: self._beh_437E50}.get(self.beh)
+        return fn() if fn else 1
+
+
 # `0x593AB4` 起的 65536 项倒数平方根表：`word[i] = (int)(4096 / sqrt(i))`（截断）
 # 由启动期 `0x45A7E0` 用 FPU 建表（`0x45A83B fild i ; fsqrt ; fdivr [0x499388]`，
 # `[0x499388] = 4096.0`，`0x463F30` 是"截断取整"的 ftol）。此表运行期才生成，磁盘上是全 0。
@@ -2659,6 +2866,7 @@ class Page4Mixin:
                   f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
                   f"vmframe={self.vm.frame} "
                   f"zero_beh_types={sorted({e.g32(0x14) for e in self.p4_q43c if e.g32(0x40) == 0})[:8]} "
+                  f"q4cc={[(hex(e.g32(0x14)), e.beh, e.node.dst if e.node else None) for e in self._p4_q('ui4cc') if hasattr(e,'tick')][:6]} "
                   f"miss={(getattr(self, 'p4_beh_missing_types', {}) and
                             [(hex(b), hex(t), c) for (b, t), c in sorted(self.p4_beh_missing_types.items(),
                              key=lambda kv: -kv[1])[:3]]) or []}",
@@ -2915,6 +3123,66 @@ class Page4Mixin:
         见 §16.269：类型 6 命中的最后一击分支已按 0x43C21B..0x43C302 落地。"""
         return
 
+    # ---- 0x42 家族（开场）----------------------------------------------
+    def p4_spawn42(self, x: int, y: int, typ: int, prm: int) -> None:
+        """`0x43A3C0(0x4AD4CC, &rec)` → ctor `0x4355E0` 的 0x42 分支。"""
+        e = Ent42(int(x), int(y), int(typ), int(prm), owner=self)
+        self._p4_q("ui4cc").append(e)
+
+    def _p4_tick_4cc(self) -> None:
+        """`0x43A350`：遍历 `list+0x28` 链表，`byte[+0x34]` 为 0 的摘链，
+        否则 `0x437920`（= `jmp [ent+0x40]`）派发行为；返回 0 ⇒ 清 `[+0x34]` 与 `node[+0x1C]`。"""
+        keep = []
+        for e in self._p4_q("ui4cc"):
+            if not hasattr(e, "tick"):
+                keep.append(e)
+                continue
+            if not e.alive:                      # 0x43A361
+                continue
+            if e.tick():                         # 0x43A368 0x437920
+                keep.append(e)
+            else:
+                e.alive = 0                      # 0x43A374
+                if e.node is not None:
+                    e.node.active = 0            # 0x43A377
+        self._p4_q("ui4cc")[:] = keep
+
+    # ---- 行为里用到的小工具（都对应一个确切地址）---------------------------
+    def p4_430640(self, e) -> bool:
+        """`0x430640(ecx=ent)`：节点矩形是否与 (0,0)-(0x27F,0x1DF) 相交。"""
+        n = e.node
+        if n is None:
+            return False
+        l, t, r, b = n.rect
+        x, y = n.dst
+        if x > 0x27F:                            # 0x430647
+            return False
+        if (r - l) + x <= 0:                     # 0x430656 0x45A710 宽
+            return False
+        if y > 0x1DF:                            # 0x430667
+            return False
+        return (b - t) + y > 0                   # 0x430674 0x45A730 高
+
+    def p4_afc0(self, which: int, mask: int) -> int:
+        """`0x45AFC0(obj, mask)`：`value & mask`（页4 用 0x4AB5B0 / 0x56CCB8）。
+
+        `0x45AFC0` 本体在 `0x45AFB0` 一族里：`and` 之后返回，**不含**取反。
+        """
+        if which == 0x4AB5B0:
+            return self.p4_sys_bits() & mask if hasattr(self, "p4_sys_bits") else 0
+        return int(getattr(self, "_p4_b5b0", 0)) & mask
+
+    def p4_rand(self) -> int:
+        """`0x45AD00`：LCG，状态 `[0x5D3E38]`；`st = (st*0x19660D + 0x3C6EF35F) & 0x7FFFFFFF`。"""
+        st = (int(getattr(self, "_p4_rand_st", 0x12345678)) * 0x19660D + 0x3C6EF35F) & 0x7FFFFFFF
+        self._p4_rand_st = st
+        return st
+
+    def p4_rand_mod(self, m: int) -> tuple[int, int]:
+        """`0x462D71(v, m)`：返回 (商, 余数)。调用点用余数（`0x437C95` 的 edx）。"""
+        v = self.p4_rand()
+        return v // m, v % m
+
     def p4_dispatch(self) -> None:
         """0x458E70：9 队列「行为 + 绘制」（顺序不能改：先 tick 的队列本帧生成的实体，
         会被后排队列当帧 tick 到）。页13 已按同一顺序实现，这里沿用。"""
@@ -2934,6 +3202,7 @@ class Page4Mixin:
         self.tick_ui(self.p4_ui49c)               # 0x4AD49C → 0x4353A0
         self._tick_wipe4f()                       # 0x4AD4CC → 0x43A350（同队列的另一半工作）
         self._tick_spark4cc()                     # 0x4AD4CC → 0x43A350（同上，不是独立队列）
+        self._p4_tick_4cc()                       # 0x4AD4CC → 0x43A350 的行为派发（0x42 家族）
         self.tick_ui(self.ui4fc)                  # 0x4AD4FC → 0x44B0D0
         self.tick_ui(self.ui52c)                  # 0x4AD52C → 0x445A30
 
@@ -6574,7 +6843,10 @@ class Page4Mixin:
             self.spawn(self._p4_q("ui40c"), c, a, b, d)
         elif op == 3:
             # 0x460411：0x430400(&rec,…) 后 0x43A3C0(0x4AD4CC,&rec) ⇒ ui4cc
-            self.spawn(self._p4_q("ui4cc"), c, a, b, d)
+            if (c & 0xFF000000) == 0x42000000:      # ctor 0x4355E0 的 0x42 家族分支
+                self.p4_spawn42(a, b, c, d)
+            else:
+                self.spawn(self._p4_q("ui4cc"), c, a, b, d)
         elif op == 4:
             # 0x460490：0x430400(&rec,…) 后 0x44B140(0x4AD4FC,&rec) ⇒ ui4fc
             self.spawn(self._p4_q("ui4fc"), c, a, b, d)

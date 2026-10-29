@@ -1947,6 +1947,8 @@ def main():
     _vq.spawn = lambda q, t, x=0, y=0, a3=0, a4=0: q.append((t, x, y, a3, a4))
     _vq._p4_q = lambda name: getattr(_vq, name)
     _vq.spawn_flash = lambda a, b, c: None
+    # 0x42 家族走真实 ctor（0x4355E0 的 5 个分支），不再落到通用 spawn
+    _vq.p4_spawn42 = lambda x, y, t, prm: _vq.ui4cc.append(("ent42", t, x, y, prm))
     _vq.p4_other = {}
     for _op, _rec in ((1, (0x10, 0x20, 0x42000001, 0x30)),
                       (3, (0x11, 0x21, 0x42000002, 0x31)),
@@ -1962,10 +1964,27 @@ def main():
           and _opq.get(0x460442) == ("mov", "ecx, 0x4ad4cc")
           and _opq.get(0x460480) == ("mov", "ecx, 0x4ad40c")
           and _vq.ui40c == [(0x42000001, 0x10, 0x20, 0x30, 0)]
-          and _vq.ui4cc == [(0x42000002, 0x11, 0x21, 0x31, 0)]
+          and _vq.ui4cc == [("ent42", 0x42000002, 0x11, 0x21, 0x31)]
           and _vq.ui4fc == [(0x42000005, 0x12, 0x22, 0x32, 0)]
           and _vq.p4_other == {}
           and isinstance(page4.Ent(0, 0, 0x23000006, 0), page4.Ent), "")
+    _e42 = [page4.Ent42(0x100, 0x140, 0x42000001 + i, i) for i in range(5)]
+    check("0x42 家族 ctor（0x437074 跳表 5 项）：行为分别落到 "
+          "0x437940/0x437B00/0x437C30/0x437DB0/0x437E50，类型 4 的 [+0xC] 取尺寸表 0x4357BC",
+          [e.beh for e in _e42] == [0x437940, 0x437B00, 0x437C30, 0x437DB0, 0x437E50]
+          and _e42[3].g32(0x0C) == page4.T42_SIZE[3]
+          and _e42[1].g32(0x20) == 0xFFFFFFB8 and _e42[1].g32(0x24) == 0x90
+          and _e42[2].g32(0x2C) == 2 and _e42[2].g32(0x20) == 0xFFFFFFFF
+          and page4.T42_RECT4[4] == (0, 0xA8, 0x6B, 0x113), "")
+    _t42 = page4.Ent42(0, 0, 0x42000001, 0)
+    _t42.node.dst = (100, 300)
+    _t42._owner = _vq
+    _vq.p4_430640 = lambda e: True
+    _ok42 = [_t42.tick() for _ in range(0x12C)]
+    check("行为 0x437940：t≥0x41 查阈值表 0x43795F（每档 [+0x20]=-4..0），t==0xFF 不死"
+          "（只在模式 4 分支 0x4379F6），t==0x12C 返回 0（0x437A84 setne）",
+          _ok42[-1] == 0 and all(_ok42[:-1]) and _t42.g32(0x20) == 0
+          and _t42.g32(0x1C) == 0x12C, "")
     _c21 = {i.address: (i.mnemonic, i.op_str)
             for i in _mdk.disasm(img[0x43A899 - ib:0x43A938 - ib], 0x43A899)}
     _b21 = {i.address: (i.mnemonic, i.op_str)
