@@ -34,6 +34,158 @@ P4_STAT_ZERO = [0x56CC98, 0x56CC9C, 0x56CCA0, 0x56CCA4, 0x56CCA8, 0x56CCAC,
                 0x56CCCC, 0x56CCD0, 0x56CCD4]
 
 
+
+# ---------------------------------------------------------------------------
+# 脚本流状态机（`0x56CC4C`）：`0x460350` 一帧一步
+# ---------------------------------------------------------------------------
+class ScriptBank:
+    """资源访问：`0x45DDA0(id)` = 指针、`0x45DDE0(id)` = 长度。
+
+    表头是 24 位、基址相对的紧凑偏移表（`resource_dec.bin` 前 294 字节 = 98 项），id 从 1 起；
+    id 45..76 = 32 个脚本。
+    """
+
+    def __init__(self, path):
+        self.d = path.read_bytes()
+        self.n = 294 // 3
+
+    def _u24(self, i: int) -> int:
+        o = 3 * (i - 1)                       # 0x45DDA0：3*(id-1)
+        return int.from_bytes(self.d[o:o + 3], "little")
+
+    def get(self, sid: int) -> bytes:
+        """`0x45DDA0(id)`..`0x45DDE0(id)`。"""
+        o = self._u24(sid)
+        e = self._u24(sid + 1) if sid < self.n else len(self.d)
+        return self.d[o:e]
+
+
+class ScriptVM:
+    """`0x56CC4C` 的字段级复刻（`docs/p4_vm_0x460350.md`）。
+
+    +04 帧计数｜+08 当前流 id｜+0A 待播队列 w[16]｜+2A 链索引｜+2C 缓冲｜+30 游标｜+34 终止｜+38 旗标
+    """
+
+    # 记录总长（含 4 字节头）；op9 变长，op0 特例 edi=0
+    SIZES = {0x0: 4, 0x1: 0x14, 0x2: 0x14, 0x3: 0x14, 0x4: 0x14, 0x5: 0x14,
+             0x6: 0x5C, 0x7: 0x60, 0x8: 8, 0xA: 0xC, 0xB: 0x3C, 0xC: 8, 0xD: 8, 0xE: 0x14}
+
+    def __init__(self, bank: ScriptBank, chains: list[int], owner=None):
+        self.bank = bank
+        self.chains = chains
+        self.owner = owner
+        self.frame = 0            # +04
+        self.cur_id = 0           # +08
+        self.queue: list[int] = []  # +0A
+        self.chain = 0            # +2A
+        self.buf = b""            # +2C
+        self.cur = 0              # +30
+        self.term = 0             # +34
+        self.flags = 0            # +38
+        self.out = {1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [], 8: [],
+                    9: [], 0xA: [], 0xB: [], 0xC: [], 0xD: [], 0xE: []}
+
+    # 0x4602D0(this, chain)
+    def load_chain(self, chain: int) -> None:
+        self.flags = 0                       # 0x4602D4 0x401064
+        chain &= 0xFFFF
+        c = chain - 0x10000 if chain & 0x8000 else chain
+        self.chain = c & 0xFFFF              # 0x4602E2 word[+0x2A]
+        i, n = c, 0
+        while 0 <= i < len(self.chains) and n < 0xF:     # 0x4602F6 cmp esi,0xF
+            v = self.chains[i]
+            if v == 0:
+                break
+            self.queue.append(v)             # 0x4602FB word[edx]=ax
+            n += 1
+            i += 1
+        self.queue = self.queue[:0xF]
+        self.load_next()                     # 0x460313 尾调
+
+    # 0x4600F0：取队列头装新流
+    def load_next(self) -> bool:
+        if not self.queue:
+            self.term = 1                    # 0x46021C
+            return False
+        self.cur_id = self.queue[0]           # 0x460108 word[+8]
+        self.queue = self.queue[1:] + [0] * (0xF - len(self.queue) + 1)   # 0x460111..0x46011C 左移 15 字
+        self.queue = [q for q in self.queue if q] or []
+        self.buf = self.bank.get(self.cur_id) if self.cur_id else b""
+        self.cur = 0
+        self.frame = 0                        # +04 清 0
+        self.term = 0 if self.buf else 1
+        return bool(self.buf)
+
+    # 0x460350：一帧；返回 1 = 本流/链已耗尽，0 = 运行中
+    def step(self) -> int:
+        if not self.buf or self.term:         # 0x46036B
+            return 1
+        if self.flags:                        # 0x460376 0x45B030(+0x38,0) ⇒ [+4]!=0
+            return 0
+        while True:
+            if self.cur + 4 > len(self.buf):
+                self.term = 1
+                return 1
+            t = int.from_bytes(self.buf[self.cur + 2:self.cur + 4], "little")
+            if t > self.frame:                # 有符号比较 0x460388
+                self.frame += 1               # 0x46069C
+                return 0
+            op = int.from_bytes(self.buf[self.cur:self.cur + 2], "little")
+            if op > 0xE:                      # 0x4603A2 非法 op
+                edi = 0
+            elif op == 0x9:
+                n = int.from_bytes(self.buf[self.cur + 0xC:self.cur + 0x10], "little")
+                edi = 0x10 + n * 4
+            else:
+                edi = self.SIZES[op]
+            if op == 0:                       # 0x460686 → 0x4600F0
+                if not self.load_next():
+                    self.term = 1             # 0x460691
+                    return 1
+                continue                      # 游标已重置，不叠加 edi
+            self.exec_op(op, self.buf[self.cur + 4:self.cur + edi])
+            self.cur += edi                   # 0x4603EE
+            if not self.buf:                  # 0x460404
+                return 1
+
+    def exec_op(self, op: int, body: bytes) -> None:
+        if op == 0xE:                                            # 0x4603E9 注释
+            self.out[0xE].append(body.split(b"\0")[0])
+        elif 1 <= op <= 5:                                       # 0x46044F/3AD/411/490/4D1
+            self.out[op].append(tuple(int.from_bytes(body[i:i + 4], "little") for i in (0, 4, 8, 0xC)))
+        elif op == 0x6:                                          # 0x460554 立即触发
+            self.out[6].append((int.from_bytes(body[0:4], "little"), body[4:0x54],
+                                int.from_bytes(body[0x54:0x58], "little")))
+        elif op == 0x7:                                          # 0x460574 只改参数
+            self.out[7].append((int.from_bytes(body[0:4], "little"), body[4:0x54],
+                                int.from_bytes(body[0x54:0x58], "little"),
+                                int.from_bytes(body[0x58:0x5C], "little")))
+        elif op == 0x8:                                          # 0x4605C6 停通道
+            self.out[8].append(int.from_bytes(body[0:4], "little"))
+        elif op == 0x9:                                          # 0x460512 变长表
+            n = int.from_bytes(body[8:0xC], "little")
+            vals = [int.from_bytes(body[0xC + 4 * i:0x10 + 4 * i], "little") for i in range(n)]
+            self.out[9].append((int.from_bytes(body[0:4], "little"),
+                                int.from_bytes(body[4:8], "little"), vals))
+        elif op == 0xA:                                          # 0x460538
+            self.out[0xA].append((int.from_bytes(body[0:4], "little"),
+                                  int.from_bytes(body[4:8], "little")))
+        elif op == 0xB:                                          # 0x460600 装层
+            res = [int.from_bytes(body[i:i + 4], "little") for i in range(0, 0x38, 4)]
+            self.out[0xB].append(res)
+            if self.owner is not None:
+                self.owner.p4_load_layers(res)
+        elif op == 0xC:                                          # 0x46064A 播 BGM
+            v = int.from_bytes(body[0:4], "little") & 0xFFFF
+            self.out[0xC].append(v)
+            if self.owner is not None:
+                self.owner.p4_play_bgm(v)
+        elif op == 0xD:                                          # 0x46066D 关卡号
+            v = int.from_bytes(body[0:4], "little") & 0xFFFF
+            self.out[0xD].append(v)
+            if self.owner is not None:
+                self.owner.p4_set_level(v)
+
 class Page4Mixin:
     # ---- 0x4505B0 参数块 -----------------------------------------------
     @staticmethod
@@ -362,6 +514,11 @@ class Page4Mixin:
         self.p4_ui49c: list = []
         self.p4_emit = []             # 0x4AD55C 发射器 12 通道
         self.p4_seq = None            # 0x4CD484 序列引擎
+        # 0x56CC4C 脚本流状态机 + 资源表（0x45DDA0/0x45DDE0）
+        from pathlib import Path
+        bank = ScriptBank(Path(__file__).resolve().parent.parent.parent / "resource_dec.bin")
+        self.vm = ScriptVM(bank, self._p4_block_data()["vm_chains"], owner=self)
+        self.p4_level = 0             # 0x56CCB0"Level"
 
     def inp_keys(self):
         """run.py 每帧把键盘状态挂在 `self.kbd`（dict：shot/lock/left/right/up/down）。"""
@@ -499,20 +656,49 @@ class Page4Mixin:
         return self.load_wave(slot, script_id)
 
     def vm_init_script(self, arg: int) -> None:
-        """0x4602D0(0x56CC4C, arg)：VM 初始化/换流。"""
-        self.p4_stat[0x56CC4C] = arg
+        """0x4602D0(0x56CC4C, 组号)：按 `0x499798` 链表把最多 15 个脚本 id 装进 `+0x0A` 队列，
+        再 `0x4600F0` 装首流（帧计数清 0）。组号来自参数块 `+0x10`。"""
+        self.vm.load_chain(arg)
 
     def vm_step_frame(self) -> bool:
-        """0x460350(0x56CC4C)：执行一帧记录，返回是否有命令。"""
-        return False
+        """0x460350(0x56CC4C)：执行一帧记录。返回 1 = 本流/链已耗尽（`0x450FE5 test al,al` 用它
+        决定是否去取命令字）。"""
+        return self.vm.step() != 0
 
     def vm_command(self) -> int:
-        """0x460800(0x56CC4C)：取命令字（ax）。"""
-        return 0
+        """0x460800 = `mov ax,word[ecx+0x2A]`：命令字就是**链索引**。"""
+        return self.vm.chain
 
     def vm_restart(self, arg: int) -> None:
-        """0x4602D0(0x56CC4C, 9)。"""
-        return
+        """`0x4602D0(0x56CC4C, 9)`：命令 0 的另一条路 => 进链 9（[60]）。"""
+        self.vm.load_chain(arg)
+
+    def p4_load_layers(self, res: list[int]) -> None:
+        """op 0x0B → `0x460600`：`0x44CEE0` 清层，再 14 层 `0x44C640(i,res[i])`+`0x44CE60(i,0)`，
+        `res[i]==5` 跳过；任一失败 → `0x4AB5C0 |= 2` 且 `[+0x38] |= 1` 并结束本流。"""
+        self.layers.free_all()                    # 0x460614
+        for i in range(14):                       # 0x46062F
+            v = res[i] if i < len(res) else 5
+            if v == 5:
+                continue
+            if not self.layers.bind(i, v):        # 0x44C640
+                self.flags.set(2)                 # 0x4606B3
+                self.vm.flags |= 1                # 0x4606BD
+                break
+            self.layers.color_key(i, 0)           # 0x460635 0x44CE60(i,0)
+
+    def p4_play_bgm(self, track: int) -> None:
+        """op 0x0C → `0x44F600(0x4AB514, arg1=(param!=3), arg2=param)`（资源 1..20 = 20 首 MIDI）。"""
+        if self.audio is not None:
+            self.audio.bgm(track)
+
+    def p4_set_level(self, level: int) -> None:
+        """op 0x0D → `0x45EF10(0x4CD4A0, word[+4])`：清 +0x14..+0x20、`word[+0x24]=level`、
+        `[+0xEC]=0x4A4B64[level]`。"""
+        for a in range(0x14, 0x24, 4):
+            self.p4_stat[0x4CD4A0 + a] = 0
+        self.p4_level = level
+        self.p4_stat[0x4CD4A0 + 0x24] = level
 
     def sequence_started(self) -> bool:
         """0x460EE0(0x4CD590)：序列是否已启动。"""
