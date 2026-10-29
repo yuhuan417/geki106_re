@@ -1476,6 +1476,16 @@ def main():
           "b1!=0 且 r1==0 时**不移动**；显示节点摆到 (x-0x18, y-0x18)；返回 [e+0x18]!=0",
           _ra is True and _dstA == (0x110 - 0x18, 0x100 - 0x18)
           and _rb is True and _pe.g32(0x04) == 0x100, "")
+    _b95s = _PS()
+    _b95e = page4.Ent(0x100, 0x100, 0x1, 0)
+    _b95e.d32(0x18, 1)
+    _b95e.node = _Nd()
+    _b95r = page4._beh_446950(_b95s, _b95e)
+    check("0x446950（= 0x446890 逐字节相同）：1/4 步进 + **发布 [0x56CC8C]/[0x56CC90]** + "
+          "显示节点 (x-0x18,y-0x18)",
+          _b95r is True and _b95e.g32(0x04) == 0x110
+          and _b95s.p4_player_pos == (0x110, 0x100)
+          and _b95e.node.dst == (0x110 - 0x18, 0x100 - 0x18), "")
     check("0x4466F0 的输入字节是 rec.b1(0x4AB595) / rec.r1(0x4AB599)，不是位域",
           img[0x4466FE - ib:0x446703 - ib] == bytes([0xA0, 0x95, 0xB5, 0x4A, 0x00])
           and img[0x446705 - ib:0x44670A - ib] == bytes([0xA0, 0x99, 0xB5, 0x4A, 0x00]), "")

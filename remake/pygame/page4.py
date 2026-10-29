@@ -1894,8 +1894,10 @@ def _beh_446950(self, e) -> bool:
     dy = (dy + 3) >> 2 if dy >= 0 else dy >> 2       # 0x446989 / 0x44698F sar
     e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)     # 0x446980
     e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)     # 0x446992
+    nx, ny = p4_45A690(e.s32(0x04), e.s32(0x08))     # 0x446999（恒等）
+    self.p4_player_pos = (nx, ny)                    # 0x44699E [0x56CC8C] / [0x4469A3 0x56CC90]
     if e.node is not None:                           # 0x4469BC 节点镜像
-        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+        e.node.dst = (nx - 0x18, ny - 0x18)          # 0x4469C2
     return e.g32(0x18) != 0                          # 0x4469CA setne
 
 
