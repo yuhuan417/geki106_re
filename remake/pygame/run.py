@@ -109,15 +109,18 @@ def main(argv: list[str] | None = None) -> int:
     # 重制版对应：隐藏光标 + **相对模式 + 抓取**，否则窗口一旦失焦/指针移出 640×480，
     # SDL 就不再给 rel 位移，表现就是"点了有反应，但移动像是没被捕获"。
     pygame.mouse.set_visible(False)
+    # 采样方式照抄原作：**每帧把光标钉回窗口中心 (320,240)，再读它离中心多远**当位移
+    # （0x454759 `SetCursorPos(0x140,0xF0)` + 下一帧 0x44EB60 读指针）。
+    # 不用 SDL 的 set_relative_mode：WSLg 下它给的 rel 方向不可靠（实测十字与手相反）。
     _grab = not args.headless and not args.no_grab
     if _grab:
         try:
             pygame.event.set_grab(True)
-            pygame.mouse.set_relative_mode(True)
-            print("[input] 相对鼠标模式：已开启（指针被捕获，F1 释放/再次捕获）", flush=True)
-        except Exception as _e:                        # WSLg/Wayland 可能不支持
+            pygame.mouse.set_pos((320, 240))
+            print("[input] 光标抓取 + 中心采样：已开启（F1 释放/再次捕获）", flush=True)
+        except Exception as _e:
             _grab = False
-            print(f"[input] 相对鼠标模式不可用（{_e}）⇒ 退化为窗口内相对位移", file=sys.stderr, flush=True)
+            print(f"[input] 抓取不可用（{_e}）⇒ 退化为窗口内相对位移", file=sys.stderr, flush=True)
     clock_font = pygame.font.Font(None, 16) if args.debug_hud else None
 
     data = geki.load_data()
@@ -183,15 +186,24 @@ def main(argv: list[str] | None = None) -> int:
                     _grab = not _grab
                     try:
                         pygame.event.set_grab(_grab)
-                        pygame.mouse.set_relative_mode(_grab)
+                        if _grab:
+                            pygame.mouse.set_pos((320, 240))
                     except Exception:
                         pass
-                    pygame.mouse.set_visible(not _grab)
-                    print(f"[input] 相对鼠标模式：{'开' if _grab else '关'}", flush=True)
+                    print(f"[input] 光标抓取：{'开（中心采样）' if _grab else '关（窗口内相对位移）'}",
+                          flush=True)
             elif ev.type == pygame.MOUSEMOTION:
                 # 位移要跨"非到期"循环累积，否则会随 build 一起丢掉
                 pend_dx += ev.rel[0]
                 pend_dy += ev.rel[1]
+
+        if _grab:
+            # 读"离中心多远"= 本帧位移，然后把光标弹回中心（原作 0x458CB0/0x454759 的顺序）
+            _mx, _my = pygame.mouse.get_pos()
+            pend_dx += _mx - 320
+            pend_dy += _my - 240
+            if _mx != 320 or _my != 240:
+                pygame.mouse.set_pos((320, 240))
 
         if keycode:
             pend_key = keycode
