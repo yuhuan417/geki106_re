@@ -3280,6 +3280,33 @@ class Page4Mixin:
             self.p4_stat["tbl_4ab5cc"] = t
         return t
 
+    def p4_45ff80(self, ents, buf, off: int = 0) -> int:
+        """`0x45FF80(obj, head, dst)`：把一条实体链写进快照缓冲，**每条 0x20 字节**，返回写入字节数。
+
+        ```
+        0x45FF87 eax = 0x45A310(arg1)                 ; 队首
+        0x45FF8C while ([eax+0x24] != 0 || 首条) :
+        0x45FFA2 [dst+0x00] = [eax+0x00]              ; vtable
+        0x45FFAD [dst+0x04..0x10] = [eax+4..eax+0x10] ; x / y / 半径 / 活跃
+        0x45FFC6 [dst+0x14] = [eax+0x14]              ; 类型
+        0x45FFCC [dst+0x18] = [eax+0x18]              ; HP
+        0x45FFD2 byte[dst+0x1C] = byte[eax+0x1C]      ; 帧计数低字节
+        0x45FFD8 eax = [eax+0x24]                     ; 链表 +0x24
+        0x45FFAF edi += 0x20                          ; 累计字节数
+        ```
+
+        ⇒ 记录 = 8 dword = `0x20`，与 `0x45FBF0` 的 `total*8` 完全对齐。
+        复刻侧直接用队列列表代替 `+0x24` 链（两者元素集合相同）。
+        """
+        n = 0
+        for e in ents or ():
+            b = off + n
+            for i, src in enumerate((0x00, 0x04, 0x08, 0x0C, 0x10, 0x14, 0x18)):
+                buf[b + i * 4:b + i * 4 + 4] = e.g32(src).to_bytes(4, "little")
+            buf[b + 0x1C] = e.m[0x1C] & 0xFF                  # 0x45FFD2
+            n += 0x20                                         # 0x45FFAF
+        return n
+
     def p4_45c740(self, idx: int) -> int:
         """`0x45C740(this, idx, out)`：从 `0x4AB5CC` 拷一条 **0x54 字节**记录到 `out`。
 

@@ -1491,6 +1491,22 @@ def main():
     _be5.d32(0x18, 1)
     _be5.node = _Nd()
     _br5 = page4._beh_446AD0(_bs5, _be5)
+    _sn_e1 = page4.Ent(0x11, 0x22, 0x44, 0)
+    _sn_e1.d32(0x18, 0x55)
+    _sn_e1.m[0x1C] = 0x66
+    _sn_e2 = page4.Ent(0x77, 0x88, 0x99, 0)
+    _sn_e2.d32(0x18, 0xAA)
+    _sn_e2.m[0x1C] = 0xBB
+    _sn_buf = bytearray(0x40)
+    _sn_n = _Z().p4_45ff80([_sn_e1, _sn_e2], _sn_buf, 0)
+    _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
+    _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
+    check("0x45FF80 快照记录 = 0x20 字节 / 8 dword："
+          "[+0]=vtable [+4]=x [+8]=y [+0xC]=半径 [+0x10]=活跃 [+0x14]=类型 [+0x18]=HP [+0x1C]=字节",
+          _sn_n == 0x40
+          and _sn_w0 == (0x49874C, 0x11, 0x22, 0, 0, 0x44, 0x55) and _sn_buf[0x1C] == 0x66
+          and _sn_w1 == (0x49874C, 0x77, 0x88, 0, 0, 0x99, 0xAA) and _sn_buf[0x3C] == 0xBB
+          and 0x20 * 8 == 0x100, "")   # 8 dword 记录 ⇒ 与 0x45FBF0 的 total*8 对齐
     check("0x446A10（索引 4）/ 0x446AD0（索引 5）：**直接吸附**到指针（无 /4），"
           "并发布坐标；两者都已登记进 P4_BEH",
           _br4 is True and (_be4.g32(0x04), _be4.g32(0x08)) == (0x140, 0x100)
