@@ -316,7 +316,9 @@ class Layers:
         # bm_cm48 是 240×528（页13 层0），旧版把它裁到 480 行 ⇒ y≥0x1E0 的精灵
         # （如 0x120D112B 的 (0x78,0x1F8,0x8F,0x20F)）永远贴不出来。
         if lay.w != w or lay.h != h:
+            old_key = lay.ckey
             lay = Layer(int(w), int(h))
+            lay.ckey = old_key        # 0x44CE60 设的色键是**层**的属性，0x44BE10 只写像素，不清键
             self.tab[n] = lay
         lay.buf[0:h, 0:w] = px
         lay.bind_id = ggd_id          # 记录“这一层当前装的是哪个 GGD”
