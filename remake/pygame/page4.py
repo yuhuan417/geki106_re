@@ -1725,15 +1725,24 @@ class Page4Mixin:
     def p4_dispatch(self) -> None:
         """0x458E70：9 队列「行为 + 绘制」（顺序不能改：先 tick 的队列本帧生成的实体，
         会被后排队列当帧 tick 到）。页13 已按同一顺序实现，这里沿用。"""
-        self.tick_ui(self.actorq)                 # 0x4AD40C
-        self.tick_ui(self.ui46c)                  # 0x4AD46C
-        self._p4_tick_ents()                      # 0x4AD43C（页4 实体队列）
-        self.tick_ui(self.p4_ui49c)               # 0x4AD49C
-        self._tick_wipe4f()                       # 0x4AD4CC
-        self._tick_spark4cc()                     # 0x4AD4CC
-        self.tick_ui(self.ui4fc)                  # 0x4AD4FC
-        self.tick_ui(self.ui52c)                  # 0x4AD52C
-        # 0x4AD55C 发射器 / 0x4CD484 序列引擎：待 VM 规格落地后实现
+        # 反汇编 0x458E70 的真实调用序（每条都是 `mov ecx,<队列>; call`）：
+        #   0x458E75 0x4AD55C → 0x457BD0   背景 12 槽（本函数前于 S21 由 p4_bg_update 执行）
+        #   0x458E7F 0x4AD40C → 0x448F80   演员
+        #   0x458E89 0x4AD46C → 0x430220   节点池扫描（jmp [node+0x40] 行为）
+        #   0x458E93 0x4AD43C → 0x43BC70   敌机/实体
+        #   0x458E9D 0x4AD49C → 0x4353A0
+        #   0x458EA7 0x4AD4CC → 0x43A350
+        #   0x458EB1 0x4AD4FC → 0x44B0D0
+        #   0x458EBB 0x4AD52C → 0x445A30
+        #   0x458EC0 0x4CD484 → 0x456270   色带推进（复刻侧在 draw 之后单独调 band_advance）
+        self.tick_ui(self.actorq)                 # 0x4AD40C → 0x448F80
+        self.tick_ui(self.ui46c)                  # 0x4AD46C → 0x430220
+        self._p4_tick_ents()                      # 0x4AD43C → 0x43BC70
+        self.tick_ui(self.p4_ui49c)               # 0x4AD49C → 0x4353A0
+        self._tick_wipe4f()                       # 0x4AD4CC → 0x43A350（同队列的另一半工作）
+        self._tick_spark4cc()                     # 0x4AD4CC → 0x43A350（同上，不是独立队列）
+        self.tick_ui(self.ui4fc)                  # 0x4AD4FC → 0x44B0D0
+        self.tick_ui(self.ui52c)                  # 0x4AD52C → 0x445A30
 
     # ---- 自机输入/队列辅助（0x448C70 用）----------------------------------
     # ---- 碰撞（0x451461..0x4514A6 三组）------------------------------
