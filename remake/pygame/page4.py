@@ -850,7 +850,10 @@ class Page4Mixin:
         self.p4_after_vm()                        # S9-S14
         self.p4_frames += 1                       # S15 0x451442
         self.band_draw()                          # S16 0x451457 0x4562A0
-        self.p4_collide()                         # S17-S20 0x451461..0x4514A6
+        if self.p4_collide() is not None:          # 0x4017FD → 0x43BF60（vtable 初始化，无副作用）
+            self.p4_collide_pair(self._p4_q("ui40c"), self.p4_q43c)   # 0x451480 0x43BFD0(0x4AD40C,0x4AD43C)
+            self.p4_collide_pair(self._p4_q("ui46c"), self.p4_q43c)   # 0x451493 0x43C060(0x4AD46C,0x4AD43C)
+            self.p4_collide_pair(self._p4_q("ui40c"), self._p4_q("ui49c"))  # 0x4514A6 0x43C0F0(0x4AD40C,0x4AD49C)
         self.p4_bg_update()                       # S21 第一条 0x458E75 → 0x457BD0
         self.p4_dispatch()                        # S21 0x4514AD 0x458E70
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
@@ -1022,6 +1025,48 @@ class Page4Mixin:
         # 0x4AD55C 发射器 / 0x4CD484 序列引擎：待 VM 规格落地后实现
 
     # ---- 自机输入/队列辅助（0x448C70 用）----------------------------------
+    # ---- 碰撞（0x451461..0x4514A6 三组）------------------------------
+    def p4_hit_test(self, e, x: int, y: int, r: int) -> bool:
+        """`0x4306C0(ent, x, y, r)`：菱形（L1）判定。
+
+        ```
+        0x4306C0 if (!ent[0x10]) return 0
+        0x4306D3 d = |ent[4]-x| + |ent[8]-y|          ; cdq/xor/sub 取绝对值
+        0x4306F4 d += (ent[0xC]>>2) + (r>>2) - ent[0xC] - r
+        0x430706 return d <= 0
+        ```
+        ⇒ 命中条件 `|dx| + |dy| <= r_e + r - (r_e>>2) - (r>>2)`。
+        """
+        if not e.g32(0x10):
+            return False
+        dx = e.s32(0x04) - x
+        dy = e.s32(0x08) - y
+        d = abs(dx) + abs(dy)
+        er = e.s32(0x0C)
+        d += (er >> 2) + (r >> 2) - er - r
+        return d <= 0
+
+    def p4_collide_pair(self, qa, qb) -> int:
+        """`0x43BFD0(qa, qb)`：外层取 arg2 的 `[+0x28]` 链表、内层取 arg1 的，
+        对每对 (a,b) 做 `0x4306C0(b, a[4], a[8], a[0xC])`，命中则 `0x43C170(this, b, a)`。"""
+        hits = 0
+        if self.p4_key_test(2):                       # 0x43BFD4 0x45AFF0(0x56CCB8,2)
+            return 0
+        for a in list(qa):
+            if not a.g32(0x10):
+                continue
+            for b in list(qb):
+                if not b.g32(0x10):
+                    continue
+                if self.p4_hit_test(b, a.s32(0x04), a.s32(0x08), a.s32(0x0C)):   # 0x43C011
+                    self.p4_hit_cb(b, a)                                          # 0x43C01E → 0x43C170
+                    hits += 1
+        return hits
+
+    def p4_hit_cb(self, b, a) -> None:
+        """`0x43C170`：命中回调（下一步实现）。"""
+        self.p4_stat[0xC1] = self.p4_stat.get(0xC1, 0) + 1
+
     def p4_ptr(self):
         """`[0x4AB59C]`/`[0x4AB5A0]`：指针坐标（0x44E660 Poll 写、0x44EB60 记录）。"""
         return int(self.inp.x), int(self.inp.y)
