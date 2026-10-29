@@ -589,9 +589,26 @@ def p4_446470(self, e, a: int, b: int) -> None:
 
 
 def p4_446470_play(self, fid: int, e, d: int) -> None:
-    """`0x4019B0`/`0x40115E`(0x4AB454, …)：头像帧播放（两 thunk 目标待展开）。"""
+    """`0x4019B0 → 0x44E620` / `0x40115E → 0x44E4A0`：头像帧播放。
+
+    ```
+    0x44E4AB eax = fid*7 ; 0x44E4B7 帧表 = 0x498A88 + fid*14
+    0x44E4BE 复制 4+3 个 word 到 [mgr+0x4C]
+    0x44E620 再写 [mgr+0x14] = x、[mgr+0x18] = y
+    ```
+    `0x498A88` 是**运行期填充**的图集表（静态镜像是代码样字节），故这里只登记 fid、
+    矩形由 `p4_avatar_rect(fid)` 从资源层现算。
+    """
     self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
     self.p4_avatar_fid = fid
+    rec = self.p4_avatar_rect(fid)                     # 0x4C 帧记录（图集现算）
+    if rec is not None:
+        self.p4_avatar_rec = rec
+
+
+def p4_avatar_rect(self, fid: int):
+    """`0x498A88 + fid*14`（7 words/项）：运行期图集表，静态不可读 ⇒ 由资源层提供。"""
+    return getattr(self, "p4_avatar_table", {}).get(fid)
 
 
 def p4_446600(self, e) -> bool:
