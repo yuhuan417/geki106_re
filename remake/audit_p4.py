@@ -1374,6 +1374,22 @@ def main():
     _q1 = page4.Ent(0x120, 0x80, 0x10142214, 0)
     _qz = _Z()
     page4.Page4Mixin._p4_43c868(_qz, _q1)
+    _j1 = page4.Ent(0x200, 0x100, 0x10FF0053, 0)
+    _j1.d32(0x10, 1)
+    _j1.d32(0x18, 9)
+    _ja = page4.Ent(0x10, 0x10, 0x2A000001, 0)
+    _jz = _Z()
+    page4.Page4Mixin.p4_43c460(_jz, _j1, _ja)
+    _jhit = [c for c in _jz.calls if c[0] == "ui4cc"]
+    check("0x43C8CD（类型 0x10FF0053）：抖动 ±0x10/±0x20 的 0x41000004；"
+          "[a+0x14]==0x2A000001 时清零 [p+0x18]",
+          len(_jhit) == 1 and _jhit[0][1] == 0x41000004
+          and 0x200 - 0x10 <= _jhit[0][2] <= 0x200 + 0x0F
+          and 0x100 - 0x20 <= _jhit[0][3] <= 0x100 + 0x1F
+          and _j1.g32(0x18) == 0, "")
+    check("0x430820 把 rec+0x10 覆盖成队列 的 this+4（所以 0x430400 的第 5 实参总是被丢弃）",
+          img[0x430820 - ib:0x43082D - ib] == bytes([0x8B, 0x44, 0x24, 0x04, 0x83, 0xC1, 0x04,
+                                                     0x89, 0x48, 0x10, 0xC2, 0x04, 0x00]), "")
     check("0x43C868（类型 0x10142214）：同址连发 20 个 0x10032215，a3 = 0..0x13",
           len(_qz.calls) == 0x14
           and all(c[0] == "ui46c" and c[1] == 0x10032215 and c[2] == 0x120 and c[3] == 0x80
