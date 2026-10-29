@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--debug-hud", action="store_true", help="叠加调试信息（非原作内容）")
     ap.add_argument("--ptr", action="store_true",
                     help="叠加虚拟指针十字（非原作内容；原作只有硬件光标，见 0x458CB0）")
+    ap.add_argument("--inv-x", action="store_true", help="位移取反 X（平台方向异常时的兜底）")
+    ap.add_argument("--inv-y", action="store_true", help="位移取反 Y（平台方向异常时的兜底）")
     ap.add_argument("--no-grab", action="store_true",
                     help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
@@ -193,9 +195,13 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"[input] 光标抓取：{'开（中心采样）' if _grab else '关（窗口内相对位移）'}",
                           flush=True)
             elif ev.type == pygame.MOUSEMOTION:
-                # 位移要跨"非到期"循环累积，否则会随 build 一起丢掉
-                pend_dx += ev.rel[0]
-                pend_dy += ev.rel[1]
+                # 位移要跨"非到期"循环累积，否则会随 build 一起丢掉。
+                # **抓取模式必须忽略它**：我们每帧 `set_pos(中心)` 会合成一条 MOUSEMOTION，
+                # 其 rel 恰好等于真实位移的**负值**（中心 - 旧位置），再累加就把方向翻过来了
+                # （这正是"十字上下左右全反"的原因）。抓取模式下位移只来自位置采样。
+                if not _grab:
+                    pend_dx += ev.rel[0]
+                    pend_dy += ev.rel[1]
 
         if _grab:
             # 读"离中心多远"= 本帧位移，然后把光标弹回中心（原作 0x458CB0/0x454759 的顺序）
@@ -228,7 +234,9 @@ def main(argv: list[str] | None = None) -> int:
             # 0x44EB60 + 0x44E660：**每帧**建一次记录（原件在 step 开头做）。
             # 注意：不能放在帧门之外 —— Input.build 会推进按键的"上帧状态"，
             # 非到期帧也调用会把按下沿（e0/e1）吃掉，导致"按 C 没反应"。
-            inp.build(state, pygame.mouse.get_pressed(), (pend_dx, pend_dy), pend_key)
+            _dx = -pend_dx if args.inv_x else pend_dx
+            _dy = -pend_dy if args.inv_y else pend_dy
+            inp.build(state, pygame.mouse.get_pressed(), (_dx, _dy), pend_key)
             pend_dx = pend_dy = 0
             pend_key = 0
             pend_shot = pend_lock = False
