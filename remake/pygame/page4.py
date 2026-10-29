@@ -607,8 +607,23 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
 
 
 def p4_avatar_rect(self, fid: int):
-    """`0x498A88 + fid*14`（7 words/项）：运行期图集表，静态不可读 ⇒ 由资源层提供。"""
-    return getattr(self, "p4_avatar_table", {}).get(fid)
+    """`0x498A88 + fid*14`：14 字节/项、7 个 u16 的静态帧表（`.rdata`，`build_p4_avatar.py` 导出）。
+
+    `0x44E4A0` 把整项 14 字节复制到 `[mgr+0x4C]`；7 个 u16 的字段语义尚未定案，
+    这里返回原始元组，避免凭空解释。
+    """
+    tab = getattr(self, "p4_avatar_table", None)
+    if tab is None:
+        try:
+            import json
+            import pathlib
+            f = pathlib.Path(__file__).resolve().parent.parent / "p4_avatar.json"
+            tab = json.loads(f.read_text(encoding="utf-8"))["frames"]
+            self.p4_avatar_table = tab
+        except Exception:
+            return None
+    v = tab.get(str(fid))
+    return tuple(v) if v else None
 
 
 def p4_446600(self, e) -> bool:
