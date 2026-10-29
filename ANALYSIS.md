@@ -6188,6 +6188,37 @@ thunk 解析：`0x4020BD→0x447640`、`0x4015FF→0x447410`、`0x401E06→0x448
 又是 `0x44E4A0/0x44E620` 的**头像 sprite 播放器** —— 同一个全局对象，`+0x4C` 起存当前帧矩形、
 `+0x14/+0x18` 存光标坐标。早期把它只记成 "DirectInput 管理器" 是不完整的，特此更正。
 
+#### 16.150 带推进尾部 `0x457861`：源矩形 + 居中落点
+
+```
+0x457861 eax = [band+0x10] ; ecx = [band+0x1C]（kind）
+0x45786A eax = idx*kind            ; lo = 索引*kind
+0x45786D edx = (idx+1)*kind - 1    ; hi
+0x457872 edx = kind - 1            ; 幅
+0x45787E 0x45A750(&rect, 0, lo, hi, kind-1)     ; 4 dword 矩形
+0x45788B 把 16 字节拷到 [band+0x2C]+4            ; 渲染对象的源矩形
+```
+
+`0x40238D → 0x45A750` 实测就是**四 dword 直接倒装**：`out[0]=arg2, out[4]=arg3, out[8]=arg4, out[0xC]=arg5`
+（`0x45A765` 处的 `[esp+0x1c]` 实际取到的是 arg4，因 `push edi` 已改变栈基）。
+⇒ 源矩形 = `{0, idx*kind, (idx+1)*kind - 1, kind-1}`。
+
+```
+0x4578B1 kind = grid[pos].kind ; 0x4578B7 if (kind == 0) → 隐藏并返回 1
+0x4578B9 edx = [band+0x1C] >> 1              ; kind/2
+0x4578BC x = grid[pos].x - kind/2 + [band+0x20]
+0x4578BE y = grid[pos].y - kind/2 + [band+0x24]
+0x4578D3 0x45A690(x, y)                      ; 事实上的直通（mov eax,[esp+4]; mov edx,[esp+8]; ret）
+0x4578DE [[band+0x2C]+0x14] = eax            ; 落点 x
+0x4578E5 [[band+0x2C]+0x18] = edx            ; 落点 y
+```
+
+`0x40238D → 0x45A750` 与 `0x401753 → 0x45A690` 都是**极简叶子函数**：
+前者是矩形打包器，后者是"两参数原样返回"的坐标变换钩子（本版本不缩放不平移）。
+
+⇒ 落点 = 格点坐标 **减半个 kind** 并按 `[+0x20]`/`[+0x24]` 偏移 = **以 kind 为中心的居中绘制**。
+`kind == 0` 的格直接隐藏，与 §16.149 的"kind 0 → 隐藏"一致。
+
 #### 16.149 kind → 层号的完整对应表（`0x457938` / `0x457908` 导出）
 
 一级表 `0x457938`（256 字节，`byte[kind]` = 分支号）：
