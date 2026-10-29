@@ -791,6 +791,8 @@ class Page4Mixin:
         self.p4_frames = 0                        # [0x56CCA8]
         self.p4_speed = 1                         # 0x450D98 `[App+0x2C4] = 1`（1=常速，8=快进，0=4×泵）
         self.p4_intro_gate = False                # [0x56CCB4]（只有 0x423B7B 置 1）
+        self._p4_sys = 0                          # 0x450B00 0x401AAA→0x45AF10(0x56CCB8) 清系统位
+        self.p4_ccc8 = 1                          # 0x450B10 mov byte[0x56CCC8],1
         b = self.p4_block()                       # 0x4505F5..0x450A25
 
         self.p4_replay_header(b)                  # 0x450A25 0x401EB0 → 0x45D160
