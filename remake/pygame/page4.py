@@ -6168,7 +6168,10 @@ class Page4Mixin:
                      0x44CDF0(0x4AA7B0, 2, [0x4AB5B8]>>… *4-0xC8, …)   ; 载暗调色板
                      if (!ok) 0x45AF30(0x4AB5C0, 2) }
         0x451B68 0x458B80(this)                      ; 泵 + 帧门
-        0x451B6F 0x44EB60(0x4AB454, 0x4AB594)        ; 输入记录（复刻侧 run.py 已做）
+        0x451B6F 0x44ECC0(0x4AB454, 0x4AB594)        ; **键盘轮询**（不是 0x44EB60）：
+                 GetDeviceState(0x100,&buf) → Acquire → 按 DIK 表 [0x498A60] 扫描，
+                 只在 `bl != byte[0x4AB570+0x1F]`（与上帧不同）时把键码写 `arg+6`
+                 = **`[0x4AB59A]`**；ESC(0x1B) 特判同样写入。
         0x451B7E SetCursorPos(0x140, 0xF0)
         0x451B96 0x458FD0(this, [0x4AB59A])          ; 键码 → 旗标
         0x451BA3 if (0x45B070(0x4AB5C0) == 0         ; 旗标为空
@@ -6184,7 +6187,11 @@ class Page4Mixin:
                     self.flags.set(2)                         # 0x451B5C 0x45AF30(0x4AB5C0,2)
             self.p4_pump(1)                                  # 0x451B6A
             self._p4_recenter_cursor()                       # 0x451B7E
-            self.key_command(self.inp.rec.key)               # 0x451B97
+            # 0x451B6F 0x44ECC0：轮询键盘，按下沿的键码写进 [0x4AB59A]（arg+6）。
+            # 复刻侧的输入层（run.py → inp.build）已经做了同一次边沿检测，
+            # 结果就是 `inp.rec.key`；这里把它落到同一个全局地址上再交给 0x458FD0。
+            self.p4_stat[0x4AB59A] = self.inp.rec.key        # 0x44ED4D byte[ecx+6]=al
+            self.key_command(self.p4_stat[0x4AB59A])         # 0x451B97 0x458FD0(this,dl)
             if self.flags.bits == 0 and getattr(self, "p4_ab59a", 0) != 2:
                 continue                                     # 0x451BA8 仍在暂停
             self.p4_load_palette(1)                          # 0x451BF0 恢复亮版
