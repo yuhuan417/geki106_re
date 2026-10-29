@@ -1601,6 +1601,18 @@ def main():
             0x4A4040: b"run", 0x4A4044: b"list", 0x4A404C: b"goto",
             0x4A4054: b"auto", 0x4A405C: b"color"}
     _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
+    _adj = page4.Page4Mixin.p4_451630_adjust
+    check("0x451657..0x45168E 阶段首帧的对比/亮度：两个 7 位字段 ×4−200；"
+          "亮度取 (w&0x1FC0000)>>18、对比取 (w&0xFE000000)>>25；"
+          "压栈顺序 push f1/f2/2 ⇒ 0x44CDF0(mgr, id=2, 对比, 亮度)",
+          _adj(0) == (-200, -200)
+          and _adj(0x1FC0000) == (308, -200)
+          and _adj(0xFE000000) == (-200, 308)
+          and _adj(0x1FC0000 | 0xFE000000) == (308, 308)
+          and _adj(0x20000000) == (-200, -136)
+          and img[0x451659 - ib:0x451659 - ib + 5] == bytes([0x68, 0x00, 0x00, 0xFC, 0x01])
+          and img[0x451675 - ib:0x451675 - ib + 5] == bytes([0x68, 0x00, 0x00, 0x00, 0xFE])
+          and img[0x451668 - ib:0x451668 - ib + 7] == bytes([0x8D, 0x04, 0x85, 0x38, 0xFF, 0xFF, 0xFF]), "")
     _tar = page4.Page4Mixin.p4_4511_ta
     check("0x451186..0x451206：[0x56CCD4]（TA）= (B-上次B)*100/(A-上次A)，钳 999；"
           "B 未变整段跳过、A 未变只更新上次值",

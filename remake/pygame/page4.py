@@ -4991,6 +4991,29 @@ class Page4Mixin:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
+    @staticmethod
+    def p4_451630_adjust(w: int):
+        """`0x451657..0x45168E`：阶段首帧从配置字取**对比/亮度**两个 7 位字段。
+
+        ```
+        0x451659 push 0x1FC0000 ; 0x451663 0x45AFC0(0x4AB5B8, 0, 0x1FC0000)
+            ⇒ eax = (w & 0x1FC0000) >> 18     ; 位 18..24，7 位
+        0x451668 lea eax, [eax*4 - 0xC8]      ; ×4 − 200
+        0x451675 push 0xFE000000 ; 0x45167A 0x45AFC0
+            ⇒ eax = (w & 0xFE000000) >> 25    ; 位 25..31，7 位
+        0x45167F lea ecx, [eax*4 - 0xC8]      ; ×4 − 200
+        0x451687 push 2 ; 0x45168E 0x44CDF0(0x4AA7B0, 2, 对比=f2, 亮度=f1)
+        ```
+
+        压栈顺序 `push f1 / push f2 / push 2` ⇒ cdecl 下 **arg2 = 2**、arg3 = f2、arg4 = f1，
+        即 `0x44CDF0(mgr, id=2, 对比, 亮度)`，与 `p4_load_palette` 的 docstring 一致。
+
+        返回 `(亮度, 对比)`，各在 `-200 .. 308`（`0x7F*4-200 = 308`）。
+        """
+        br = ((w & 0x1FC0000) >> 18) * 4 - 0xC8      # 0x1FC0000 的最低位是第 18 位
+        ct = ((w & 0xFE000000) >> 25) * 4 - 0xC8
+        return br, ct
+
     def p4_load_palette(self, ident: int) -> bool:
         """0x44CDF0(mgr, id, 对比, 亮度, 淡入)：按 RT_STRING id 载调色板。
         页4 阶段首帧载 id 2（bm_pald，暗版），退出时恢复 id 1（bm_pal）。"""
