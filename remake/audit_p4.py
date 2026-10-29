@@ -1334,6 +1334,30 @@ def main():
     _he.d32(0x14, 0x3000)
     _h2 = _H()
     page4.Page4Mixin.p4_43c460(_h2, _he)
+    def _hit(typ, extra30=0, life=3):
+        class _HS(_H):
+            pass
+        e = page4.Ent(10, 20, 0x23000001, 0)
+        e.d32(0x14, typ)
+        e.d32(0x30, extra30)
+        e.d32(0x18, life)
+        h = _H()
+        page4.Page4Mixin.p4_43c460(h, e)
+        return [(c[0], c[1]) for c in h.calls], e.s32(0x18)
+    _c1 = _hit(0x12061128)
+    _c2 = _hit(0x12081123)
+    _c3 = _hit(0x120C112C)
+    _c4 = _hit(0x1B000001)
+    check("0x43C460 二级分发：0x12061128/0x12081123 造同类型入 ui46c；0x120C112C 置 [+0x30]=-3；"
+          "0x1B000001 提前返回不走共用尾",
+          _c1[0] == [("ui4cc", 0x41000004), ("ui46c", 0x12061128)] and _c1[1] == 2
+          and _c2[0] == [("ui4cc", 0x41000004), ("ui46c", 0x12081123)]
+          and _c3[0] == [("ui4cc", 0x41000004)] and _c3[1] == 2
+          and _c4[0] == [] and _c4[1] == 0, "")
+    check("0x43C460 的 cmp 链是**无符号**二叉查找（0x43C525 ja / 0x43C53B ja / 0x43C557 jne）",
+          img[0x43C525 - ib:0x43C52B - ib] == bytes([0x0F, 0x87, 0x1C, 0x04, 0x00, 0x00])
+          and img[0x43C53B - ib:0x43C541 - ib] == bytes([0x0F, 0x87, 0x8C, 0x03, 0x00, 0x00])
+          and img[0x43C557 - ib:0x43C55D - ib] == bytes([0x0F, 0x85, 0x65, 0x04, 0x00, 0x00]), "")
     check("0x43C460 前半段：(type&0x7000)==0x1000 用 [0x1C]>>7/[0x20]>>7，其它不生成",
           len(_h1.calls) == 1 and _h1.calls[0][1] == 0x41000004
           and _h1.calls[0][2] == 100 and _h1.calls[0][3] == 50

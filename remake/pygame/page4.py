@@ -3359,7 +3359,8 @@ class Page4Mixin:
         """
         x = p.s32(0x04)                                        # 0x43C474
         y = p.s32(0x08)                                        # 0x43C477
-        t = p.s32(0x14) & 0x7000                               # 0x43C49D
+        t0 = p.s32(0x14)                                       # 0x43C4A2 保存完整类型
+        t = t0 & 0x7000                                        # 0x43C49D
         if t == 0x1000:                                        # 0x43C4B9
             ox = p.s32(0x1C) >> 7                              # 0x43C4E5
             oy = p.s32(0x20) >> 7                              # 0x43C4E1
@@ -3367,8 +3368,67 @@ class Page4Mixin:
             ox = _random.randrange(0x20) - 0xF                 # 0x43C4C7
             oy = _random.randrange(0x20) - 0xF                 # 0x43C4D3
         else:
-            return                                             # 0x43C4C0 jne 0x43C508 的前半
+            self._p4_43c460_dispatch(p, t0)                    # 0x43C4C0 jne 0x43C508 之前的分支
+            return
         self.spawn(self._p4_q("ui4cc"), 0x41000004, x, y, (ox, oy))   # 0x43C488 / 0x43C503
+        self._p4_43c460_dispatch(p, t0)                        # 0x43C508 起
+
+    def _p4_43c987(self, p, u: int) -> None:
+        """`0x43C987`（类型 `0x12061128` / `0x12081123`）：`[p+0x30] == 0` 时才造一份同类型实体入 `0x4AD46C`。
+
+        ```
+        0x43C987 ecx = [ebx+0x30] ; 0x43C98C if (ecx != 0) → 0x43C9C2
+        0x43C994..0x43C99E 0x430400(rec, [ebx+4], [ebx+8], eax=type, 0)
+        0x43C9B8 0x430290(0x4AD46C, &rec)      ; 0x40100F thunk
+        ```
+        """
+        if p.g32(0x30) != 0:                                   # 0x43C98A
+            return
+        self.spawn(self._p4_q("ui46c"), u, p.s32(0x04), p.s32(0x08), 0)   # 0x43C99D / 0x43C9BD
+
+    def _p4_43c460_dispatch(self, p, t: int) -> None:
+        """`0x43C508..0x43C9C2`：按**完整类型**做**无符号**二叉查找式的 cmp 链。
+
+        ```
+        0x43C525 t >  0x12061128 → 0x43C947：0x12081123 / 0x120C112C / 0x1B000001
+        0x43C530 t == 0x12061128 → 0x43C987
+        0x43C53B t >  0x10142214 → 0x43C8CD：0x10FF0053
+        0x43C541 t == 0x10142214 → 0x43C868
+        0x43C54C t == 0x10008041 → 0x43C6C4
+        0x43C557 t == 0x10008431 → 0x43C55D
+        其余 → 0x43C9C2
+        ```
+
+        `0x43C9C2` 共用尾：`ecx = (t >> 16) & 0xFF`（`0x43C516 xor edx,edx` / `0x43C518 mov dl,byte[esp+0x2E]`），
+        `ecx == 0` 转 `0x43CAFA`；否则 `[p+0x18]` 减一（`== 0` 或 `== -1` 不递减），归零则 `byte[p+0x10] = 0`。
+        """
+        u = t & 0xFFFFFFFF
+        if u > 0x12061128:                                     # 0x43C525 → 0x43C947
+            if u == 0x12081123:                                # 0x43C94C
+                self._p4_43c987(p, u)
+            elif u == 0x120C112C:                              # 0x43C953 → 0x43C97E
+                p.d32(0x30, 0xFFFFFFFD)                        # 0x43C97E [+0x30] = -3
+            elif u == 0x1B000001:                              # 0x43C95A
+                p.d32(0x18, 0)                                 # 0x43C963
+                return                                         # 0x43C97B ret 8（**不走**共用尾）
+        elif u == 0x12061128:                                  # 0x43C530 → 0x43C987
+            self._p4_43c987(p, u)
+        elif u > 0x10142214:                                   # 0x43C53B → 0x43C8CD：只剩 0x10FF0053
+            pass                                               # 未落地
+        elif u == 0x10142214:                                  # 0x43C541 → 0x43C868（未落地）
+            pass
+        elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4（未落地）
+            pass
+        elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D（见 §16.216）
+            pass
+        # 0x43C9C2 共用尾
+        if ((t >> 16) & 0xFF) != 0:                            # 0x43C9C6
+            n = p.s32(0x18)                                    # 0x43C9CE
+            if n != 0 and n != -1:                             # 0x43C9D3 / 0x43C9D8
+                n -= 1
+                p.d32(0x18, n & 0xFFFFFFFF)                    # 0x43C9DB
+            if p.s32(0x18) == 0:                               # 0x43C9E3
+                p.d32(0x10, 0)                                 # 0x43C9E5
 
     def p4_43c060(self, qa, qb) -> int:
         """`0x43C060(a, b)`：与 `0x43BFD0` 同形，但有两处不同（**不是同一个函数**）。
