@@ -437,6 +437,40 @@ def _beh_23000008(self, e) -> bool:
     return e.g32(0x18) != 0
 
 
+def _beh_23000009(self, e) -> bool:
+    """`0x401181` → `0x40EAF0`：正弦航迹 + 周期射击。
+
+    ```
+    0x40EAF3  if (++[+0x20] == 0) { if ([+0x1C] > 0) 0x43B070(ent,0) }     ; 计数归零打一发
+    0x40EB0C  else if ([+0x20] == 0x30) {
+                  [+0x20] = 0xFFFFFFD1                                     ; -0x2F
+                  [+0x1C] = ([+0x1C] == -6) ? 4 : -6                       ; 0x40EB1B..0x40EB27
+              }
+    0x40EB2A  [+0x24] += [+0x20]                                            ; 相位
+    0x40EB3D  y = ([+0x24] >> 3) + 0x1C8                                     ; 航迹高度
+    0x40EB45  x += [+0x1C]
+    0x40EB4D  dst = (x-0x18, y-0x18)
+    0x40EB69  存活 = x > -0x18 && [+0x18] != 0
+    ```
+    """
+    n = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, n)
+    if n == 0:
+        if e.s32(0x1C) > 0:
+            self.p4_43B070(e, 0)                     # 0x40EB03
+    elif e.s32(0x20) == 0x30:                        # 0x40EB0C
+        e.d32(0x20, 0xFFFFFFD1)                      # -0x2F
+        e.d32(0x1C, 4 if e.s32(0x1C) == -6 else -6)  # 0x40EB1B..0x40EB27
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x20)) & 0xFFFFFFFF)
+    y = (e.s32(0x24) >> 3) + 0x1C8                   # 0x40EB3D
+    e.d32(0x08, y)
+    x = (e.s32(0x04) + e.s32(0x1C)) & 0xFFFFFFFF     # 0x40EB45
+    e.d32(0x04, x)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, y - 0x18)
+    return e.s32(0x04) > -0x18 and e.g32(0x18) != 0  # 0x40EB69
+
+
 def _beh_10000001(self, e) -> bool:
     """`0x401E06` → `0x448C70`（自机，类型 0x10000001）。
 
@@ -583,6 +617,7 @@ P4_BEH: dict[int, object] = {
     0x448C70: _beh_10000001,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
+    0x40EAF0: _beh_23000009,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
