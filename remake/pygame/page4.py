@@ -5093,15 +5093,6 @@ class Page4Mixin:
         或 `idx = 条数 + acc - 1`（步长<0）。
         """
         import os as _os
-        if _os.environ.get("P4_BG_GRIDDUMP") and not getattr(self, "_gg", 0):
-            self._gg = 1
-            for _s in self.p4_bg[:4]:
-                _g = _s.grid
-                if not _g:
-                    continue
-                print(f"[grid] n={len(_g)} x={min(e[0] for e in _g)}..{max(e[0] for e in _g)} "
-                      f"y={min(e[1] for e in _g)}..{max(e[1] for e in _g)} "
-                      f"k={sorted({e[2] for e in _g})}", flush=True)
         if not _os.environ.get("P4_BG_EXPERIMENT"):
             return      # 索引/窗口/矩形都有出处，但实测仍画不出（见 §16.327），默认关闭
         c = self.canvas
@@ -5141,7 +5132,11 @@ class Page4Mixin:
                 continue
             base = getattr(slot, "_base", 0)             # [obj+0x10]，0..3 分组
             l, tp, r, b = 0, base * k, k - 1, (base + 1) * k - 1
-            dx, dy = ent[0], ent[1]                      # 0x4578C7（种子本轮取 0）
+            # 0x4578C7 的 dst 是恒等写回（§16.329），但条目值是「1/1024 归一化」坐标：
+            # `0x456FB0` 里 `arr[i].x = [param+0x30] >> 6`，而 params[0]=33280=0.508(16.16)
+            # ⇒ 520/1024 = 0.508。故屏幕坐标 = 归一化值 × 屏宽/屏高 >> 10。
+            dx = (ent[0] * 640) >> 10
+            dy = (ent[1] * 480) >> 10
             lay = self.layers.tab.get(layer)
             if lay is None:
                 continue
