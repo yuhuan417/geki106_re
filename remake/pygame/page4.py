@@ -1872,6 +1872,67 @@ def _beh_446BD0(self, e) -> bool:
     return e.g32(0x18) != 0                          # 0x446C24 setne
 
 
+def _beh_446A10(self, e) -> bool:
+    """`0x446A10`（type 1 行为，索引 4）：与 `0x4466F0` 同构，但「移动」是**直接吸附**不是 1/4 步进。
+
+    ```
+    0x446A13 if (!0x446600(e)) return false
+    0x446A1E al = byte[0x4AB595] = rec.b1 ; 0x446A25 al = byte[0x4AB599] = rec.r1
+    0x446A2A b1 != 0 → 0x446A43：r1 == 0 → 0x446A52（**不移动**），否则 0x446A47
+    0x446A2C b1 == 0：r1 != 0 → 0x446A47，否则 0x446A30
+    0x446A47 0x446470(e, 0, 1) → 0x446A52
+    0x446A30 [e+4] = [0x4AB59C] ; [e+8] = [0x4AB5A0]      ; ★ 吸附，无 /4
+    ── 0x446A52 共用尾 ──
+    0x446A5A 0x45A690(x, y) → [0x56CC8C]/[0x56CC90]
+    0x446A78 0x45A690(x-0x18, y-0x18) → 显示节点 [+0x14]/[+0x18]
+    0x446A93 return [e+0x18] != 0
+    ```
+    """
+    if not p4_446600(self, e):
+        return False
+    b1 = bool(getattr(self.inp.rec, "b1", 0))               # 0x446A1E
+    r1 = bool(getattr(self.inp.rec, "r1", 0))               # 0x446A25
+    if b1:
+        if r1:                                              # 0x446A43 test al,al / je 0x446A52
+            p4_446470(self, e, 0, 1)                        # 0x446A4D
+    elif r1:                                                # 0x446A2E jne 0x446A47
+        p4_446470(self, e, 0, 1)                            # 0x446A4D
+    else:                                                   # 0x446A30 吸附
+        px, py = self.p4_ptr()
+        e.d32(0x04, px & 0xFFFFFFFF)
+        e.d32(0x08, py & 0xFFFFFFFF)
+    nx, ny = p4_45A690(e.s32(0x04), e.s32(0x08))            # 0x446A5A
+    self.p4_player_pos = (nx, ny)                           # 0x56CC8C / 0x56CC90
+    ox, oy = p4_45A690(nx - 0x18, ny - 0x18)                # 0x446A78
+    if e.node is not None:
+        e.node.dst = (ox, oy)                               # 0x446A83
+    return e.g32(0x18) != 0                                 # 0x446A93
+
+
+def _beh_446AD0(self, e) -> bool:
+    """`0x446AD0`（type 1 行为，索引 5）：**无条件吸附**，没有任何输入分支。
+
+    ```
+    0x446AD3 if (!0x446600(e)) return false
+    0x446ADE [e+4] = [0x4AB59C] ; 0x446AEC [e+8] = [0x4AB5A0]
+    0x446AF8 0x45A690(x, y) → [0x56CC8C]/[0x56CC90]
+    0x446B11 0x45A690(x-0x18, y-0x18) → 显示节点 [+0x14]/[+0x18]
+    0x446B2D return [e+0x18] != 0
+    ```
+    """
+    if not p4_446600(self, e):
+        return False
+    px, py = self.p4_ptr()
+    e.d32(0x04, px & 0xFFFFFFFF)                            # 0x446AE3
+    e.d32(0x08, py & 0xFFFFFFFF)                            # 0x446AEE
+    nx, ny = p4_45A690(e.s32(0x04), e.s32(0x08))            # 0x446AF3
+    self.p4_player_pos = (nx, ny)                           # 0x446AF8
+    ox, oy = p4_45A690(nx - 0x18, ny - 0x18)                # 0x446B11
+    if e.node is not None:
+        e.node.dst = (ox, oy)                               # 0x446B1C
+    return e.g32(0x18) != 0                                 # 0x446B2D
+
+
 def _beh_446950(self, e) -> bool:
     """`0x401XXX` → `0x446950`（type 1 变体）：只有 `0x446600` 门 + 1/4 步进逼近，**无**锁定击破分支。
 
@@ -2158,6 +2219,8 @@ P4_BEH: dict[int, object] = {
     0x40E520: _beh_23000005_06,
     0x4466F0: _beh_type1_follow,
     0x4467D0: _beh_type1_follow_b,
+    0x446A10: _beh_446A10,
+    0x446AD0: _beh_446AD0,
     0x40E230: _beh_23000003,
     **{a: globals()[f"_beh_p4slot_{a:06X}"] for a in P4_SPAWN_SLOTS},
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）

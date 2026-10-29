@@ -1481,6 +1481,33 @@ def main():
     _b95e.d32(0x18, 1)
     _b95e.node = _Nd()
     _b95r = page4._beh_446950(_b95s, _b95e)
+    _bs4 = _PS()
+    _be4 = page4.Ent(0x100, 0x100, 0x1, 0)
+    _be4.d32(0x18, 1)
+    _be4.node = _Nd()
+    _br4 = page4._beh_446A10(_bs4, _be4)
+    _bs5 = _PS()
+    _be5 = page4.Ent(0x100, 0x100, 0x1, 0)
+    _be5.d32(0x18, 1)
+    _be5.node = _Nd()
+    _br5 = page4._beh_446AD0(_bs5, _be5)
+    check("0x446A10（索引 4）/ 0x446AD0（索引 5）：**直接吸附**到指针（无 /4），"
+          "并发布坐标；两者都已登记进 P4_BEH",
+          _br4 is True and (_be4.g32(0x04), _be4.g32(0x08)) == (0x140, 0x100)
+          and _bs4.p4_player_pos == (0x140, 0x100)
+          and _be4.node.dst == (0x140 - 0x18, 0x100 - 0x18)
+          and _br5 is True and (_be5.g32(0x04), _be5.g32(0x08)) == (0x140, 0x100)
+          and _be5.node.dst == (0x140 - 0x18, 0x100 - 0x18)
+          and page4.P4_BEH[0x446A10] is page4._beh_446A10
+          and page4.P4_BEH[0x446AD0] is page4._beh_446AD0, "")
+    _bs6 = _PS()
+    _be6 = page4.Ent(0x100, 0x100, 0x1, 0)
+    _be6.d32(0x18, 1)
+    _be6.node = _Nd()
+    _bs6.inp.rec.b1 = True          # b1 != 0 且 r1 == 0 ⇒ **不移动**
+    page4._beh_446A10(_bs6, _be6)
+    check("0x446A10 的 b1!=0/r1==0 分支不移动（与 0x4466F0 同构的四态）",
+          _be6.g32(0x04) == 0x100 and _be6.g32(0x08) == 0x100, "")
     check("0x446950（= 0x446890 逐字节相同）：1/4 步进 + **发布 [0x56CC8C]/[0x56CC90]** + "
           "显示节点 (x-0x18,y-0x18)",
           _b95r is True and _b95e.g32(0x04) == 0x110
