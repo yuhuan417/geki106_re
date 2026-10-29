@@ -604,6 +604,26 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
         self.p4_avatar_rec = rec
 
 
+def p4_input_cfg(self, fid: int):
+    """`0x498A88 + fid*14` → 输入配置（`build_p4_avatar.py` 导出 `configs`）。
+
+    字段按 `0x44E660` Poll 的消费点命名：
+    `+0x4C` = 摇杆启用字节（`0x44E8B5`，为 0 则整段摇杆处理跳过）、
+    `+0x4E` = 标志字节（`0x44E917`）、`+0x50` = 灵敏度 word（`0x44E91C`，按 ±0x3E8 归一）。
+    """
+    cfg = getattr(self, "p4_input_cfgs", None)
+    if cfg is None:
+        try:
+            import json
+            import pathlib
+            f = pathlib.Path(__file__).resolve().parent.parent / "p4_avatar.json"
+            cfg = json.loads(f.read_text(encoding="utf-8"))["configs"]
+            self.p4_input_cfgs = cfg
+        except Exception:
+            return None
+    return cfg.get(str(fid))
+
+
 def p4_avatar_rect(self, fid: int):
     """`0x498A88 + fid*14`：**输入配置表**（不是 sprite 帧表）。
 
