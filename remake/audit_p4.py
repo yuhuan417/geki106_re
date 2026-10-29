@@ -505,6 +505,54 @@ def main():
           and img[0x448280 - ib:0x448282 - ib] == bytes([0xB9, 0x06])
           and u32(0x448296) == 0x120B1121, "")
 
+    print("== 11p. 两块行为银行的族性（§16.172）")
+    bankA = [0x4466F0, 0x4467D0, 0x446890, 0x446950,
+             0x446A10, 0x446AD0, 0x446B50, 0x446BD0]
+    bankB = [0x446C50, 0x446D30, 0x446E20, 0x446F10,
+             0x447000, 0x447110, 0x447200, 0x447320]
+
+    def scan(a, end):
+        big, calls = [], []
+        for i in md32.disasm(img[a - ib:end - ib], a):
+            if i.mnemonic == "push" and i.op_str.startswith("0x"):
+                v = int(i.op_str, 16)
+                if v > 0xFFFF:
+                    big.append(v)
+            if i.mnemonic == "call":
+                r = int.from_bytes(img[i.address + 1 - ib:i.address + 5 - ib],
+                                   "little", signed=True)
+                calls.append(deep(i.address + 5 + r))
+        return big, calls
+
+    a_big, a_calls = [], []
+    for k, a in enumerate(bankA):
+        end = bankA[k + 1] if k + 1 < len(bankA) else 0x446C50
+        big, calls = scan(a, end)
+        a_big += big
+        a_calls += calls
+    check("类型1 的八个行为都不含大常数（不生成弾）", a_big == [], f"{[hex(x) for x in a_big]}")
+    check("类型1 的行为只调 0x446600 与 0x45A690",
+          set(a_calls) <= {0x446600, 0x45A690, 0x446470},
+          f"{[hex(x) for x in sorted(set(a_calls))]}")
+
+    b_big = []
+    ok_enq = True
+    for k, a in enumerate(bankB):
+        end = bankB[k + 1] if k + 1 < len(bankB) else 0x447410
+        big, calls = scan(a, end)
+        b_big += big
+        if 0x430290 not in calls:
+            ok_enq = False
+    check("类型5 的八个行为都发 0x10008041",
+          b_big.count(0x10008041) == 8, f"{[hex(x) for x in b_big]}")
+    check("类型5 的八个行为都经 0x430290 入队", ok_enq, "")
+    check("0x40212B→0x446600、0x401AA5→0x446470、0x40164F→0x45F530",
+          thunk(0x40212B) == 0x446600 and thunk(0x401AA5) == 0x446470
+          and thunk(0x40164F) == 0x45F530, "")
+    check("0x446C50 造记录首项为子对象 ebp（push ebp）",
+          img[0x446C6B - ib:0x446C6C - ib] == b"\x55"
+          and u32(0x446C6D) == 0x10008041, "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
