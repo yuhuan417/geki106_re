@@ -375,6 +375,12 @@ class Layers:
 
     def bind(self, n: int, ggd_id: int) -> bool:
         """0x44C640：与已绑定 id 不同才重新装载。"""
+        import os as _os
+        if _os.environ.get("P4_BINDLOG"):
+            import traceback as _tb
+            _st = _tb.extract_stack()[-4:-1]
+            _chain = " < ".join(f"{f.filename.split('/')[-1]}:{f.lineno}" for f in _st)
+            print(f"[bind] layer={n} id={ggd_id} <- {_chain}")
         lay = self.tab.get(n)
         if lay is not None and lay.bind_id == ggd_id:
             return True

@@ -5441,6 +5441,13 @@ class Page4Mixin:
             self.flags.set(2)
         _ok = True
         for _l, _id in ((0, 0xF0), (1, 0xF1)):               # 0x4549A1 / 0x4549B6
+            # exe 顺序：0x4505B0 → 0x454950（此处绑 240/241）→ 首帧 VM 的 op 0x0B 再绑 7/8。
+            # 复刻侧 `p4_enter` 把 VM 构造（连带 t=0 的 op 0x0B）一起做了，流解析**早于**这里，
+            # 若此时再无条件绑 240/241 就会把脚本刚装好的 7/8 冲掉（实测就是这么错的）。
+            # 等价做法：只在层还没被绑过时才绑 —— exe 里这两层此刻也是空的，净效果相同。
+            _cur = getattr(self.layers.tab.get(_l), "bind_id", None)
+            if _cur not in (None, 0, 5):
+                continue
             if not self.layers.bind(_l, _id):
                 _ok = False
                 break
