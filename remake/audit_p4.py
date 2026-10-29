@@ -973,6 +973,33 @@ def main():
           or img[0x446973 - ib:0x446980 - ib][:5] == bytes([0x85, 0xC0, 0x7C, 0x03, 0x83]),
           img[0x446973 - ib:0x446980 - ib].hex())
 
+    # ---- §16.192 生成器的 type→行为 指派 ----
+    THUNKS = {0x40116D: 0x447F90, 0x40143D: 0x446890, 0x4015FF: 0x447410,
+              0x40197E: 0x446C50, 0x401A7D: 0x4467D0, 0x401B6D: 0x4466F0,
+              0x401BE0: 0x448230, 0x401E06: 0x448C70, 0x401FBE: 0x446D30,
+              0x4020BD: 0x447640, 0x4023B5: 0x446E20, 0x401E3D: 0x446950,
+              0x402199: 0x446BD0}
+
+    def _deep(a):
+        t = thunk(a)                      # thunk() 已是"指令地址 → rel32 目标"
+        n = 0
+        while 0x401000 <= t <= 0x4026FF and img[t - ib] == 0xE9 and n < 4:
+            t = thunk(t)
+            n += 1
+        return t
+
+    check("13 个 thunk 的展开目标与文档表一致",
+          all(_deep(a) == b for a, b in THUNKS.items()),
+          f"{[(hex(a), hex(_deep(a)), hex(b)) for a, b in THUNKS.items() if _deep(a) != b]}")
+    check("5 处直接写 [ent+0x40] 的立即数正确",
+          u32(0x445CE7 + 3) == 0x4020BD and u32(0x44601E + 3) == 0x4015FF
+          and u32(0x44605E + 3) == 0x401E06 and u32(0x446121 + 3) == 0x401BE0
+          and u32(0x446227 + 3) == 0x40116D,
+          f"{[hex(u32(x + 3)) for x in (0x445CE7, 0x44601E, 0x44605E, 0x446121, 0x446227)]}")
+    check("新发现的 4 个行为都是真函数（起始字节非 int3 填充）",
+          all(img[x - ib] != 0xCC for x in (0x446890, 0x446C50, 0x446D30, 0x446E20)),
+          f"{[hex(img[x - ib]) for x in (0x446890, 0x446C50, 0x446D30, 0x446E20)]}")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
