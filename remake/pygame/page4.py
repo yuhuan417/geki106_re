@@ -1449,6 +1449,54 @@ def _beh_446E20(self, e) -> bool:
     return p4_laser(self, e, "e20")
 
 
+def _beh_447F90(self, e) -> bool:
+    """`0x40116D` → `0x447F90`（type 10 行为）：**三向旋转散射**（§16.200/§16.201）。
+
+    ```
+    0x447F99 n = [ent+0x20] + 1                        ; 帧计数
+    0x447FA2 ang = (n & 0xF) * 225                     ; 22.5°，满圆 3600 ⇒ 16 等分
+    0x447FAF 0x40159B→0x45ABB0(ang) = cos ; 0x447FB7 shl 1      ⇒ co2 = 2cos
+    0x447FB9 0x401A50→0x45AAF0(ang) = sin ; 0x447FBE *5         ⇒ sn5 = 5sin
+    0x447FD8 方向表 (0x100,0) / (−0x80,0xDE) / (−0x80,−0xDE)   ; 半径≈256、三向 120°
+    0x448023 edx = (dy·co2 + dx·sn5) >> 13  ⇒ y = py − edx
+    0x44803E eax = (dy·sn5 + dx·co2) >> 13  ⇒ x = px + eax
+    0x448062 t = 7 < (n & 0x1F) < 0x18 ? 0x10000052→0x4AD46C : 0x41000010→0x4AD4CC
+    0x4480D4 if (0x45AFF0(0x56CCB8, 0x20)) 跳过尾部
+    0x4480E8 尾部再补一发：n 奇 → (sn5*2, co2*5)，偶 → (sn5*4, co2*10)
+    0x448127 y = py − (b >> 5) ; 0x448135 x = px − (a >> 5)
+    0x44817F 0x40114A→0x45B0A0(0x56CCB8, 0x10, byte[sub+0x34])  ; 置/清 bit4
+    0x44818A return byte[sub+0x34]
+    ```
+    """
+    sub = e.p.get("sub")                                # 0x447FD5 eax = [ebp+0x1C]
+    if sub is None:
+        return False
+    n = (e.g32(0x20) + 1) & 0xFFFFFFFF                  # 0x447F99
+    e.d32(0x20, n)                                      # 0x447F9F
+    ang = (n & 0xF) * 225                               # 0x447FA2 (lea 链 25×9)
+    co2 = p4_sin_q(ang, "cos") * 2                      # 0x447FAF + 0x447FB7 shl 1
+    sn5 = p4_sin_q(ang, "sin") * 5                      # 0x447FB9 + 0x447FBE ×5
+    px, py = sub.s32(0x04), sub.s32(0x08)               # 0x447FF0 / 0x447FF3
+    many = 7 < (n & 0x1F) < 0x18                        # 0x448080 / 0x448085
+    for dx, dy in ((0x100, 0), (-0x80, 0xDE), (-0x80, -0xDE)):   # 0x447FD8 表
+        y = py - ((dy * co2 + dx * sn5) >> 13)          # 0x448035..0x448040
+        x = px + ((dy * sn5 + dx * co2) >> 13)          # 0x44803E..0x44804D
+        if many:
+            self.spawn(self._p4_q("ui46c"), 0x10000052, x, y)     # 0x44808E
+        else:
+            self.spawn(self._p4_q("ui4cc"), 0x41000010, x, y)     # 0x4480AD
+    if not (self.p4_sys_bits() & 0x20):                 # 0x4480D4 0x45AFF0(…,0x20)
+        if n & 1:                                       # 0x4480E8
+            a, b = sn5 * 2, co2 * 5                     # 0x448101 / 0x448104
+        else:
+            a, b = sn5 * 4, co2 * 10                    # 0x4480F2 / 0x4480F9 + shl
+        self.spawn(self._p4_q("ui46c"), 0x10000052,
+                   px - (a >> 5), py - (b >> 5))        # 0x448135 / 0x448127
+    alive = sub.g32(0x34)                               # 0x448179
+    self._p4_sys = (int(getattr(self, "_p4_sys", 0)) & ~0x10) | (0x10 & (1 if alive else 0))
+    return bool(alive)                                  # 0x44818A
+
+
 def _beh_446F10(self, e) -> bool:
     """`0x446F10`：激光族变体（入口置 `[0x56CC94]=1`，释放时 0 号结算）。见 `p4_laser`。"""
     return p4_laser(self, e, "f10")
@@ -1751,6 +1799,7 @@ P4_BEH: dict[int, object] = {
     0x446F10: _beh_446F10,
     0x447410: _beh_447410,
     0x448C70: _beh_10000001,
+    0x447F90: _beh_447F90,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
     0x40EAF0: _beh_23000009,

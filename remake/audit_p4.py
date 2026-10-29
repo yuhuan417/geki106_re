@@ -1166,8 +1166,25 @@ def main():
     check("0x447F90 的两条入队类型 0x10000052 / 0x41000010 至 4AD46C / 4AD4CC",
           bytes([0xC7, 0x44, 0x24, 0x30, 0x52, 0x00, 0x00, 0x10]) in _r
           and bytes([0xC7, 0x44, 0x24, 0x34, 0x10, 0x00, 0x00, 0x41]) in _r, "")
-    check("0x447F90 尚未登记进 P4_BEH（尾部两点未定）",
-          0x447F90 not in page4.P4_BEH, "")
+    check("0x447F90 已登记进 P4_BEH（§16.201 定案）",
+          0x447F90 in page4.P4_BEH and page4.P4_BEH[0x447F90] is page4._beh_447F90, "")
+    # 用分支感知的 esp_flow 证明：尾部读的 px/py 与循环里写的 x/y 是同一槽
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import esp_flow as _ef
+    _m = _ef.flow(0x447F90, 0x448192)
+    check("0x44811C 读的槽 == 0x448006 写的 y 槽（分支感知换算后同一地址）",
+          _m[0x44811C][0x24] == _m[0x448006][0x20],
+          f"{_m[0x44811C][0x24]} vs {_m[0x448006][0x20]}")
+    check("0x448129 读的槽 == 0x448002 写的 x 槽",
+          _m[0x448129][0x28] == _m[0x448002][0x24],
+          f"{_m[0x448129][0x28]} vs {_m[0x448002][0x24]}")
+    def _f(addr, raw):
+        return next(iter(_m[addr][raw]))
+    check("0x448123 写的 a 就在 0x448113 指针处、0x448117 写的 b 紧随其后（+4）",
+          _f(0x448123, 0x1C) == _f(0x448113, 0x18)
+          and _f(0x448117, 0x1C) == _f(0x448113, 0x18) + 4,
+          f"{_f(0x448123, 0x1C)} {_f(0x448117, 0x1C)} {_f(0x448113, 0x18)}")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
