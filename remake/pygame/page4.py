@@ -220,7 +220,26 @@ class ScriptVM:
             vals = [int.from_bytes(body[0xC + 4 * i:0x10 + 4 * i], "little") for i in range(n)]
             self.out[9].append((int.from_bytes(body[0:4], "little"),
                                 int.from_bytes(body[4:8], "little"), vals))
+            # 0x460512 本体：0x4561D0(0x4CD484, 表=[esi+0x10], count=[esi+0xC],
+            #                    startIdx=[esi+4], scroll=[esi+8])——**立即装载色带表**。
+            # 表项 dword = {u8 color, u8 pad, i16 h}（h 在高半，band_draw 读 [idx*4+2]）。
+            if self.owner is not None:
+                self.owner.band_push(
+                    [(v & 0xFF, _p4_s16(v >> 16)) for v in vals],
+                    n,
+                    int.from_bytes(body[0:4], "little"),
+                    int.from_bytes(body[4:8], "little"))
+            if os.environ.get("P4_BANDTRACE"):
+                print(f"[band] t={self.owner.p4_frames if self.owner else '?'} "
+                      f"count={n} start={int.from_bytes(body[0:4], 'little')} "
+                      f"scroll={int.from_bytes(body[4:8], 'little')} "
+                      f"vals[0:6]={[(v & 0xFF, _p4_s16(v >> 16)) for v in vals[:6]]}")
         elif op == 0xA:                                          # 0x460538
+            # 0x460538 本体：0x456240(0x4CD484, [esi+4], [esi+8])——设置滚动速度/帧数。
+            if self.owner is not None:
+                self.owner.band_scroll_for(
+                    int.from_bytes(body[0:4], "little"),
+                    int.from_bytes(body[4:8], "little"))
             self.out[0xA].append((int.from_bytes(body[0:4], "little"),
                                   int.from_bytes(body[4:8], "little")))
         elif op == 0xB:                                          # 0x460600 装层

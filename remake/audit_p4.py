@@ -2743,6 +2743,34 @@ def main():
           and _gfn.p4_45cfb0(1, 1, 4, 1) == "rp_tr_j_05_rin.dat"
           and _gfn.p4_45cfb0(0, 1, 11, 2) == "rp_gm_j_12_kan.dat"
           and _gfn.p4_45cfb0(1, 0, 0x63, 0) == "rp_last.dat", "")
+    class _BO:
+        def __init__(self):
+            self.pushed = None
+            self.scrolled = None
+        def band_push(self, table, count, start, scroll):
+            self.pushed = (list(table), count, start, scroll)
+        def band_scroll_for(self, speed, frames):
+            self.scrolled = (speed, frames)
+    _bop9 = _BO()
+    _vm9 = page4.ScriptVM(page4.ScriptBank.__new__(page4.ScriptBank), [0], owner=_bop9)
+    _vm9.exec_op(9, (3).to_bytes(4, "little")         # [esi+4]  startIdx
+                 + (100).to_bytes(4, "little")        # [esi+8]  scroll
+                 + (4).to_bytes(4, "little")          # [esi+0xC] count
+                 + b"".join(((0xD3 | (617 << 16))).to_bytes(4, "little")
+                            for _ in range(4)))
+    check("op 9（0x460512）→ 0x4561D0 立即装载：band_push(表, count=[esi+0xC], "
+          "startIdx=[esi+4], scroll=[esi+8])，表项 dword {u8 color, u8 pad, i16 h} → (color, h)",
+          _bop9.pushed is not None
+          and _bop9.pushed[0] == [(0xD3, 617)] * 4 and _bop9.pushed[1] == 4
+          and _bop9.pushed[2] == 3 and _bop9.pushed[3] == 100
+          and len(_vm9.out[9]) == 1, "")
+    _bopa = _BO()
+    _vma = page4.ScriptVM(page4.ScriptBank.__new__(page4.ScriptBank), [0], owner=_bopa)
+    _vma.exec_op(0xA, (-40).to_bytes(4, "little", signed=True)
+                 + (12).to_bytes(4, "little"))
+    check("op 0xA（0x460538）→ 0x456240：band_scroll_for(speed=[esi+4], frames=[esi+8])",
+          _bopa.scrolled == (0xFFFFFFC0 - 0x100000000 + 0x100000000, 12)
+          or _bopa.scrolled == ((-40) & 0xFFFFFFFF, 12), "")
     _fmts = {0x4A4D20: b"BrokenEnemy              %4d",
              0x4A4CFC: b"BrokenEnemy(Laser)       %4d",
              0x4A4CD8: b"Capture                   %3d",

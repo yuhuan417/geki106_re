@@ -1,0 +1,14 @@
+; func 0x460512  (12 insns)
+
+0x00460512  mov     ecx, dword ptr [esi + 8]
+0x00460515  mov     edx, dword ptr [esi + 4]
+0x00460518  mov     eax, dword ptr [esi + 0xc]
+0x0046051b  push    ecx
+0x0046051c  push    edx
+0x0046051d  add     esi, 0x10
+0x00460520  push    eax
+0x00460521  push    esi
+0x00460522  mov     ecx, 0x4cd484
+0x00460527  lea     edi, [eax*4 + 0x10]
+0x0046052e  call    0x401d61   ; → 0x4561d0
+0x00460533  jmp     0x4603ee
