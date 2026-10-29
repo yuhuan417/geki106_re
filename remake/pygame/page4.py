@@ -277,6 +277,7 @@ ENT_PROP = {
 ENT23_BEH_THUNK = {
     0x401C44: 0x40E070, 0x401FF0: 0x40E100, 0x401B1D: 0x40E230, 0x40118B: 0x40E460,
     0x401BD1: 0x40E520, 0x402180: 0x40E790, 0x401528: 0x40E8C0, 0x401181: 0x40EAF0,
+    0x4015AA: 0x40E9B0,      # 类型 0x23000009 的 thunk（0x43A899 家族之外，经 ctor 表写入）
 }
 
 
@@ -453,6 +454,56 @@ def _p4_rsqrt(s: int) -> int:
         v = int(4096.0 / math.sqrt(s)) if s > 0 else 0
         P4_RSQRT[s] = v
     return v
+
+
+def _beh_23000009(self, e) -> bool:
+    """`0x4015AA → 0x40E9B0`（类型 `0x23000009`）：下落 → 第 240 帧锁定自机 → 直线突进。
+
+    ```
+    0x40E9B3 t = [+0x2C]
+    0x40E9B6 if (t < 0x28)  [+0x1C] -= 0x20               ; 前 40 帧加速下降
+    0x40E9C1 if (t == 0xF0) {                             ; 第 240 帧：一次性锁定
+                 dy = [0x56CC90]-[e+8] ; dx = [0x56CC8C]-[e+4]
+                 inv = 0x45AA80(dx, dy)          ; 4096/|d| 倒数距离
+                 k   = inv / 3                   ; 0x55555556 有符号除 3
+                 [+0x1C] = dx * k ; [+0x20] = dy * k
+             }
+    0x40EA16 [+0x24] += [+0x1C] ; [+0x28] += [+0x20]      ; 8.8 定点累加
+    0x40EA2E [+0x04] = [+0x24] >> 8 ; [+0x08] = [+0x28] >> 8
+    0x40EA42 节点 dst = (x-0x18, y-0x18)
+    0x40EA56 if (t == 0xB4) 0x43B150(e, -[+0x58])         ; 双发对称弹
+    0x40EA6A if (t == 0xD2) 0x43B070(e, 0)                ; 单发追踪弹
+    0x40EA7C ++[+0x2C]
+    0x40EA83 返回 ([+0x18] != 0) && 0x4305F0(e, 0x18)     ; 在屏
+    ```
+
+    ⇒ 一枚**定时怪**：先自由下落，第 240 帧一次性把速度锁成「朝当时玩家位置」的定长向量
+    （`k = (4096/|d|)/3`，即速度 = 4096/3 的 8.8 定点 ≈ 5.33 像素/帧…实际再乘 `dx` 归一），
+    然后沿直线飞出；`t=0xB4` 与 `t=0xD2` 各放一次弹。
+    """
+    t = e.s32(0x2C)                                   # 0x40E9B3
+    if t < 0x28:                                      # 0x40E9B6
+        e.d32(0x1C, (e.s32(0x1C) - 0x20) & 0xFFFFFFFF)
+    elif t == 0xF0:                                   # 0x40E9C1
+        dy = self.p4_player_y() - e.s32(0x08)         # 0x40E9C8/0x40E9D6
+        dx = self.p4_player_x() - e.s32(0x04)         # 0x40E9D0/0x40E9DC
+        k = self._p4_div3(self.p4_45aa80(dx, dy))     # 0x40E9DF/0x40E9E6
+        e.d32(0x1C, (dx * k) & 0xFFFFFFFF)            # 0x40EA05
+        e.d32(0x20, (dy * k) & 0xFFFFFFFF)            # 0x40EA13
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)   # 0x40EA1C
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)   # 0x40EA29
+    x = e.s32(0x24) >> 8                              # 0x40EA2E
+    y = e.s32(0x28) >> 8                              # 0x40EA31
+    e.d32(0x04, x & 0xFFFFFFFF)                       # 0x40EA37
+    e.d32(0x08, y & 0xFFFFFFFF)                       # 0x40EA34
+    if e.node is not None:                            # 0x40EA42
+        e.node.dst = (x - 0x18, y - 0x18)
+    if t == 0xB4:                                     # 0x40EA56
+        self.p4_43B150(e, (-e.s32(0x58)) & 0xFFFFFFFF)
+    if t == 0xD2:                                     # 0x40EA6A
+        self.p4_43B070(e, 0)
+    e.d32(0x2C, (t + 1) & 0xFFFFFFFF)                 # 0x40EA7C
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x18) == 1   # 0x40EA83
 
 
 def _beh_43AEB0(self, e) -> bool:
@@ -2278,7 +2329,8 @@ P4_PLAYER_BEH = (0x4466F0, 0x4467D0, 0x446890, 0x446950,
                  0x446A10, 0x446AD0, 0x446B50, 0x446BD0)   # 0x445ED5..0x45F015
 
 P4_BEH: dict[int, object] = {
-    0x43AEB0: _beh_43AEB0,          # 类型 0x21000001（ctor 0x43A899 写 [+0x40]=0x401E2E）
+    0x43AEB0: _beh_43AEB0,
+    0x40E9B0: _beh_23000009,        # 类型 0x23000009（thunk 0x4015AA）          # 类型 0x21000001（ctor 0x43A899 写 [+0x40]=0x401E2E）
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
@@ -5070,6 +5122,56 @@ class Page4Mixin:
         if rng.randrange(0x500) < life + arg - 0x100:    # 0x43AFDB
             return life + arg
         return 0
+
+    @staticmethod
+    def _p4_div3(v: int) -> int:
+        """`0x55555556 imul` + `shr 31` 的**有符号除以 3**（向零截断）。"""
+        v &= 0xFFFFFFFF
+        v = v - 0x100000000 if v & 0x80000000 else v
+        return -((-v) // 3) if v < 0 else v // 3
+
+    def p4_43B150(self, e, arg: int) -> None:
+        """`0x43B150`：**双发对称斜向弹**（`0x43B070` 的"旋回"版），进 ui49c。
+
+        ```
+        0x43B15E 0x40113B(&vec, e)              ; = 0x43B020，借栈传址取类型
+        0x43B171 0x430400(&rec, [e+4], [e+8], type)
+        0x43B19B [esp+0x10] = 1                 ; 计数 = 1 ⇒ 循环跑 n=1,0 两遍
+        0x43B1AE dx = [0x56CC8C] - [e+4] ; 0x43B1B0 dy = [0x56CC90] - [e+8]
+        循环体 0x43B1C4:
+          n != 0 → ebx = 2*dy - dx ; edi = dy + 2*dx
+          n == 0 → edi = 2*dx - dy ; ebx = dx + 2*dy
+          0x43B1E5 spd = 0x401FB4(e, arg) >> 4
+          0x43B1F1 inv = 0x45AA80(edi, ebx)
+          0x43B1FB vx = (inv*spd*edi) >> 8
+          0x43B1FE vy = (inv*spd*ebx) >> 8
+          0x43B215 若 vx==0 && vy==0 跳过
+          0x43B22B 0x435440(0x4AD49C, &rec)     ; 速度对作为 a3（栈残留）
+        0x43B230 n-- ; n >= 0 则继续
+        ```
+
+        `(2dy-dx, dy+2dx)` 与 `(2dx-dy, dx+2dy)` 是把 `(dx,dy)` 旋转约 ±63.4°（`tan⁻¹2`），
+        所以两发呈**对称的 V 形夹角**，而不是直线对射。
+        """
+        typ = self.p4_43B020(e)                           # 0x43B15E
+        px, py = self.p4_player_x(), self.p4_player_y()
+        dx = px - e.s32(0x04)                             # 0x43B1AE
+        dy = py - e.s32(0x08)                             # 0x43B1B0
+        for n in (1, 0):                                  # 0x43B19B = 1 ⇒ 两遍
+            if n:
+                ebx = 2 * dy - dx                         # 0x43B1CC/0x43B1D2
+                edi = dy + 2 * dx                         # 0x43B1CF
+            else:
+                edi = 2 * dx - dy                         # 0x43B1D6/0x43B1DC
+                ebx = dx + 2 * dy                         # 0x43B1D9
+            spd = self.p4_43af90(e, arg) >> 4             # 0x43B1E5/0x43B1EE
+            inv = self.p4_45aa80(edi, ebx)                # 0x43B1F1
+            vx = ((inv * spd) * edi) >> 8                 # 0x43B1FB
+            vy = ((inv * spd) * ebx) >> 8                 # 0x43B1FE
+            if vx == 0 and vy == 0:                       # 0x43B215
+                continue
+            self.spawn(self._p4_q("ui49c"), typ,
+                       e.s32(0x04), e.s32(0x08), (vx, vy))   # 0x43B22B
 
     def p4_43B070(self, e, arg: int) -> None:
         """`0x43B070`：朝玩家生成一枚 `0x31` 族实体进 **0x4AD49C**。

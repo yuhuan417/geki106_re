@@ -1694,6 +1694,63 @@ def main():
            for i in _mdk.disasm(img[0x45A7E0 - ib:0x45A862 - ib], 0x45A7E0)}
     _eb = page4.Ent(320, 240, 0x23000006, 0)
     _eo = page4.Ent(700, 240, 0x23000006, 0)
+    _b020 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x43B020 - ib:0x43B053 - ib], 0x43B020)}
+    _b070 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x43B070 - ib:0x43B10A - ib], 0x43B070)}
+    _b0f90 = {i.address: (i.mnemonic, i.op_str)
+              for i in _mdk.disasm(img[0x43AF90 - ib:0x43AFF3 - ib], 0x43AF90)}
+    _e31 = page4.Ent(0, 0, 0x23000006, 0)
+    _t31 = []
+    for _hi, _want in ((0x25000000, 0x31000006), (0x26000000, 0x31000019),
+                       (0x27000000, 0x31000001), (0x23000000, 0x3100000A)):
+        _e31.d32(0x14, _hi | 1)
+        _t31.append(page4.Page4Mixin.p4_43B020(None, _e31) == _want)
+    check("0x43B020 按 [e+0x14]&0xFF000000 选类型：0x25→0x31000006、0x26→0x31000019、"
+          "0x27→0x31000001（neg/sbb 读 CF）、其余→0x3100000A；"
+          "0x43AF90 带难度(op==3 翻倍)与生命门控(r < life+arg-0x100)；"
+          "0x43B070 朝玩家发弹，速度=(4096/|d|)*分量*(speed>>4)>>8，两分量全 0 则不发",
+          _b020.get(0x43B023) == ("and", "eax, 0xff000000")
+          and _b020.get(0x43B03B) == ("neg", "eax")
+          and _b020.get(0x43B03D) == ("sbb", "eax, eax")
+          and _b020.get(0x43B03F) == ("and", "al, 0xf7")
+          and _b020.get(0x43B041) == ("add", "eax, 0x3100000a")
+          and _b0f90.get(0x43AFB1) == ("add", "esi, esi")
+          and _b0f90.get(0x43AFDB) == ("lea", "ecx, [eax + esi - 0x100]")
+          and _b0f90.get(0x43AFE2) == ("cmp", "edx, ecx")
+          and _b070.get(0x43B091) == ("sub", "edi, ebx")
+          and _b070.get(0x43B09D) == ("sar", "ebx, 4")
+          and _b070.get(0x43B0B3) == ("sar", "ecx, 8")
+          and _b070.get(0x43B0CA) == ("je", "0x43b10a")
+          and _b070.get(0x43B0FF) == ("mov", "ecx, 0x4ad49c")
+          and _b070.get(0x43B105) == ("call", "0x401861")
+          and all(_t31), "")
+    _b150 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x43B150 - ib:0x43B243 - ib], 0x43B150)}
+    _e9b0 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x40E9B0 - ib:0x40EAA2 - ib], 0x40E9B0)}
+    check("0x43B150 双发对称弹：方向向量 (2dy-dx, dy+2dx) 与 (2dx-dy, dx+2dy)（把 (dx,dy) "
+          "旋转约 ±63.4°），速度 (inv*spd*分量)>>8，全 0 则跳过，进 ui49c；"
+          "0x40E9B0（类型 0x23000009）t<0x28 加速下降、t==0xF0 一次性锁定朝玩家、"
+          "t==0xB4 双发、t==0xD2 单发，存活=HP!=0 && 0x4305F0(e,0x18)",
+          _b150.get(0x43B1CC) == ("lea", "ebx, [ecx + ecx]")
+          and _b150.get(0x43B1D2) == ("sub", "ebx, eax")
+          and _b150.get(0x43B1D6) == ("lea", "edi, [eax + eax]")
+          and _b150.get(0x43B1D9) == ("lea", "ebx, [eax + ecx*2]")
+          and _b150.get(0x43B19B) == ("mov", "dword ptr [esp + 0x10], 1")
+          and _b150.get(0x43B22B) == ("call", "0x401861")
+          and _b150.get(0x43B239) == ("jns", "0x43b1bc")
+          and _e9b0.get(0x40E9B9) == ("jge", "0x40e9c1")
+          and _e9b0.get(0x40E9BB) == ("add", "dword ptr [esi + 0x1c], -0x20")
+          and _e9b0.get(0x40E9C1) == ("cmp", "eax, 0xf0")
+          and _e9b0.get(0x40EA31) == ("sar", "eax, 8")
+          and _e9b0.get(0x40EA65) == ("call", "0x401d6b")
+          and _e9b0.get(0x40EA77) == ("call", "0x40213f")
+          and page4.P4_BEH.get(0x40E9B0) is not None
+          and page4.ENT23_BEH_THUNK.get(0x4015AA) == 0x40E9B0
+          and page4.Page4Mixin._p4_div3(9) == 3
+          and page4.Page4Mixin._p4_div3(-9) == -3
+          and page4.Page4Mixin._p4_div3(8) == 2, "")
     check("0x45AA80 = 倒数距离 4096/hypot(a,b)（不是 atan2！）：先 a²+b² 再 >>2 到 <0x10000，"
           "查 0x593AB4 的倒数平方根表 word[i]=(int)(4096/sqrt(i))（启动期 0x45A7E0 用 fsqrt+fdivr 建表），"
           "结果 >>cl；0x4305F0 是带半径在屏判据 (x-r<=0x27F && x+r>0 && y-r<=0x1DF && y+r>0)",
