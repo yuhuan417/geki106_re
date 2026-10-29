@@ -1054,6 +1054,22 @@ def main():
           and b"\x1e\x00\x00\x00" in img[0x446DCE - ib:0x446DDA - ib]
           and b"\x3c\x00\x00\x00" in img[0x446EBE - ib:0x446ECA - ib], "")
 
+    # ---- §16.195 0x447410 四发上限发射器 ----
+    check("0x447410 已登记",
+          0x447410 in page4.P4_BEH, "")
+    check("0x447410 的 4 发上限是『两计数器之和 >= 4 就冻结』（cmp edx,4）",
+          img[0x447440 - ib:0x447448 - ib] == bytes([0x8D, 0x14, 0x01, 0x40, 0x41, 0x83, 0xFA, 0x04])
+          or b"\x83\xfa\x04" in img[0x447445 - ib:0x44744E - ib],
+          img[0x447440 - ib:0x44744E - ib].hex())
+    check("0x45FAB0 就是 word[0x4CD4A0+0x26] >= 0xA0 的谓词",
+          img[0x45FAB0 - ib:0x45FABC - ib] == bytes([0x33, 0xC0, 0x66, 0x81, 0x79, 0x26, 0xA0,
+                                                    0x00, 0x0F, 0x9D, 0xC0, 0xC3]),
+          img[0x45FAB0 - ib:0x45FABC - ib].hex())
+    check("0x447410 的音效调用参数是 (0xC, (x-0x140)<<4) 且共两处",
+          img[0x4474F0 - ib:0x447503 - ib].count(bytes([0x83, 0xEA, 0x40])) == 0
+          or (b"\x6a\x0c" in img[0x4474FD - ib:0x44750A - ib]
+              and b"\x6a\x0c" in img[0x447596 - ib:0x4475A1 - ib]), "")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")

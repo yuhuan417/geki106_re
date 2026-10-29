@@ -1293,6 +1293,79 @@ def _beh_type1_follow(self, e) -> bool:
     return True
 
 
+def _beh_447410(self, e) -> bool:
+    """`0x4015FF` → `0x447410`（特殊类；ctor `0x446030` 另置 `[+0x20]=5`）：**四发上限**的 `0x10008431` 发射器。
+
+    ```
+    0x447410 al = byte[0x4AB596] ; ebp = ent ; ebx = [ent+0x1C]（子对象）
+    0x447422 if (al)      [ent+0x20] = 0
+    0x44742D if (byte[0x4AB597]) [ent+0x24] = 0
+    0x447439 edx = [ent+0x20] + [ent+0x24]
+    0x447445 if (edx >= 4) → 0x447528        ; 合计到 4 就冻结
+    0x447448 [ent+0x24]++ ; [ent+0x20]++     ; 两计数器同增
+    0x447454 需要 btn0 或 btn1 按下沿，且 [sub+0x28] != 1、byte[sub+0x34] != 0
+    0x44747F slot = 0x45AFC0(0x4AB5B0,0xC000)
+    0x44748E slot == 3 → 0x44750C
+    0x447493 否则：若 [sub+0x28] != 0 → 清零后 0x447521，否则 0x4474A0
+    0x4474A0 0x45FAB0(0x4CD4A0) 为假 → 0x447528   ; word[0x4CD4A0+0x26] >= 0xA0
+    0x4474AE 造 0x10008431（位置 = sub、第 5 字段 = [ent+0x1C]）入 0x4AD46C
+    0x4474F6 [sub+0x28] = 1 ; 0x447503 0x4013A2(0xC, ([sub+4]−0x140)<<4)  ; 声像
+    ── 0x44750C ──
+    0x44750C 同样先测 0x45FAB0(0x4CD4A0)
+    0x44751A [ent+0x28] = 0x3C
+    0x447521 [sub+0x20] = 0x79
+    ── 0x447528 ──
+    0x447528 if (slot != 3) → 0x4475A1
+    0x44753C [sub+0x28] = 0 ; 0x44753F t = [ent+0x28] ; t == 0 → 尾部
+    0x447546 t-- ; [ent+0x28] = t ; 0x447547 if (t & 3) != 0 → 尾部
+    0x44754E 造 0x10008431 + 0x44759C 0x4013A2(0xC, ([sub+4]−0x140)<<4)  ; 不置 [sub+0x28]
+    ── 0x4475A1 ──
+    0x4475A1 if (byte[0x56CCB3] && [sub+0x28] != 2 && != 3) byte[0x56CCB3] = 0
+    0x4475BF 返回 byte[sub+0x34]
+    ```
+    """
+    sub = e.p.get("sub")                              # 0x44741F ebx = [ebp+0x1C]
+    if sub is None:
+        return False
+    b0e = self.p4_btn0_edge()                         # 0x4AB596
+    b1e = self.p4_btn1_edge()                         # 0x4AB597
+    if b0e:                                           # 0x447422
+        e.d32(0x20, 0)
+    if b1e:                                           # 0x44742D
+        e.d32(0x24, 0)
+    c20, c24 = e.s32(0x20), e.s32(0x24)
+    if c20 + c24 < 4:                                 # 0x447445
+        e.d32(0x24, (c24 + 1) & 0xFFFFFFFF)           # 0x447448
+        e.d32(0x20, (c20 + 1) & 0xFFFFFFFF)           # 0x44744B
+        if (b0e or b1e) and sub.s32(0x28) != 1 and sub.g32(0x34):
+            slot = self.keys.field(0xC000)            # 0x44747F
+            if slot == 3:                             # 0x44748E
+                if self.p4_4cd4a0_ge_a0():            # 0x44750C
+                    e.d32(0x28, 0x3C)                 # 0x44751A
+                    sub.d32(0x20, 0x79)               # 0x447521
+            else:
+                if sub.s32(0x28) != 0:                # 0x447493
+                    sub.d32(0x28, 0)
+                elif self.p4_4cd4a0_ge_a0():          # 0x4474A0
+                    self.p4_fire_8431(sub)   # 0x4474AE
+                    sub.d32(0x28, 1)                  # 0x4474F6
+                    self.p4_se_pan(0x0C, (sub.s32(0x04) - 0x140) << 4)   # 0x447503
+    if self.keys.field(0xC000) == 3:                  # 0x447528
+        sub.d32(0x28, 0)                              # 0x44753C
+        t = e.s32(0x28)                               # 0x44753F
+        if t != 0:
+            t -= 1
+            e.d32(0x28, t & 0xFFFFFFFF)               # 0x447549
+            if (t & 3) == 0:                          # 0x447547 每 4 帧
+                self.p4_fire_8431(sub)           # 0x44754E
+                self.p4_se_pan(0x0C, (sub.s32(0x04) - 0x140) << 4)   # 0x44759C
+    if self.p4_stat.get(0x56CCB3, 0):                  # 0x4475A1
+        v = sub.s32(0x28)
+        if v != 2 and v != 3:
+            self.p4_stat[0x56CCB3] = 0                # 0x4475B8
+    return bool(sub.g32(0x34))                        # 0x4475BF
+
+
 def p4_laser(self, e, variant: str) -> bool:
     """type-5 激光族四行为（§16.194）：`0x446C50` / `0x446D30` / `0x446E20` / `0x446F10`。
 
@@ -1676,6 +1749,7 @@ P4_BEH: dict[int, object] = {
     0x446D30: _beh_446D30,
     0x446E20: _beh_446E20,
     0x446F10: _beh_446F10,
+    0x447410: _beh_447410,
     0x448C70: _beh_10000001,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
@@ -2369,6 +2443,14 @@ class Page4Mixin:
         """`[0x56CCA8]`：全局帧计数器（`0x451442` 每帧 ++）。"""
         return int(getattr(self, "p4_frames", 0))
 
+    def p4_4cd4a0_ge_a0(self) -> bool:
+        """`0x4016EF`→`0x45FAB0`：`word[0x4CD4A0+0x26] >= 0xA0`（真 = 达标）。"""
+        return (self.p4_stat.get(0x4CD4A0 + 0x26, 0) & 0xFFFF) >= 0xA0
+
+    def p4_fire_8431(self, sub) -> None:
+        """`0x4474AE`/`0x44754E`：造 `0x10008431`（位置 = 子对象，第 5 字段 = 子对象指针）入 `0x4AD46C`。"""
+        self.spawn(self._p4_q("ui46c"), 0x10008431, sub.s32(0x04), sub.s32(0x08), sub)
+
     def p4_se_pan(self, se: int, pan: int) -> None:
         """`0x4013A2(0x4AB4B0, se, pan)`：带声像的音效（见 §11）。"""
         self.p4_stat[0x3A2] = self.p4_stat.get(0x3A2, 0) + 1
@@ -2414,6 +2496,10 @@ class Page4Mixin:
     def p4_btn_attack(self) -> bool:
         """`[0x4AB594]`：btn0（C/左键=攻击）当前状态。"""
         return bool(self.p4_in_bits() & 1)
+
+    def p4_btn0_edge(self) -> bool:
+        """`byte[0x4AB596]`：btn0 **按下沿**（输入记录第 3 字节，`rec.e0`）。"""
+        return bool(getattr(self.inp.rec, "e0", 0))
 
     def p4_btn1_edge(self) -> bool:
         """`byte[0x4AB597]`：btn1 **按下沿**（输入记录第 4 字节，`rec.e1`）。"""
