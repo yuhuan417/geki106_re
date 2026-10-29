@@ -5093,6 +5093,15 @@ class Page4Mixin:
         或 `idx = 条数 + acc - 1`（步长<0）。
         """
         import os as _os
+        if _os.environ.get("P4_BG_GRIDDUMP") and not getattr(self, "_gg", 0):
+            self._gg = 1
+            for _s in self.p4_bg[:4]:
+                _g = _s.grid
+                if not _g:
+                    continue
+                print(f"[grid] n={len(_g)} x={min(e[0] for e in _g)}..{max(e[0] for e in _g)} "
+                      f"y={min(e[1] for e in _g)}..{max(e[1] for e in _g)} "
+                      f"k={sorted({e[2] for e in _g})}", flush=True)
         if not _os.environ.get("P4_BG_EXPERIMENT"):
             return      # 索引/窗口/矩形都有出处，但实测仍画不出（见 §16.327），默认关闭
         c = self.canvas

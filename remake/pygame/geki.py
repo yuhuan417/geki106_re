@@ -3554,6 +3554,17 @@ class Pages(Page4Mixin):
             lt = self.layers.tab.get(1)
             if lt is not None:
                 c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
+        import os as _os
+        if _os.environ.get("P4_LAYERDUMP") and not getattr(self, "_ldonce", 0):
+            self._ldonce = 1
+            for _i in range(14):
+                _l = self.layers.tab.get(_i)
+                if _l is None:
+                    print(f"[layer] {_i} <none>"); continue
+                _b = _l.buf
+                _h, _w = _b.shape[:2]
+                _nz = int((_b[::4, ::4] != 0).sum())
+                print(f"[layer] {_i} {_w}x{_h} nz/16={_nz} id={getattr(_l,'bind_id',None)}")
         if getattr(self, "p4_bg", None):
             self.p4_bg_draw()                           # 0x458EF5 → 0x457CB0（12 槽，最先绘制）
         # 0x458EF0 的六条队列顺序：ui4cc → ui43c → ui49c → 0x4AD40C → ui46c → ui4fc
