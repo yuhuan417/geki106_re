@@ -554,6 +554,10 @@ def _beh_6B000001(self, e) -> bool:
         return self._p4_443606(e, cnt)
     if idx == 1:
         return self._p4_4437e0(e, cnt, st)
+    if idx == 2:
+        return self._p4_443c67(e, cnt)
+    if idx == 3:
+        return self._p4_443fdc(e, cnt)
     k = (0x4435C0, idx)
     self.p4_beh_missing_types[k] = self.p4_beh_missing_types.get(k, 0) + 1
 
@@ -5205,9 +5209,11 @@ class Page4Mixin:
                 self.spawn(q4, 0x2B000001, 0x14, 0xC8, 6)
             elif st == 6:                                  # 0x443A96
                 self.spawn(q4, 0x2B000001, 0x190, 0xC8, 7)
-            elif st == 7:                                  # 0x443AD5 区段线性反汇编失步，待核
-                _k = (0x4437E0, "st7")
-                self.p4_beh_missing_types[_k] = self.p4_beh_missing_types.get(_k, 0) + 1
+            elif st == 7:                                  # 0x443AD5（递归下降重切后已解）
+                # 0x443ADA push 8 ; push 0x2B000001 ; 0x443AE1 rand()%0x1AC → y
+                # 0x443AEF rand()%0x12C → x ; 0x443B05 0x430400(&rec, x, y, type, 8) → ui43c
+                self.spawn(q3, 0x2B000001, rng.randrange(0x12C),
+                           rng.randrange(0x1AC), 8)
             # 0x443B33
             if self.audio is not None:
                 self.audio.bgm(0x10 + (1 if st == 7 else 0))
@@ -5241,6 +5247,67 @@ class Page4Mixin:
             if self.audio is not None:
                 self.audio.bgm_stop()                      # 0x44FDD0
             e.d32(0x1C, 0x90000000)                        # 0x443C53
+        return True
+
+    def _p4_443fdc(self, e, ebp: int) -> bool:
+        """`0x443FDC`：状态 9 —— 终场清屏、放一块 UI、播 SE，300 帧后**回到状态 0**。
+
+        ```
+        ebp == 0：
+          0x443FE5 0x43BC40(0x4AD43C)                  清 ui43c
+          0x443FEF 0x4301F0(0x4AD46C)                  清 ui46c（thunk 0x4019AB）
+          0x443FF9 0x43A320(0x4AD4CC)                  清 ui4cc
+          0x443FFE 0x430400(&rec, 0xC000F0, 0x200000, 0x4B000001, 0x1000E0) → ui4cc
+          0x444044 0x450350(0x4AB4B0, 1, 0)            波形槽 1
+        ebp == 0x12C：0x444066 [esi+0x1C] = 0          ; 300 帧后整机复位
+        ```
+        """
+        q3 = self._p4_q("ui43c")
+        q4 = self._p4_q("ui4cc")
+        q6 = self._p4_q("ui46c")
+        if ebp == 0:                                       # 0x443FDE
+            for _q in (q3, q6, q4):                        # 0x443FE5/0x443FEF/0x443FF9
+                _c = getattr(_q, "clear", None)
+                if _c is not None:
+                    _c()
+            self.spawn(q4, 0x4B000001, 0xC000F0, 0x200000, 0x1000E0)   # 0x44403F
+            self.p4_se_pan(1, 0)                           # 0x44404C 0x450350(0x4AB4B0,1,0)
+            return True
+        if ebp == 0x12C:                                   # 0x44405E
+            e.d32(0x1C, 0)                                 # 0x444066 回到状态 0
+        return True
+
+    def _p4_443c67(self, e, ebp: int) -> bool:
+        """`0x443C67`：状态 8 —— 终场爆炸序列（**未实现完**，见 docstring 尾部）。
+
+        ```
+        0x443C67 if (ebp == 0 || ebp == 0x21C) {
+                   0x443C78 0x43BC40(0x4AD43C) 清 ui43c
+                   0x443C82 0x4301F0(0x4AD46C) 清 ui46c
+                   0x443C8C 0x43A320(0x4AD4CC) 清 ui4cc
+                   0x443C96 0x448F50(0x4AD40C) 清 actorq（thunk 0x4023B0）
+                 }
+        0x443C9B if (ebp > 0x1C2) goto 0x443DF9
+        0x443CA7 if (ebp % 0x5A != 0) goto 0x443DF9      ; 每 90 帧一次
+                 ; 在栈上拼 0x2A 字节的小矩形/调色板结构（0x443CB9..0x443DA5）
+                 ; 0xB60B60B7 imul + sar 6 = 按 /0x5A 取索引，从字节表取颜色
+        0x443D7C or ecx, 0x100000 ...
+        ```
+
+        `0x443DF9` 之后的生成调用与那块 0x2A 字节结构的字段语义**尚未解完**，
+        所以这里只做"清场"部分，生成部分记 TODO 计数器，不猜坐标/颜色。
+        """
+        if ebp in (0, 0x21C):                              # 0x443C67
+            for _q in (self._p4_q("ui43c"), self._p4_q("ui46c"), self._p4_q("ui4cc")):
+                _c = getattr(_q, "clear", None)
+                if _c is not None:
+                    _c()
+            _aq = getattr(self, "actorq", None)            # 0x443C96 0x448F50
+            if _aq is not None and hasattr(_aq, "clear"):
+                _aq.clear()
+        if ebp <= 0x1C2 and ebp % 0x5A == 0:               # 0x443C9B / 0x443CA7
+            _k = (0x443C67, "explosion")
+            self.p4_beh_missing_types[_k] = self.p4_beh_missing_types.get(_k, 0) + 1
         return True
 
     def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,

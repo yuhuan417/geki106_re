@@ -1751,6 +1751,70 @@ def main():
           and page4.Page4Mixin._p4_div3(9) == 3
           and page4.Page4Mixin._p4_div3(-9) == -3
           and page4.Page4Mixin._p4_div3(8) == 2, "")
+    class _Stub:
+        def __init__(self):
+            self.q = {"ui43c": [], "ui4cc": [], "ui46c": [], "ui40c": []}
+            self.actorq = []
+            self.flags = type("F", (), {"set": lambda s2, v: None})()
+            self.p4_beh_missing_types = {}
+            self.audio = None
+            self.seen = []
+
+        def _p4_q(self, n):
+            return self.q[n]
+
+        def spawn(self, q, t, x, y, a3=0):
+            q.append((t, x, y, a3))
+
+        def _p4_ent_into(self, q, t, x, y, a3=0, beh=None):
+            q.append((t, x, y, a3))
+
+        def p4_se_pan(self, i, pan):
+            self.seen.append(("se", i))
+
+        def p4_in_bits(self):
+            return 0
+
+        def p4_btn0_edge(self):
+            return False
+
+        def p4_btn1_edge(self):
+            return False
+
+        def _p4_4437e0(self, e, ebp, st):
+            return page4.Page4Mixin._p4_4437e0(self, e, ebp, st)
+
+        def _p4_443c67(self, e, ebp):
+            return page4.Page4Mixin._p4_443c67(self, e, ebp)
+
+        def _p4_443fdc(self, e, ebp):
+            return page4.Page4Mixin._p4_443fdc(self, e, ebp)
+
+        def _p4_443606(self, e, ebp):
+            return page4.Page4Mixin._p4_443606(self, e, ebp)
+
+    _s = _Stub()
+    _e7 = page4.Ent(0, 0, 0x6B000001, 0)
+    _e7.d32(0x1C, 0x70000000)                # 状态 7、计数 0
+    page4._beh_6B000001(_s, _e7)
+    _t7 = _s.q["ui43c"]
+    _ok7 = (len(_t7) == 1 and _t7[0][0] == 0x2B000001 and _t7[0][3] == 8
+            and _t7[0][1] < 0x12C and _t7[0][2] < 0x1AC)
+    _s9 = _Stub()
+    _e9 = page4.Ent(0, 0, 0x6B000001, 0)
+    _e9.d32(0x1C, 0x90000000 | 0x12C)  # 状态 9、计数 0x12C（增量前）
+    page4._beh_6B000001(_s9, _e9)
+    _ok9 = _e9.g32(0x1C) == 0                # 0x444066 回到状态 0
+    check("状态机行为实测：状态 7 计数 0 → 生成 1 个 `0x2B000001`（a3=8，x<0x12C，y<0x1AC）进 ui43c；"
+          "状态 9 计数 0x12C → `[+0x1C]` 清零（0x444066 整机复位）",
+          _ok7 and _ok9, "")
+    _s8 = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x443C67 - ib:0x443CB8 - ib], 0x443C67)}
+    check("0x443C67 状态 8：计数 0 / 0x21C 时清 ui43c+ui46c+ui4cc+演员队列；"
+          "计数 > 0x1C2 直接返回；每 0x5A 帧一次爆炸（生成体字段语义未解完，记 TODO 计数器不猜）",
+          _s8.get(0x443C6B) == ("cmp", "ebp, 0x21c")
+          and _s8.get(0x443C91) == ("mov", "ecx, 0x4ad40c")
+          and _s8.get(0x443CA9) == ("mov", "ecx, 0x5a"), "")
     _s17 = {i.address: (i.mnemonic, i.op_str)
             for i in _mdk.disasm(img[0x4437E0 - ib:0x443C67 - ib], 0x4437E0)}
     check("0x4437E0 状态 1..7：血条 x 从 0x40 步 0x20 到 < 0x23F、y=((st<<5)-0x20)&0xFFFF|0x300000，"
