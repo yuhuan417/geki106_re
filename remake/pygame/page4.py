@@ -2614,6 +2614,236 @@ P4_TYPE5_BEH = (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
 P4_PLAYER_BEH = (0x4466F0, 0x4467D0, 0x446890, 0x446950,
                  0x446A10, 0x446AD0, 0x446B50, 0x446BD0)   # 0x445ED5..0x45F015
 
+
+# ---- 0x51 族：死亡→继续→结算演出（ctor 0x422EF0 / 跳表 0x4234D0，本轮逐函数读定）----
+# 交接文档把它叫"开场演出族"是误名：0x51000002 由死亡链 0x460D78 生成（勘误 A-页4-2），
+# case 0 = 结算计数（0x45F710 把剩余量换算进 0x4CD4A0+4 得分），case 1 = 继续画面总控。
+P4_51_BEH_THUNK = {
+    0x51000001: 0x4019EC,   # → 0x423A40  结算计数（ctor case 0 = 0x423027）
+    0x51000002: 0x402504,   # → 0x423B30  继续总控（ctor case 1 = 0x42319C）
+    0x51000004: 0x40169A,   # → 0x423EE0  结果推进（ctor case 3 = 0x423304）
+    0x51000005: 0x4022F7,   # → 0x430520  倒数面板（ctor case 4 = 0x4233BB）
+    0x51000006: 0x4022F7,   # → 0x430520  倒数面板（ctor case 5 = 0x4233E3）
+    0x51000007: 0x4021A8,   # → 0x424290  卫星格（ctor case 6 = 0x42343D）
+    0x5100000A: 0x40173F,   # → 0x423980  波纹（ctor case 9 = 0x422F13）
+}
+P4_51_BEH = {k: v for k, v in {
+    0x51000001: 0x423A40, 0x51000002: 0x423B30, 0x51000004: 0x423EE0,
+    0x51000005: 0x430520, 0x51000006: 0x430520, 0x51000007: 0x424290,
+    0x5100000A: 0x423980,
+}.items() if v in (0x423A40, 0x423B30, 0x423EE0, 0x430520, 0x424290, 0x423980)}
+
+# 0x423B30 状态字节表 0x423D84（0x97 项；实测非 5 项只有这 5 个 ⇒ t = i+0x1E）
+P4_423D84_STATES = {0: 0, 5: 1, 20: 2, 90: 3, 150: 4}
+
+
+def _beh_430520(self, e) -> bool:
+    """`0x430520`（0x51000005/06 行为，thunk 0x4022F7）：`[+0x1C]` 倒数，减到 0 前的
+    那次返回 0 摘链；ctor 置 `[+0x1C] = -1` ⇒ 永生，只能被外部杀死。"""
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t - 1) & 0xFFFFFFFF)          # 0x430525 lea edx,[eax-1] / 0x430528 存
+    return t != 0                              # 0x43052B je（原值为 0 ⇒ 死）
+
+
+def _beh_423B30(self, e) -> bool:
+    """`0x423B30`（0x51000002 继续总控，thunk 0x402504）：t = ++[+0x1C]，
+    t-0x1E ∈ [0,0x96] 查 byte[0x423D84+t-0x1E] → jmp [0x423D6C+state*4]。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    i = t - 0x1E
+    st = P4_423D84_STATES.get(i, 5) if 0 <= i <= 0x96 else 5
+    if st == 0:                                    # 0x423B5D（t=30）
+        # 0x460EC0 = [0x4CD590+0x3C]；非 0 且 [esi+0x20]==0 → byte[0x56CCB4]=1
+        if self.p4_stat.get(0x4CD590 + 0x3C, 0) != 0 and e.s32(0x20) == 0:
+            self.p4_stat[0x56CCB4] = 1             # 0x423B7B（0x451630 进场帧循环的门）
+        return True
+    if st == 1:                                    # 0x423B89（t=35）
+        # 0x460EA0 = [0x4CD590+0x30]（剩余命）：非 0 且 param==0 → 清 0x56CC84 的 0x10 并自尽
+        # （0x45B010 是 `ret 4` 空函数，0x423BAD 调它等于什么都不做）
+        if self.p4_stat.get(0x4CD590 + 0x30, 0) != 0 and e.s32(0x20) == 0:
+            self.sysf.bits &= ~0x10                # 0x423BAD 0x402400→0x45AF60 清位
+            return False                           # 0x423BB3 xor al,al
+        return True
+    if st == 2:                                    # 0x423BBA（t=50）
+        if e.s32(0x20) == 0:
+            # 0x423BC5 0x430400(&rec,0x7F,0,0x61000007,-8) → 0x445AA0(0x4AD52C)
+            self.p4_spawn52c_flash(0x7F, 0, 0x61000007, -8)
+        return True
+    if st == 3:                                    # 0x423C01（t=120）
+        # 0x45AFC0(0x4AB5B8,0x1FC0000)/0xFE000000 → *4-0xC8 → 0x44CDF0(mgr,1,…)
+        w = self.p4_cfg_word()
+        a, b = self.p4_451630_adjust(w) if w else (0, 0)
+        self.p4_load_palette(1, b * 4 - 0xC8, a * 4 - 0xC8)
+        if e.node is not None:
+            e.node.active = 1                      # 0x423C45 byte[node+0x1C]=1
+        self.p4_448f50()                           # 0x423C49 清 0x4AD40C
+        self.p4_4301f0()                           # 0x423C53 清 0x4AD46C
+        return True
+    if st == 4:                                    # 0x423C60（t=180）
+        if not self.p4_btn0_edge():                # byte[0x4AB596]==0 → 0x423D5C
+            e.d32(0x1C, 0xB3)                      # 停在 179，下帧再判
+            return True
+        leave = self.keys.field(0xC000) == 3        # 0x423C7F 选中槽 3
+        if not leave:
+            leave = (self.p4_sys_bits() & 0x2000) != 0   # 0x423C8F 0x45AFC0(0x56CCB8,0x2000)
+        if not leave:
+            if self.p4_stat.get(0x56CCB5, 0):      # 0x423CA1 回放模式：无条件生成
+                self.p4_51_spawn(0, 0, 0x51000004, 0)
+            else:
+                # 0x45FA30(0x4CD4A0)（演出状态机判定）与 0x460EE0(=[+0x40]) 任一不过 → 离页
+                if not self.p4_45fa30() or self.p4_stat.get(0x4CD590 + 0x40, 0) != 0:
+                    leave = True
+                else:
+                    self.p4_51_spawn(0, 0, 0x51000004, 0)   # 0x423CF7..0x423D23
+        if leave:
+            self.flags.set(0x10000)                # 0x423D34 0x45AF30(0x4AB5C0,0x10000)
+        self.sysf.bits &= ~0x10                    # 0x423D40 清 0x10
+        self.sysf.bits |= 0x80                     # 0x423D4F 置 0x80
+        return False                               # 0x423D55
+    return True                                    # 0x423D63 空状态/越界
+
+
+def _beh_423A40(self, e) -> bool:
+    """`0x423A40`（0x51000001 结算计数，thunk 0x4019EC）：`[+0x30]` 门开启后
+    两路计数 `[+0x20]/[+0x24]` 每帧各减 1 并把 `[+0x28]/[+0x2C]` 各加 0xC8；
+    btn0 按下沿时未走完的余量一次补进（×200），双 0 则结算（0x45F710）并自尽。"""
+    if e.s32(0x30) != 0:                           # 0x423A45 [esi+0x30] 门
+        if e.s32(0x20) != 0:                       # 0x423A4A
+            e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+            e.d32(0x28, (e.s32(0x28) + 0xC8) & 0xFFFFFFFF)
+        if e.s32(0x24) != 0:                       # 0x423A62
+            e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+            e.d32(0x2C, (e.s32(0x2C) + 0xC8) & 0xFFFFFFFF)
+        if self.p4_btn0_edge():                    # 0x423A75 byte[0x4AB596]
+            if e.s32(0x20) == 0 and e.s32(0x24) == 0:
+                self.p4_45f710()                   # 0x423A8E 计数换分 + HUD 重建
+                self.sysf.bits &= ~0x4             # 0x423A9A 0x402400→0x45AF60 清 bit4
+                return False                       # 0x423A9F
+            # 0x423AA3：剩余量 ×200 一次补进（eax = 减完后的 [+0x20]，[+0x24] 同式）
+            r20, r24 = e.s32(0x20), e.s32(0x24)
+            e.d32(0x28, (e.s32(0x28) + r20 * 0xC8) & 0xFFFFFFFF)
+            e.d32(0x20, 0)
+            e.d32(0x2C, (e.s32(0x2C) + r24 * 0xC8) & 0xFFFFFFFF)
+            e.d32(0x24, 0)
+    self.p4_423820(e.s32(0x28), 0x90)              # 0x423AD9 数字绘制（桩，见 docstring）
+    self.p4_423820(e.s32(0x2C), 0xF0)              # 0x423AE9
+    return True
+
+
+def _beh_423EE0(self, e) -> bool:
+    """`0x423EE0`（0x51000004 结果推进，thunk 0x40169A）：**无自增**——
+    `[ebp+0x1C]` 由 ctor case 3 置 0 起步，态 0 置 1、卫星格锁定时置 2、
+    态 2 置 3、态 3 置 4；≤4 查跳表 0x4241B4（5 态），>4 返回 1。"""
+    t = e.s32(0x1C)
+    if t > 4:
+        return True                                # 0x423EF1 ja
+    if t == 0:                                     # 0x423EFE：铺结果面板
+        # 0x61000007 @ (0,0x7F) param 0x7F → 52C；0x51000005/06 带父指针 → 4FC；
+        # 0x51000007 ×10 @ (0x104+24i, 0xC0) param=&{this,0} → 4FC
+        self.p4_spawn52c_flash(0, 0x7F, 0x61000007, 0x7F)
+        self.p4_51_spawn(0x8C, 0xC0, 0x51000005, e)   # param = 父实体（0x423F4C push ebp）
+        self.p4_51_spawn(0x68, 0xF0, 0x51000006, e)
+        for i in range(10):                        # 0x423FB7..0x424018
+            self.p4_51_spawn(0x104 + 24 * i, 0xC0, 0x51000007, e)
+        e.d32(0x1C, 1)                             # 0x42401B → 下帧从态 1 开始
+        return True
+    if t == 1:                                     # 0x42402D：光标选格
+        if self.p4_btn0_edge() and e.s32(0x20) < 0xA:
+            e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+        if self.inp.rec.e1 and e.s32(0x20) > 0:    # 0x424042 byte[0x4AB597]
+            e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+        x = self.inp.x & 0xFFFFFFFF                # 0x424056 [0x4AB59C]
+        y = self.inp.y & 0xFFFFFFFF
+        e.d32(0x04, x)
+        e.d32(0x08, y)
+        if x >= 0x198:                             # 0x424064：钳到 0x197 并回吸指针
+            e.d32(0x04, 0x197)
+            self.p4_44e470(0x197, y)               # 0x424082 0x44E470(mgr,0x197,y)
+        if y >= 0x5F:                              # 0x424087
+            e.d32(0x08, 0x60)
+            self.p4_44e470(e.s32(0x04), 0x5F)      # 0x42409F 0x44E470(mgr,x,0x5F)
+        if e.node is not None:
+            e.node.dst = (e.s32(0x04) + 0x5C, e.s32(0x08) + 0xE4)   # 0x4240AA..0x4240C3
+        return True
+    if t == 2:                                     # 0x4240D2：藏节点、清计数、进态 3
+        if e.node is not None:
+            e.node.active = 0                      # byte[node+0x1C]=0
+        e.d32(0x24, 0)
+        e.d32(0x28, 0)
+        e.d16(0x2C, 0)
+        e.d32(0x1C, 3)
+        return True
+    if t == 3:                                     # 0x424101：回放落盘 + 起淡出
+        self.p4_45f850(e.s32(0x24), e.s32(0x28), e.g16(0x2C))   # 0x424122（录制门内才写盘）
+        # 0x424127 0x430400(&rec, 0, 0xFFFFFF01, 0x61000005, -1)
+        # ⇒ 0x61000005：(cur=0, target=-255, step=-1) = 结果画面淡出到黑
+        self.p4_spawn52c_flash(0, -255, 0x61000005, -1)
+        e.d32(0x1C, 4)                             # 0x42413D
+        e.d32(0x24, 0x100)                         # 0x424169 态 4 的帧计数
+        return True
+    # t == 4：0x42417B —— 每 4 帧按 [ebp+0x24]>>1 调 0x44FCC0（DMusic 速度），计满 0x100 离页
+    v = e.s32(0x24)
+    if (v & 3) == 0:
+        self.p4_44fcc0(v >> 1)                     # 0x42418A（复刻侧记日志）
+    v = (v - 1) & 0xFFFFFFFF
+    e.d32(0x24, v)
+    if v == 0:
+        self.flags.set(0x10000)                    # 0x4241A2
+    return True
+
+
+def _beh_424290(self, e) -> bool:
+    """`0x424290`（0x51000007 卫星格，thunk 0x4021A8）：无自有计时，每帧按
+    **父实体**（ctor case 6 从 param 解出的指针，存 `e.p51_parent`）的状态镜像。"""
+    p = getattr(e, "p51_parent", None)
+    if p is None:
+        return True
+    pst = p.s32(0x1C)                              # 0x42429B [parent+0x1C]
+    if pst == 1:                                   # 0x4242E0
+        if p.s32(0x20) < e.s32(0x20):              # 0x4242E6 jge
+            e.d32(0x04, 0x198)
+            e.d32(0x08, 0x90)
+        elif p.s32(0x20) == e.s32(0x20):
+            e.d32(0x04, p.s32(0x04))               # 0x4242FD
+            e.d32(0x08, (p.s32(0x08) + 0x48) & 0xFFFFFFFF)
+    elif pst == 3:                                 # 0x4242AA（dec 2 == 0）
+        if self.p4_btn0_edge():                    # 0x42430C byte[0x4AB596]
+            # 0x424315：x/y 各 (v+0xC)/0x18*24 吸到 24 格
+            qx = ((e.s32(0x04) + 0xC) // 0x18) * 0x18
+            qy = ((e.s32(0x08) + 0xC) // 0x18) * 0x18
+            e.d32(0x04, qx)
+            e.d32(0x08, qy)
+            if qx == 0x198 and qy == 0xA8:         # 0x424353/0x424355
+                e.d32(0x04, 0x198)
+                e.d32(0x08, 0x90)
+                p.d32(0x1C, 2)                     # 0x424366 父进态 2
+                p.d32(0x20, 0xB)                   # 0x42436D
+    if e.node is not None:                         # 0x424374 尾：node.rect = (x,y,+0x17,+0x17)
+        x, y = e.s32(0x04), e.s32(0x08)
+        e.node.rect = (x, y, x + 0x17, y + 0x17)
+    return True
+
+
+def _beh_423980(self, e) -> bool:
+    """`0x423980`（0x5100000A 波纹，thunk 0x40173F）：计数 `[+0x20]` <0x10 时每帧
+    node.rect.b += 3（向下扩），≥0x10 改 node.rect.l/dst.x += 3（右移）；计数恰 0x10 且
+    世代 [ebx+0x1C] < 2 时在原地复制下一代；计满 0x20 自尽。"""
+    nd = e.node
+    if nd is not None:
+        if e.g32(0x20) & 0x10:                     # 0x42398D test byte[ebx+0x20],0x10
+            l, tp, r, b = nd.rect
+            nd.rect = (l + 3, tp, r, b)            # 0x42399D [eax+4] += 3
+            nd.dst = (nd.dst[0] + 3, nd.dst[1])    # 0x4239A5 [eax+0x14] += 3
+        else:
+            l, tp, r, b = nd.rect
+            nd.rect = (l, tp, r, b + 3)            # 0x4239AA [eax+0xC] += 3
+    if e.g32(0x20) == 0x10 and e.s32(0x1C) < 2:    # 0x4239AE/0x4239B6
+        self.p4_51_spawn(e.s32(0x04), e.s32(0x08), 0x5100000A, e.s32(0x1C) + 1)
+    n = (e.g32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, n)                                 # 0x4239F9
+    return n < 0x20                                # 0x4239FF/0x423A03 setl
+
+
 P4_BEH: dict[int, object] = {
     0x43AEB0: _beh_43AEB0,
     0x40E9B0: _beh_23000009,        # 类型 0x23000009（thunk 0x4015AA）
@@ -2642,6 +2872,12 @@ P4_BEH: dict[int, object] = {
     0x446A10: _beh_446A10,
     0x446AD0: _beh_446AD0,
     0x40E230: _beh_23000003,
+    0x423A40: _beh_423A40,          # 0x51 族（thunk 0x4019EC）
+    0x423B30: _beh_423B30,          # （thunk 0x402504）
+    0x423EE0: _beh_423EE0,          # （thunk 0x40169A）
+    0x424290: _beh_424290,          # （thunk 0x4021A8）
+    0x423980: _beh_423980,          # （thunk 0x40173F）
+    0x430520: _beh_430520,          # （thunk 0x4022F7）
     **{a: globals()[f"_beh_p4slot_{a:06X}"] for a in P4_SPAWN_SLOTS},
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
@@ -3185,6 +3421,198 @@ class Page4Mixin:
         e = Ent42(int(x), int(y), int(typ), int(prm), owner=self)
         self._p4_q("ui4cc").append(e)
 
+    # ---- 0x51 族（死亡→继续→结算演出）：0x44B140 → 0x449150 → 0x422EF0 ----
+    def p4_51_spawn(self, x: int, y: int, typ: int, prm) -> "Ent":
+        """`0x430400(&rec,…)` + `0x44B140(0x4AD4FC,&rec)`：0x5C 实体入 ui4fc，
+        共享 ctor `0x449150`（0x430450 拷记录 → vtable 0x4987E8 → 0x51 高位转
+        `0x422EF0(this, rec)`），再按 `0x4234D0` 跳表走 case。"""
+        e = Ent(int(x), int(y), int(typ), 0)
+        if isinstance(prm, int):
+            e.d32(0x0C, prm & 0xFFFFFFFF)          # 0x430450：rec.param → [ent+0xC]
+        e.d32(0x40, P4_51_BEH_THUNK.get(typ & 0xFFFFFFFF, 0))
+        e.beh = P4_51_BEH[typ & 0xFFFFFFFF]
+        e.node = DNode(0, 0, 0)                    # 0x430450 建节点；层号由各 case 重写
+        e.node.active = 0
+        self._p4_q("ui4fc").append(e)
+        self.p4_422ef0(e, prm)                     # 0x449375 push esi(rec); call 0x422ef0
+        return e
+
+    def p4_spawn52c_flash(self, x: int, y: int, typ: int, prm: int) -> None:
+        """`0x430400(&rec,…)` + `0x445AA0(0x4AD52C,&rec)`：52C 队列原语（0x61 亮度族等）。"""
+        if typ == 0x61000005:
+            self.spawn_flash(x, y, prm)            # init 0x42730B：[+0x1C]=x [+0x20]=y [+0x24]=prm
+            return
+        self.p4_other.setdefault("52c", []).append((x, y, typ, prm))
+
+    def p4_422ef0(self, e, prm) -> None:
+        """ctor `0x422EF0`：`[esi+0x14] + 0xAEFFFFFF` 与 9 比较 → `jmp [eax*4+0x4234D0]`。
+        跳表 10 项：0→0x423027、1→0x42319C、3→0x423304、4→0x4233BB、5→0x4233E3、
+        6→0x42343D、9→0x422F13，其余落共用尾 `0x4234C4`（ret，无副作用）。"""
+        typ = e.s32(0x14)
+        nd = e.node
+        if typ == 0x51000001:                      # case 0 @ 0x423027
+            if not self.layers.bind(13, 6):        # 0x423037 0x44C640(0x4AA7B0,0xD,6)
+                self.flags.set(2)                  # 0x42305A
+            else:
+                self.layers.color_key(13, 0)       # 0x42304A 0x44CE60(0x4AA7B0,0xD,0)
+            e.d32(0x20, self.p4_45f9d0())          # 0x42306F 0x45F9D0 → TS 比率
+            e.d32(0x28, 0)
+            e.d32(0x2C, 0)
+            e.d32(0x24, self.p4_45fa00())          # 0x423086 0x45FA00 → TA 比率
+            e.d32(0x30, prm if isinstance(prm, int) else 0)   # 0x4230A0 [edi+0xC]
+            nd.layer = 0xD                         # 0x4230A4 [edx]=0xD
+            nd.rect = (0, 0, 0x11F, 0x107)         # 0x4230AA 45A750(…,0,0,0x11F,0x107)
+            nd.dst = (0xB0, 0x6C)                  # 0x4230DE 45A690(0xB0,0x6C)
+            nd.active = 1 if (prm if isinstance(prm, int) else 0) != 0 else 0   # 0x423101 setne
+            self.sysf.bits |= 0x4                  # 0x423104 0x45AF30(0x56CC84,4)
+            self.p4_423820(e.s32(0x20), 0x60)      # 0x42317A 0x423780(this,[+0x20],0x60)
+            self.p4_423820(e.s32(0x24), 0xC0)      # 0x42318A
+        elif typ == 0x51000002:                    # case 1 @ 0x42319C
+            if not self.layers.bind(13, 0xE):      # 0x4231AC 0x44C640(0x4AA7B0,0xD,0xE)
+                self.flags.set(2)                  # 0x4231CF
+            else:
+                self.layers.color_key(13, 0)       # 0x4231BF 0x44CE60
+            e.d32(0x1C, 0)                         # 0x4231DE [esi+0x1C]=0
+            e.d32(0x20, prm if isinstance(prm, int) else 0)   # 0x4231E4 [esi+0x20]=rec[3]
+            nd.layer = 0xD                         # 0x4231E7
+            if (prm if isinstance(prm, int) else 0) != 0:
+                nd.rect = (0, 0xA0, 0xFF, 0xDF)    # 0x4231F2 45A750(…,0,0xA0,0xFF,0xDF)
+            else:
+                nd.rect = (0, 0, 0xFF, 0x3F)       # 0x423233
+            nd.dst = (e.s32(0x04), e.s32(0x08))    # 0x42328E 45A690([esi+4],[esi+8])
+            nd.active = 0                          # 0x4232A9 byte[node+0x1C]=0
+            self.sysf.bits |= 0x10                 # 0x4232AC 0x45AF30(0x56CC84,0x10)
+            v = self.keys.field(0x7F000000)        # 0x4232BB 0x45AFC0(0x4AB5B0,0x7F000000)
+            if v < 0x64:                           # 0x4232C3 jae
+                self.keys.set_field(0x7F000000, v + 1)   # 0x4232E0 0x45B0E0
+            self.p4_45f820(1 if (prm if isinstance(prm, int) else 0) != 0 else 0)   # 0x4232F3
+        elif typ == 0x51000004:                    # case 3 @ 0x423304
+            if self.audio is not None:
+                self.audio.bgm(6)                  # 0x42330D 0x44F600(0x4AB514,1,6)
+            e.d32(0x04, 0)                         # 0x423374 [esi+4]=0
+            e.d32(0x08, 0)
+            e.d32(0x1C, 0)                         # 0x42337A
+            e.d32(0x20, 0)                         # 0x42337D
+            nd.layer = 0                           # 0x423381 [ecx]=ebx(0)
+            nd.rect = (0xC0, 0x180, 0xEF, 0x1AF)   # 0x423383 45A750(…,0xC0,0x180,0xEF,0x1AF)
+            nd.dst = (e.s32(0x04) + 0x5C, e.s32(0x08) + 0xE4)   # 0x4233AC +0x5C/+0xE4
+            nd.active = 1                          # 0x4234C0
+        elif typ in (0x51000005, 0x51000006):      # case 4 @ 0x4233BB / case 5 @ 0x4233E3
+            e.d32(0x40, 0x4022F7)
+            e.beh = 0x430520
+            e.d32(0x1C, 0xFFFFFFFF)                # 0x4233C9/0x4233F7 [esi+0x1C]=-1
+            nd.layer = 0xD                         # 0x4233D2/0x423400
+            nd.rect = ((0, 0x30, 0x5F, 0x47) if typ == 0x51000005
+                       else (0, 0x48, 0xBF, 0x1AF))   # 0x423410 45A750
+            nd.dst = (e.s32(0x04), e.s32(0x08))    # 0x423433 45A690([esi+4],[esi+8])
+            nd.active = 1                          # 0x4234C0
+        elif typ == 0x51000007:                    # case 6 @ 0x42343D
+            e.d32(0x40, 0x4021A8)
+            e.beh = 0x424290
+            if isinstance(prm, Ent):               # 0x423455 rec.param 是父实体指针
+                e.p51_parent = prm                 # [esi+0x1C] = *[param]（0x423464）
+                e.d32(0x1C, 0)
+                e.d32(0x20, 0)                     # 0x423477 [esi+0x20] = param[1] = 0
+            else:
+                e.d32(0x1C, int(prm) & 0xFFFFFFFF)
+                e.d32(0x20, 0)
+            nd.layer = 0xD                         # 0x42347B
+            nd.rect = (0x198, 0x90, 0x1AF, 0xA7)   # 0x423481 45A750(…,0x198,0x90,0x1AF,0xA7)
+            nd.dst = (e.s32(0x04), e.s32(0x08))    # 0x4234A4
+            nd.active = 1                          # 0x4234C0
+        elif typ == 0x5100000A:                    # case 9 @ 0x422F13
+            e.d32(0x40, 0x40173F)
+            e.beh = 0x423980
+            c = int(prm) if isinstance(prm, int) else 0
+            e.d32(0x20, 0)                         # 0x422F2F [esi+0x20]=0
+            e.d32(0x1C, c if c != -1 else 0)       # 0x422F21..0x422F32（-1 → 0）
+            nd.layer = 0                           # 0x422F38 [eax]=ebx(0)
+            if c & 1:                              # 0x422F3D test al,1
+                nd.rect = (0xC0, 0, 0xC0, 0x2F)    # 0x422F53 45A750(…,0xC0,0,0xC0,0x2F)
+            else:
+                nd.rect = (0xC0, 0x30, 0xC0, 0x5F) # 0x422F8F 45A750(…,0xC0,0x30,0xC0,0x5F)
+            nd.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)   # 0x422FD2 −0x18
+            nd.active = 1                          # 0x422FF4
+        # 其余 case（2/7/8）→ 0x4234C4 共用尾：无副作用
+
+    # ---- 0x51 族辅助（0x4CD4A0 / 0x4CD590 取值与结算）----
+    def p4_45f9d0(self) -> int:
+        """`0x45F9D0`：`0x45E7A0([ecx+0x18], [ecx+0x20]) & 0xFFFF`（0x4CD4A0 的 TS 比率）。"""
+        return self.p4_45e7a0(self.p4_stat.get(0x4CD4A0 + 0x18, 0),
+                              self.p4_stat.get(0x4CD4A0 + 0x20, 0)) & 0xFFFF
+
+    def p4_45fa00(self) -> int:
+        """`0x45FA00`：`0x45E7A0([ecx+0x18], [ecx+0x1C]) & 0xFFFF`（TA 比率）。"""
+        return self.p4_45e7a0(self.p4_stat.get(0x4CD4A0 + 0x18, 0),
+                              self.p4_stat.get(0x4CD4A0 + 0x1C, 0)) & 0xFFFF
+
+    def p4_45eea0(self, n: int) -> None:
+        """`0x45EEA0(obj, n)`：`[+4] += n`、`[+0x14] += n`、`byte[+0xE1] = 1`（0x4CD4A0）。"""
+        self.p4_stat[0x4CD4A0 + 0x04] = (self.p4_stat.get(0x4CD4A0 + 0x04, 0) + n) & 0xFFFFFFFF
+        self.p4_stat[0x4CD4A0 + 0x14] = (self.p4_stat.get(0x4CD4A0 + 0x14, 0) + n) & 0xFFFFFFFF
+        self.p4_stat[0x4CD4A0 + 0xE1] = 1
+
+    def p4_45f710(self) -> None:
+        """`0x45F710(0x4CD4A0)`：剩余 TS/TA 比率各 ×200 加进得分并重建 HUD。
+        ```
+        0x45F713 eax = 0x45F9D0() ; ×45×8 = ×200 → 0x45EEA0
+        0x45F72B eax = 0x45FA00() ; ×200 → 0x45EEA0
+        0x45F745 0x45E7F0(0)
+        ```"""
+        self.p4_45eea0((self.p4_45f9d0() * 0xC8) & 0xFFFFFFFF)
+        self.p4_45eea0((self.p4_45fa00() * 0xC8) & 0xFFFFFFFF)
+        self.p4_45e7f0(0)
+
+    def p4_45f820(self, v: int) -> None:
+        """`0x45F820(0x4CD4A0, v)`：先（v==0 时）0x45E7F0(0)，再 0x45E7F0(1)。"""
+        if not v:
+            self.p4_45e7f0(0)
+        self.p4_45e7f0(1)
+
+    def p4_45e7f0(self, variant: int) -> None:
+        """`0x45E7F0(obj, variant)`：结算画面 HUD 缓冲重建（0x45E8AF/0x45E9C8 两布局）。
+        主体是 9 段 0x455720 数值拼串 + 0x455090 文本，属结果面板子系统，
+        本轮只登记调用次数——不臆造布局。"""
+        self.p4_stat["45e7f0_calls"] = self.p4_stat.get("45e7f0_calls", 0) + 1
+
+    def p4_423820(self, val: int, row: int) -> None:
+        """`0x423820(this, val, row)`：把 val 按 10 进制逐位经 `0x423690(code,x,y)`
+        盖到层 0/13（字形 24×24：code 0..9 在 t=0x150 行 l=code*24、code≥0xA 在
+        t=0x180 行 l=(code-9)*24，0x44D060 = 层→层色键 blit）。
+        逐位的 (x,y) 坐标推进（0x423896 循环里 esi 每次 −0x18、0x423780 三连调
+        0xF0/0xC0/0x90）尚未逐指令定案，本轮先登记调用——不臆造坐标。"""
+        self.p4_stat["423820_calls"] = self.p4_stat.get("423820_calls", 0) + 1
+
+    def p4_448f50(self) -> None:
+        """`0x448F50(0x4AD40C)`：0x449110（演员队列实体自尽）+ 0x430800（释放节点）。"""
+        for e in list(self._p4_q("ui40c")):
+            if hasattr(e, "m"):
+                e.m[0x34] = 0
+        self._p4_q("ui40c").clear()
+
+    def p4_4301f0(self) -> None:
+        """`0x4301F0(0x4AD46C)`：0x4303C0 + 0x430800 —— 清 46C 特效队列。"""
+        for e in list(self._p4_q("ui46c")):
+            if hasattr(e, "m"):
+                e.m[0x34] = 0
+        self._p4_q("ui46c").clear()
+
+    def p4_44e470(self, x: int, y: int) -> None:
+        """`0x44E470(mgr, x, y)`：`[mgr+0x14]/[+0x18] = x/y`（指针位置直写）。"""
+        self.inp.x = x & 0xFFFFFFFF
+        self.inp.y = y & 0xFFFFFFFF
+
+    def p4_44fcc0(self, tempo: int) -> None:
+        """`0x44FCC0(0x4AB514, tempo)`：DMusic 当前段的演奏速度（max(tempo,1)）。
+        复刻音频层没有逐段 tempo 通道，先记日志。"""
+        if os.environ.get("P4_DIAG"):
+            print(f"[0x44FCC0] tempo={max(int(tempo), 1)}")
+
+    def p4_45fa30(self) -> bool:
+        """`0x45FA30(0x4CD4A0)`：演出状态机判定（thunk 0x401A6E 的目标）。"""
+        return True
+
+
     def _p4_tick_4cc(self) -> None:
         """`0x43A350`：遍历 `list+0x28` 链表，`byte[+0x34]` 为 0 的摘链，
         否则 `0x437920`（= `jmp [ent+0x40]`）派发行为；返回 0 ⇒ 清 `[+0x34]` 与 `node[+0x1C]`。"""
@@ -3555,7 +3983,7 @@ class Page4Mixin:
             if lives == 0:                                   # 0x460D40 jne
                 # 0x460D42 是 `byte[[0x4CD590+0x2C] + 0x1C] = 0`——该指针的写入点
                 # 尚未定位（§15），故此处不写，避免凭空造一个实体。
-                self.spawn(self._p4_q("ui4fc"), 0x51000002, 0, 0)   # 0x460D78
+                self.p4_51_spawn(0, 0, 0x51000002, 0)               # 0x460D78 → 0x44B140
 
     def p4_45f660(self) -> None:
         """`0x401FD2` → `0x45F660(0x4CD4A0)`：`[+0x30] = max(0, [+0x30] − 5)`（饱和减 5）。

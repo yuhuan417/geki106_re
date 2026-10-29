@@ -2454,6 +2454,162 @@ def main():
           len(_bgslot2.bands) == 2 and _bgb0.pos == 109 - 6 * 6
           and _bgb0.visible == 1 and _bgb0.layer == 5 and _bgb0.kind == 16 and _bgb0.src[2] == 15
           and _bgslot2.bands[1].pos == 109 - 2 * 6, "")
+    # ---- 0x51 族（死亡→继续→结算演出）----
+    _jt51 = [int.from_bytes(img[0x4234D0 - ib + i * 4:0x4234D4 - ib + i * 4], "little")
+             for i in range(10)]
+    check("0x422EF0 ctor 分派：eax = [esi+0x14]+0xAEFFFFFF 与 9 比较 → jmp [eax*4+0x4234D0]；"
+          "跳表 10 项 = {0:0x423027, 1:0x42319C, 3:0x423304, 4:0x4233BB, 5:0x4233E3, "
+          "6:0x42343D, 9:0x422F13, 2/7/8→0x4234C4 共用尾}",
+          img[0x422EFE - ib:0x422EFE - ib + 5] == bytes([0x05, 0xFF, 0xFF, 0xFF, 0xAE])
+          and img[0x422F03 - ib:0x422F03 - ib + 3] == bytes([0x83, 0xF8, 0x09])
+          and _jt51 == [0x423027, 0x42319C, 0x4234C4, 0x423304, 0x4233BB,
+                        0x4233E3, 0x42343D, 0x4234C4, 0x4234C4, 0x422F13], "")
+    check("0x423B30 状态字节表 0x423D84（0x97 项）：非 5 项只有 {0:0, 5:1, 20:2, 90:3, 150:4}"
+          " ⇒ t = 30/35/50/120/180 各触发一次；0x45B010 是 ret 4 空函数",
+          img[0x423D84 - ib:0x423D84 - ib + 0x97] == bytes(
+              {0: 0, 5: 1, 20: 2, 90: 3, 150: 4}.get(i, 5) for i in range(0x97))
+          and img[0x45B010 - ib:0x45B010 - ib + 1] == bytes([0xC2]), "")
+    check("0x51 族行为 thunk：0x4019EC→0x423A40、0x402504→0x423B30、0x40169A→0x423EE0、"
+          "0x4022F7→0x430520、0x4021A8→0x424290、0x40173F→0x423980（ctor 写 [ent+0x40]）",
+          all(img[t - ib] == 0xE9 and t + 5 + int.from_bytes(
+              img[t + 1 - ib:t + 5 - ib], "little", signed=True) == d
+              for t, d in ((0x4019EC, 0x423A40), (0x402504, 0x423B30), (0x40169A, 0x423EE0),
+                           (0x4022F7, 0x430520), (0x4021A8, 0x424290), (0x40173F, 0x423980))), "")
+    _st51 = page4.P4_423D84_STATES
+    check("P4_423D84_STATES 复刻常量与映像一致；P4_51_BEH_THUNK 与 ctor 写入一致",
+          _st51 == {0: 0, 5: 1, 20: 2, 90: 3, 150: 4}
+          and page4.P4_51_BEH_THUNK == {0x51000001: 0x4019EC, 0x51000002: 0x402504,
+                                        0x51000004: 0x40169A, 0x51000005: 0x4022F7,
+                                        0x51000006: 0x4022F7, 0x51000007: 0x4021A8,
+                                        0x5100000A: 0x40173F}, "")
+
+    class _L51:
+        def bind(self, n, ggd):
+            return True
+        def color_key(self, n, k):
+            pass
+    class _K51:
+        def __init__(self):
+            self.bits = 0
+        def field(self, mask):
+            if not mask:
+                return 0
+            pos = (mask & -mask).bit_length() - 1
+            return (self.bits & mask) >> pos
+        def set_field(self, mask, v):
+            pos = (mask & -mask).bit_length() - 1
+            self.bits = (self.bits & ~mask) | ((v << pos) & mask)
+    class _G51(page4.Page4Mixin):
+        def __init__(self):
+            self.p4_stat = {}
+            self.keys = _K51()
+            self.sysf = page4_geki_flags() if False else None
+            self.flags = None
+            self.audio = None
+            self.layers = _L51()
+            self.qs = {}
+            self.p4_other = {}
+            self.btn0 = False
+            self.p4_player_pos = None
+        def _p4_q(self, n):
+            return self.qs.setdefault(n, [])
+        def p4_btn0_edge(self):
+            return self.btn0
+        def p4_cfg_word(self):
+            return 0
+    import sys as _sys51
+    from geki import Flags as _Flags51
+    _g51 = _G51()
+    _g51.sysf = _Flags51()
+    _g51.flags = _Flags51()
+    _e51 = _g51.p4_51_spawn(0x30, 0x40, 0x51000002, 0)      # ctor case 1 @ 0x42319C
+    _c1 = (_e51.g32(0x1C), _e51.g32(0x20), _e51.node.layer, _e51.node.rect,
+           _e51.node.dst, _e51.node.active, _e51.beh,
+           (_g51.sysf.bits & 0x10) != 0, _g51.keys.field(0x7F000000))
+    _g51.keys.set_field(0x7F000000, 2)
+    _g51.p4_422ef0(_e51, 0)                                  # 再走一遍 case 1：计数 +1
+    _c1b = _g51.keys.field(0x7F000000)
+    _g51.keys.set_field(0x7F000000, 0x63)
+    _g51.p4_422ef0(_e51, 0)
+    _c1c = _g51.keys.field(0x7F000000)
+    check("ctor case 1（0x51000002 @ 0x42319C）：[+0x1C]=0、[+0x20]=param、层 13、"
+          "param==0 → rect (0,0,0xFF,0x3F)、dst=(x,y)、节点隐藏、置 0x56CC84 的 0x10、"
+          "0x45AFC0(0x4AB5B0,0x7F000000)<0x64 时 0x45B0E0 加 1、0x45F820(0)",
+          _c1 == (0, 0, 0xD, (0, 0, 0xFF, 0x3F), (0x30, 0x40), 0, 0x423B30, True, 1)
+          and _c1b == 3 and _c1c == 0x64, "")
+    _n9q0 = len(_g51._p4_q("ui4fc"))
+    _e9 = _g51.p4_51_spawn(0x100, 0x80, 0x5100000A, 1)       # ctor case 9 @ 0x422F13（param 奇 → 上半）
+    _r9a = _e9.node.rect
+    _d9a = _e9.node.dst
+    page4._beh_423980(_g51, _e9)                             # 计数 0→1：rect.b += 3
+    _r9b = _e9.node.rect
+    _e9.d32(0x20, 0x10)
+    page4._beh_423980(_g51, _e9)                             # 计数==0x10：生成下一代
+    _r9c = _e9.node.rect
+    _n9 = len(_g51._p4_q("ui4fc"))
+    _alive9 = page4._beh_423980(_g51, _e9)                   # ≥0x10：rect.l/dst.x += 3
+    _r9d = _e9.node.rect
+    _d9d = _e9.node.dst
+    _e9.d32(0x20, 0x1F)
+    _done9 = page4._beh_423980(_g51, _e9)                    # 0x1F→0x20：自尽
+    check("ctor case 9（0x5100000A @ 0x422F13）+ 行为 0x423980：param&1 选 rect "
+          "(0xC0,0,0xC0,0x2F)、dst=(x-0x18,y-0x18)；计数<0x10 每帧 rect.b+=3、"
+          "==0x10 且世代<2 复制下一代、≥0x10 改 rect.l/dst.x+=3、计满 0x20 返回 0",
+          _r9a == (0xC0, 0, 0xC0, 0x2F) and _d9a == (0xE8, 0x68)
+          and _r9b == (0xC0, 0, 0xC0, 0x32) and _r9c == (0xC3, 0, 0xC0, 0x32)
+          and _n9 - _n9q0 == 2 and _alive9 and _r9d == (0xC6, 0, 0xC0, 0x32)
+          and _d9d[0] == 0xE8 + 6 and not _done9, "")
+    _e6 = _g51.p4_51_spawn(0x104, 0xC0, 0x51000007, _e51)    # ctor case 6 @ 0x42343D
+    _e51.d32(0x1C, 1)                                        # 父态 1
+    _e51.d32(0x04, 0x100)
+    _e51.d32(0x08, 0x30)
+    _e51.d32(0x20, 0)                                        # parent20 == sat20
+    page4._beh_424290(_g51, _e6)
+    _f6a = (_e6.s32(0x04), _e6.s32(0x08), _e6.node.rect)
+    _e51.d32(0x1C, 3)                                        # 父态 3
+    _e6.d32(0x04, 0x18C)
+    _e6.d32(0x08, 0x9C)
+    _g51.btn0 = True
+    page4._beh_424290(_g51, _e6)                             # 吸格：(0x18C+0xC)/24*24 = 0x198
+    _f6b = (_e6.s32(0x04), _e6.s32(0x08), _e51.g32(0x1C), _e51.g32(0x20))
+    check("ctor case 6（0x51000007 @ 0x42343D）+ 行为 0x424290：param=父实体、"
+          "rect (0x198,0x90,0x1AF,0xA7)；父态 1 且 [+0x20] 相等 → 跟随 (父x, 父y+0x48)；"
+          "父态 3 且 btn0 → 吸 24 格，吸到 (0x198,0xA8) 即锁定为 (0x198,0x90) 并置父态 2/[+0x20]=0xB",
+          _e6.p51_parent is _e51 and _e6.node.rect == (0x198, 0x90, 0x1AF, 0xA7)
+          and _f6a == (0x100, 0x78, (0x100, 0x78, 0x117, 0x8F))
+          and _f6b == (0x198, 0x90, 2, 0xB), "")
+    _e4 = _g51.p4_51_spawn(0, 0, 0x51000004, 0)              # ctor case 3 @ 0x423304
+    _c3 = (_e4.g32(0x04), _e4.g32(0x08), _e4.g32(0x1C), _e4.node.layer,
+           _e4.node.rect, _e4.node.dst, _e4.beh)
+    _n4fc0 = len(_g51._p4_q("ui4fc"))
+    page4._beh_423EE0(_g51, _e4)                             # 态 0：铺面板 + 12 个子实体
+    _n4fc = len(_g51._p4_q("ui4fc")) - _n4fc0
+    check("ctor case 3（0x51000004 @ 0x423304）：BGM 6、[+4/+8/+0x1C/+0x20]=0、"
+          "节点层 0、rect (0xC0,0x180,0xEF,0x1AF)、dst=(+0x5C,+0xE4)、行为 0x423EE0；"
+          "态 0 生成 0x51000005/06 + 0x51000007×10（共 12 只入 ui4fc）并把 [ebp+0x1C] 置 1",
+          _c3 == (0, 0, 0, 0, (0xC0, 0x180, 0xEF, 0x1AF), (0x5C, 0xE4), 0x423EE0)
+          and _n4fc == 12 and _e4.g32(0x1C) == 1, "")
+    _e5 = _g51.p4_51_spawn(0, 0, 0x51000005, 0)              # ctor case 4 @ 0x4233BB
+    _c5 = (_e5.g32(0x1C), _e5.beh, _e5.node.rect)
+    _a5a = page4._beh_430520(_g51, _e5)                            # [0x1C] = -1 → 永生
+    _e5b = _g51.p4_51_spawn(0, 0, 0x51000005, 0)
+    _e5b.d32(0x1C, 1)
+    _a5b = page4._beh_430520(_g51, _e5b)                           # 1→0 后下次为死
+    _a5c = page4._beh_430520(_g51, _e5b)
+    check("ctor case 4/5（0x51000005/06）：[+0x1C]=-1、行为 0x430520、"
+          "rect case4 (0,0x30,0x5F,0x47)；0x430520 = 倒数到 0 那次返回 0",
+          _c5 == (0xFFFFFFFF, 0x430520, (0, 0x30, 0x5F, 0x47))
+          and _a5a and _a5b and not _a5c, "")
+    _g51.p4_stat[0x4CD4A0 + 0x04] = 1000
+    _g51.p4_stat[0x4CD4A0 + 0x14] = 0
+    _g51.p4_stat[0x4CD4A0 + 0x18] = 0
+    _g51.p4_stat[0x4CD4A0 + 0x20] = 200
+    _g51.p4_stat[0x4CD4A0 + 0x1C] = 100
+    _g51.p4_45f710()
+    check("0x45F710：TS/TA 比率（0x45F9D0/0x45FA00 = 0x45E7A0(&0xFFFF)）各 ×200 加进 "
+          "[0x4CD4A0+4]/[+0x14] 并置 byte[+0xE1]、调 0x45E7F0",
+          _g51.p4_stat.get("45e7f0_calls", 0) >= 1
+          and _g51.p4_stat[0x4CD4A0 + 0xE1] == 1, "")
     check("0x4606D4 = 15 项 opcode 跳表；op 1..5 分别入 ui40c/ui43c/ui4cc/ui4fc/ui52c；op 0xE 只跳过 0x14",
           _jt == [0x460686, 0x46044F, 0x4603AD, 0x460411, 0x460490,
                   0x4604D1, 0x460554, 0x460574, 0x4605C6, 0x460512,

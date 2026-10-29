@@ -1,0 +1,15 @@
+; func 0x45f820  (12 insns)
+
+0x0045f820  mov     al, byte ptr [esp + 4]
+0x0045f824  push    esi
+0x0045f825  test    al, al
+0x0045f827  mov     esi, ecx
+0x0045f829  jne     0x45f832
+0x0045f82b  push    0
+0x0045f82d  call    0x4016ae   ; → 0x45e7f0
+loc_45f832:
+0x0045f832  push    1
+0x0045f834  mov     ecx, esi
+0x0045f836  call    0x4016ae   ; → 0x45e7f0
+0x0045f83b  pop     esi
+0x0045f83c  ret     4

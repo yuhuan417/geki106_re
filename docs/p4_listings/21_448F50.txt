@@ -1,0 +1,9 @@
+; func 0x448f50  (7 insns)
+
+0x00448f50  push    esi
+0x00448f51  mov     esi, ecx
+0x00448f53  call    0x40172b   ; → 0x449110
+0x00448f58  mov     ecx, esi
+0x00448f5a  call    0x4011d1   ; → 0x430800
+0x00448f5f  pop     esi
+0x00448f60  ret     

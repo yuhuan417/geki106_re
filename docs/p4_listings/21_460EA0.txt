@@ -1,0 +1,4 @@
+; func 0x460ea0  (2 insns)
+
+0x00460ea0  mov     eax, dword ptr [ecx + 0x30]
+0x00460ea3  ret     
