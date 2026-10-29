@@ -1686,6 +1686,35 @@ def main():
           and _t5.get(0x445EC9) == ("jmp", "0x446237")
           and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
                                      0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
+    _opq = {i.address: (i.mnemonic, i.op_str)
+            for a0, a1 in ((0x460411, 0x46044E), (0x46044F, 0x46048C), (0x460490, 0x4604CC))
+            for i in _mdk.disasm(img[a0 - ib:a1 - ib], a0)}
+    _vq = type("_VQ", (), {})()
+    for _n in ("ui40c", "ui43c", "ui4cc", "ui4fc"):
+        setattr(_vq, _n, [])
+    _vq.p4_n43c = 0
+    _vq.spawn = lambda q, t, x=0, y=0, a3=0, a4=0: q.append((t, x, y, a3, a4))
+    _vq._p4_q = lambda name: getattr(_vq, name)
+    _vq.spawn_flash = lambda a, b, c: None
+    _vq.p4_other = {}
+    for _op, _rec in ((1, (0x10, 0x20, 0x42000001, 0x30)),
+                      (3, (0x11, 0x21, 0x42000002, 0x31)),
+                      (4, (0x12, 0x22, 0x42000005, 0x32))):
+        page4.Page4Mixin.p4_vm_entity(_vq, _op, _rec)
+    check("op1/op3/op4 的落点：0x46044F→0x448FF0(0x4AD40C)=ui40c、0x460411→0x43A3C0(0x4AD4CC)=ui4cc、"
+          "0x460490→0x44B140(0x4AD4FC)=ui4fc；三者都先过 0x430400(&rec,x,y,type,a3)；"
+          "ui43c 必须挂 Ent（0x5C 字节内存模型）而不是 UiEntity",
+          _opq.get(0x460448) == ("call", "0x401686")
+          and _opq.get(0x460486) == ("call", "0x4016e5")
+          and _opq.get(0x4604C7) == ("call", "0x40128a")
+          and _opq.get(0x4604C1) == ("mov", "ecx, 0x4ad4fc")
+          and _opq.get(0x460442) == ("mov", "ecx, 0x4ad4cc")
+          and _opq.get(0x460480) == ("mov", "ecx, 0x4ad40c")
+          and _vq.ui40c == [(0x42000001, 0x10, 0x20, 0x30, 0)]
+          and _vq.ui4cc == [(0x42000002, 0x11, 0x21, 0x31, 0)]
+          and _vq.ui4fc == [(0x42000005, 0x12, 0x22, 0x32, 0)]
+          and _vq.p4_other == {}
+          and isinstance(page4.Ent(0, 0, 0x23000006, 0), page4.Ent), "")
     _c21 = {i.address: (i.mnemonic, i.op_str)
             for i in _mdk.disasm(img[0x43A899 - ib:0x43A938 - ib], 0x43A899)}
     _b21 = {i.address: (i.mnemonic, i.op_str)

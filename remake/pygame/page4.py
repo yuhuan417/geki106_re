@@ -503,7 +503,7 @@ def _beh_23000007(self, e) -> bool:
         for _ in range(n):                                   # 0x40E7AA..0x40E7FB
             x = rng.randrange(0x500)                         # 0x401393 → 0x45AD00, 0x462D71 取商
             y = rng.randrange(0x1E0) + 0x298                 # 余数 + 0x298
-            self.spawn(self.p4_q43c, 0x23000007, x, y)       # 0x401FA5(0x4AD43C, rec)
+            self._p4_ent43c(0x23000007, x, y)       # 0x401FA5(0x4AD43C, rec)
         return False
     x = e.s32(0x04)
     dy = 0 if x > 0x298 else (self.p4_player_y() - e.s32(0x08))   # 0x56CC90 = 自机 y
@@ -530,7 +530,7 @@ def _beh_23000008(self, e) -> bool:
     elif t == 0x10:
         e.d32(0x20, 0)                                       # 0x40E91F
     elif t == 0xC0:
-        self.spawn(self.p4_q43c, 0x23000009, e.s32(0x04) - 0x18, e.s32(0x08))   # 0x40E8E5
+        self._p4_ent43c(0x23000009, e.s32(0x04) - 0x18, e.s32(0x08))   # 0x40E8E5
     e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)    # 0x40E93B
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
@@ -556,7 +556,7 @@ def _beh_23000005_06(self, e) -> bool:
     if n:
         for i in range(n):                                    # ① 0x40E575 循环
             v = (n - i)
-            self.spawn(self.p4_q43c, 0x23000006, e.s32(0x04), e.s32(0x08))
+            self._p4_ent43c(0x23000006, e.s32(0x04), e.s32(0x08))
             if self.p4_q43c:
                 self.p4_q43c[-1].d32(0x28, (-8 * v) & 0xFFFFFFFF)   # 0x40E57C neg/shl 3
         e.d32(0x2C, 0)
@@ -2513,7 +2513,10 @@ class Page4Mixin:
                   f"chain={getattr(self.vm, 'chain', None)} q={self.vm.queue[:6]} "
                   f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
                   f"vmframe={self.vm.frame} "
-                  f"zero_beh_types={sorted({e.g32(0x14) for e in self.p4_q43c if e.g32(0x40) == 0})[:8]}",
+                  f"zero_beh_types={sorted({e.g32(0x14) for e in self.p4_q43c if e.g32(0x40) == 0})[:8]} "
+                  f"miss={(getattr(self, 'p4_beh_missing_types', {}) and
+                            [(hex(b), hex(t), c) for (b, t), c in sorted(self.p4_beh_missing_types.items(),
+                             key=lambda kv: -kv[1])[:3]]) or []}",
                   flush=True)
         """页4 每帧（S1..S25）。返回 `0x45AFF0(0x4AB5C0,0)`：旗标空 ⇒ 继续。"""
         skip = False
@@ -2659,6 +2662,7 @@ class Page4Mixin:
         self.p4_q43c: list = []       # 0x4AD43C 主实体队列（所有实体类型共用）
         self.p4_n43c = 0
         self.p4_beh_missing: dict[int, int] = {}
+        self.p4_beh_missing_types: dict[tuple, int] = {}
         self.p4_other: dict[int, list] = {}   # op1/3/4/5 的记录（ctor 未实现）
         # 0x56CC4C 脚本流状态机 + 资源表（0x45DDA0/0x45DDE0）
         from pathlib import Path
@@ -5685,12 +5689,26 @@ class Page4Mixin:
                     self.p4_stat[node + 0x1C] = 0
             i += 1
 
+    def _p4_ent43c(self, typ: int, x: int = 0, y: int = 0,
+                   a3: int = 0, a4: int = 0) -> "Ent":
+        """往 `0x4AD43C`（ui43c）挂一个**真实体**（`0x43A7F0` 家族，`Ent.SZ=0x5C`）。
+
+        不能用 `spawn()`：那个返回 `UiEntity`（geki 侧的轻量类），没有 `d32/g32` 字节模型，
+        而 ui43c 的行为函数全部按 `[ent+0xNN]` 直接读写内存。
+        """
+        e = Ent(x, y, typ, a3)
+        self.p4_q43c.append(e)
+        self.p4_n43c += 1
+        return e
+
     def p4_call_behaviour(self, e: "Ent") -> bool:
         """`0x446450 = jmp [ent+0x40]`：按行为指针分派。未实现的行为先返回"存活"并计数，
         绝不假装完成——实现一个就在 `P4_BEH` 里登记一个。"""
         fn = P4_BEH.get(e.beh)
         if fn is None:
             self.p4_beh_missing[e.beh] = self.p4_beh_missing.get(e.beh, 0) + 1
+            self.p4_beh_missing_types[(e.beh, e.s32(0x14))] = \
+                self.p4_beh_missing_types.get((e.beh, e.s32(0x14)), 0) + 1
             return True
         return fn(self, e)
 
@@ -5705,6 +5723,15 @@ class Page4Mixin:
         if op == 2:
             self.p4_q43c.append(Ent(a, b, c, d))       # 0x43BDC0 → 0x43A7F0
             self.p4_n43c += 1
+        elif op == 1:
+            # 0x46044F：0x430400(&rec,…) 后 0x448FF0(0x4AD40C,&rec) ⇒ ui40c
+            self.spawn(self._p4_q("ui40c"), c, a, b, d)
+        elif op == 3:
+            # 0x460411：0x430400(&rec,…) 后 0x43A3C0(0x4AD4CC,&rec) ⇒ ui4cc
+            self.spawn(self._p4_q("ui4cc"), c, a, b, d)
+        elif op == 4:
+            # 0x460490：0x430400(&rec,…) 后 0x44B140(0x4AD4FC,&rec) ⇒ ui4fc
+            self.spawn(self._p4_q("ui4fc"), c, a, b, d)
         elif op == 5 and c == 0x61000005:
             # 0x61000005：init 0x42730B（`[+0x1C]=a` 当前、`[+0x20]=b` 目标、`[+0x24]=d` 步进）
             # 链路 0 的载荷是 (-255, 0, 0x61000005, 16) = 16 帧淡入，正是开场把画面点亮的那条
