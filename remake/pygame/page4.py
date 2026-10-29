@@ -541,6 +541,80 @@ def _beh_23000009(self, e) -> bool:
     return e.s32(0x04) > -0x18 and e.g32(0x18) != 0  # 0x40EB69
 
 
+def p4_446540(self, e) -> None:
+    """`0x446540`：出场初始化（待展开）。"""
+    self.p4_stat[0x446540] = self.p4_stat.get(0x446540, 0) + 1
+
+
+def p4_446470(self, e, a: int, b: int) -> None:
+    """`0x446470`：切换/复位（待展开）。"""
+    self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
+
+
+def p4_446600(self, e) -> bool:
+    """`0x40212B` → `0x446600`：定时出场/闪烁门。返回 False = 本帧不继续。
+
+    ```
+    0x446606 if ([+0x20] <= 0x12C) {
+    0x446613     == -1  → 0x446540(e); [+0x10]=1; [+0x20]=0x12D; node[+0x1C]=1
+    0x44662C     == 0x28 → if (0x44D490(0x4CD590) == 0) return 0
+    0x446644     == 0x78 → 0x446540(e); [+0x10]=1
+    0x446658     == 0x12C → node[+0x1C]=1; [0x56CCB2]=0
+    0x44666E     > 0x78  → node[+0x1C] = [+0x20] & 1        ; 闪烁
+              }
+    0x44667E [+0x20]++; 0x446681 ++[+0x2C]; if ([+0x30]) --[+0x30]
+    ```
+    """
+    t = e.s32(0x20)
+    if t <= 0x12C:
+        if t == -1:
+            p4_446540(self, e)
+            e.d32(0x10, 1)
+            e.d32(0x20, 0x12D)
+            if e.node is not None:
+                e.node.visible = 1
+        elif t == 0x28:
+            if not bool(getattr(self, "_p4_busy", 1)):
+                return False
+        elif t == 0x78:
+            p4_446540(self, e)
+            e.d32(0x10, 1)
+        elif t == 0x12C:
+            if e.node is not None:
+                e.node.visible = 1
+            self.p4_ccc2 = 0
+        elif t > 0x78 and e.node is not None:
+            e.node.visible = t & 1
+    e.d32(0x20, (t + 1) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+    if e.g32(0x30):
+        e.d32(0x30, (e.s32(0x30) - 1) & 0xFFFFFFFF)
+    return True
+
+
+def _beh_type1_follow(self, e) -> bool:
+    """`0x4466F0`（type 1 行为 A）：以 1/4 步进逼近自机指针位置。"""
+    if not p4_446600(self, e):
+        return False
+    b1 = (self.inp.rec.key >> 1) & 1 if hasattr(self.inp.rec, "key") else 0
+    b5 = 0
+    if b1:
+        if b5:
+            p4_446470(self, e, 0, 1)
+    elif not b5:
+        px, py = self.p4_ptr()
+        dx = px - e.s32(0x04)
+        dy = py - e.s32(0x08)
+        dx = (dx + 3) >> 2 if dx >= 0 else dx >> 2      # 0x446726
+        dy = (dy + 3) >> 2 if dy >= 0 else dy >> 2      # 0x446732
+        e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
+    self.p4_player_pos = (e.s32(0x04), e.s32(0x08))
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04), e.s32(0x08))
+    return True
+
+
 def _beh_10000001(self, e) -> bool:
     """`0x401E06` → `0x448C70`（自机，类型 0x10000001）。
 
@@ -689,6 +763,7 @@ P4_BEH: dict[int, object] = {
     0x40E8C0: _beh_23000008,
     0x40EAF0: _beh_23000009,
     0x40E520: _beh_23000005_06,
+    0x4466F0: _beh_type1_follow,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
