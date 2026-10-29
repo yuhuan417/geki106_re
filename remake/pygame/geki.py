@@ -2675,9 +2675,12 @@ class Pages:
             self.actor_spawn(0xA0, 0x78, 0x0A)            #   {160,120,0xA,0} → 0x4AD40C
             self.spawn_flash(-255, 0, 0x10)               #   淡入 -255→0、每帧 +16
             self.spawn(self.ui52c, 0x6F000007)            #   缩略图（0x43F340，未实现）
-            self.spawn(self.ui4fc, 0x5F00001B)            #   高亮框
-            self.spawn(self.ui4fc, 0x5F00001C, a3=1)      #   照準－自動 标签
-            self.spawn(self.ui4fc, 0x5F00001C, a3=2)      #   照準－固定 标签
+            self.spawn(self.ui4fc, 0x5F00001B)            #   0x43EEDA 高亮框
+            # 0x43EF11 / 0x43EF4E / 0x43EF85：**三条** 0x5F00001C，a3 = 0 / 1 / 2
+            # （旧版只投了 a3=1、2 ⇒ 菜单第一项不显示，但槽位仍能在 3 台间切换）
+            self.spawn(self.ui4fc, 0x5F00001C, a3=0)
+            self.spawn(self.ui4fc, 0x5F00001C, a3=1)
+            self.spawn(self.ui4fc, 0x5F00001C, a3=2)
             self.spawn(self.ui4fc, 0x5F00001D,
                        a3=self.keys.field(2) & 0xFF)      #   鼠 / 操作器 标签
             e.a3 = 1
