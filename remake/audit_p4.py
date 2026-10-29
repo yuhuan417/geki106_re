@@ -1604,6 +1604,19 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _hit = open(page4.__file__, encoding="utf-8").read()
+    _anchor = _hit.index("—— 最后一击")
+    _lf = _hit[_anchor: _anchor + 1600]
+    check("0x43C1AF 命中(类型6)的最后一击分支：HP<=1 时**不扣血**，"
+          "半径 0x30 且类型不在 6 例 → 生成 0x61000004 入 ui52c，否则 0x41000001 入 ui4cc；"
+          "随后 0x45EFF0(type,0x100D1211,x,y) + 清 active/HP + SE 4 带声像",
+          _lf.count("0x61000004") >= 1 and _lf.count("0x41000001") >= 1
+          and _lf.count("0x100D1211") >= 1 and _lf.count("0x140") >= 1
+          and "p4_45eff0(a.s32(0x14), 0x100D1211" in _lf
+          and "self.p4_se_pan(4," in _lf
+          and "return" in _lf
+          and img[0x43C212 - ib:0x43C215 - ib] == bytes([0x83, 0xF8, 0x01])
+          and img[0x43C21B - ib:0x43C21E - ib] == bytes([0x8B, 0x45, 0x0C]), "")
     _tri = page4.Page4Mixin.p4_4590_tri
     _pair = page4.Page4Mixin.p4_450580_pair
     _bs2 = {i.address: (i.mnemonic, i.op_str)

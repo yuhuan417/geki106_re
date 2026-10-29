@@ -2689,7 +2689,7 @@ class Page4Mixin:
         """0x451461..0x4514A6：`0x43BF60` 建上下文，`ctx+0x54=0`，再跑三组：
         `0x43BFD0(ctx,0x4AD40C,0x4AD43C)`（演员×自弹）、`0x43C060(ctx,0x4AD46C,0x4AD43C)`
         （46C×自弹）、`0x43C0F0(ctx,0x4AD49C,0x4AD40C)`（49C×演员）。
-        TODO(§10.7)：页4 的碰撞判定式（0x401843）与命中处理（0x401028/0x401136）尚未实现。"""
+        见 §16.269：类型 6 命中的最后一击分支已按 0x43C21B..0x43C302 落地。"""
         return
 
     def p4_dispatch(self) -> None:
@@ -2809,8 +2809,22 @@ class Page4Mixin:
             jy = (rng.randrange(0x20) - 0xF)
             self.spawn(self._p4_q("ui4cc"), 0x41000004,
                        a.s32(0x04) + jx, a.s32(0x08) + jy)   # 0x43C1DA..0x43C20A
-            if a.s32(0x18) <= 1:                          # 0x43C212 ja → 血量>1 才走扣血
-                self.p4_stat[0xC2] = self.p4_stat.get(0xC2, 0) + 1   # 0x43C21B.. 最后一击特判（待实现）
+            if a.s32(0x18) <= 1:                          # 0x43C212 cmp 1 / ja 0x43C30D
+                # —— 最后一击（0x43C21B..0x43C302）：**不扣血**，直接置 0 并出爆/记分 ——
+                if a.s32(0x0C) == 0x30 and a.s32(0x14) not in (
+                        0x24000011, 0x2300000E, 0x27000011,
+                        0x29000013, 0x2C00000B, 0x2C00000A):     # 0x43C220/0x43C228..
+                    self.spawn(self._p4_q("ui52c"), 0x61000004,
+                               a.s32(0x04), a.s32(0x08), 0x30)   # 0x43C25A..0x43C285
+                else:
+                    self.spawn(self._p4_q("ui4cc"), 0x41000001,
+                               a.s32(0x04), a.s32(0x08))          # 0x43C28C..0x43C2C1
+                self.p4_45eff0(a.s32(0x14), 0x100D1211,
+                               a.s32(0x04), a.s32(0x08))          # 0x43C2E2
+                a.d32(0x10, 0)                                    # 0x43C2DC byte[+0x10]=0
+                a.d32(0x18, 0)                                    # 0x43C2DF [+0x18]=0
+                self.p4_se_pan(4, (a.s32(0x04) - 0x140) << 4)     # 0x43C2FB
+                return
         elif t == 0x0B000001:                             # 0x43C190 自机被击中
             self.p4_460c00()                              # 0x43C38B 死亡演出/命数
             self.p4_45f570()                              # 0x43C395 量表重置
