@@ -1601,6 +1601,17 @@ def main():
             0x4A4040: b"run", 0x4A4044: b"list", 0x4A404C: b"goto",
             0x4A4054: b"auto", 0x4A405C: b"color"}
     _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
+    import inspect as _insp
+    _sig = _insp.signature(page4.Page4Mixin.p4_load_palette)
+    import numpy as _np
+    from geki import fade_palette as _fp
+    _p = _np.arange(1024, dtype=_np.uint8).reshape(256, 4)
+    check("0x44CDF0 的对比/亮度已接进 p4_load_palette(ident, ct, br)："
+          "ct→b(乘性)、br→a(加性)，(0,0) 是恒等；cfg 未定位时不得施加强压暗",
+          list(_sig.parameters) == ["self", "ident", "ct", "br"]
+          and (_fp(_p, 0, 0) == _p).all()
+          and _fp(_p, -200, -200)[0, 0] == 55
+          and page4.Page4Mixin.p4_451630_adjust(0) == (-200, -200), "")
     _adj = page4.Page4Mixin.p4_451630_adjust
     check("0x451657..0x45168E 阶段首帧的对比/亮度：两个 7 位字段 ×4−200；"
           "亮度取 (w&0x1FC0000)>>18、对比取 (w&0xFE000000)>>25；"

@@ -2507,7 +2507,9 @@ class Page4Mixin:
             self.inp.set_preset(5)                # 0x451652 0x44E620(0x4AB454,5,0x140,0xF0,0)
             self.inp.set_pos(320, 240)
             # 0x45168E 0x44CDF0(0x4AA7B0,2,f(0xFE000000),f(0x1FC0000),0)：RT_STRING 2 = bm_pald
-            if not self.p4_load_palette(2):
+            _w = self.p4_cfg_word()
+            _br, _ct = self.p4_451630_adjust(_w) if _w else (0, 0)
+            if not self.p4_load_palette(2, _ct, _br):   # 0x45168E(mgr,2,对比,亮度)
                 self.flags.set(2)                 # 0x45169E
         self.begin_frame()                        # 0x4516AC/0x4516B3
         self.replay_record()                      # 0x4516BA（记录已由 run.py 建好）
@@ -4991,6 +4993,17 @@ class Page4Mixin:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
+    def p4_cfg_word(self) -> int:
+        """`0x4AB5B8+4`：配置字（对比/亮度两个 7 位字段的来源）。
+
+        `0x451657/0x451675` 两次 `0x45AFC0` 都是 `ecx = 0x4AB5B8`，即读
+        **该对象 `+4` 的那个位域字**（与 `0x4AB5B0` KeyMgr 的 `+4` 同构）。
+        复刻侧尚未定位该字的写入方，故默认 0。**注意**：0 解出来是 (−200, −200)，
+        那是很重的压暗、**并不等价于「不调整」** —— 所以 `p4_intro_frame` 在 cfg 为 0 时
+        不传调整值（保持不施加），只有取到真实配置字才按原样施加。这一处是显式待补的缺口。
+        """
+        return getattr(self, "p4_cfg", 0)
+
     @staticmethod
     def p4_451630_adjust(w: int):
         """`0x451657..0x45168E`：阶段首帧从配置字取**对比/亮度**两个 7 位字段。
@@ -5014,14 +5027,26 @@ class Page4Mixin:
         ct = ((w & 0xFE000000) >> 25) * 4 - 0xC8
         return br, ct
 
-    def p4_load_palette(self, ident: int) -> bool:
-        """0x44CDF0(mgr, id, 对比, 亮度, 淡入)：按 RT_STRING id 载调色板。
-        页4 阶段首帧载 id 2（bm_pald，暗版），退出时恢复 id 1（bm_pal）。"""
+    def p4_load_palette(self, ident: int, ct: int = 0, br: int = 0) -> bool:
+        """`0x44CDF0(mgr, id, 对比, 亮度)`：按 RT_STRING id 载调色板，再按 `0x44B790` 施加强度。
+
+        `0x44CDF0` 把对比写 `[mgr+0xC98]`、亮度写 `[mgr+0xC94]`，`0x44B790` 的公式是
+
+            v = src + ((src - 0x80) * b >> 6)      ; b = [mgr+0xC98] = 对比
+            out = clamp(v + a, 0, 255)             ; a = [mgr+0xC94] = 亮度
+
+        即 `fade_palette(pal, a=亮度, b=对比)`。页4 阶段首帧载 id 2（bm_pald，暗版）并施加
+        `0x451630` 算出的两个 7 位字段；退出时恢复 id 1（bm_pal，不施加）。
+        """
         pal = self.data.get("palettes", {}).get(str(ident))
         if not pal:
             return False
         import numpy as np
-        self.pal = np.array(pal, dtype=np.uint8)
+        arr = np.array(pal, dtype=np.uint8)
+        if ct or br:
+            from geki import fade_palette
+            arr = fade_palette(arr, br, ct)          # a=亮度, b=对比
+        self.pal = arr
         self.pal_now = self.pal
         return True
 
