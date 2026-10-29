@@ -887,6 +887,8 @@ class Page4Mixin:
         """op06 `0x457C00`（立即触发）/ op07 `0x457C40`（只改参数）。
         `ch >= 0xC` ⇒ 对 12 个槽广播；block 是记录的 20 个 dword（记录 +8 起）。"""
         vals = [int.from_bytes(block[4 * i:4 * i + 4], "little", signed=True) for i in range(20)]
+        if getattr(self, "p4_trace_bg", False):
+            print(f"[bgrec] op{op} ch={ch} count={vals[10]} flags=0x{flags:X} rep={rep}", flush=True)
         targets = range(12) if ch >= 12 else [ch]
         for i in targets:
             slot = self.p4_bg[i]
