@@ -3519,6 +3519,10 @@ class Pages(Page4Mixin):
         注意：4FC 的显示节点（0x5F 擦入效果）是**最后**画的，会盖在文字上面。
         """
         c = self.canvas
+        # `0x44D200` 的整屏填充发生在**行为遍**（52C 的 0x445A30）里，即渲染遍之前；
+        # 原来放在 draw() 末尾会把本帧刚画上的 0x44D330 文字整屏盖掉（页1 BIOS 文本消失）。
+        if self.screen_fill >= 0:
+            c.fill(self.screen_fill)
         # 页13 的真实次序（`0x4547B1`→`0x458E70` 行为遍 → `0x4547BA`→`0x458EF0` 渲染遍）：
         # 行为遍里 52C 的文字（`0x44D330`）先上屏；渲染遍再按
         # 55C(0x40195B) → **4CC 人像切片** → 43C → 49C → **40C 汉字** → **46C 特效** → 4FC
@@ -3584,8 +3588,6 @@ class Pages(Page4Mixin):
             if lt is not None:
                 c.blit(lt.buf, src, dst, key=lt.ckey)
         self.p2_blits = []
-        if self.screen_fill >= 0:
-            c.fill(self.screen_fill)
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
         self.present()          # 0x458CB0 → 0x44D740（调色板操作 + Blt）
