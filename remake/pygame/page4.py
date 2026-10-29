@@ -3280,6 +3280,43 @@ class Page4Mixin:
             self.p4_stat["tbl_4ab5cc"] = t
         return t
 
+    def p4_44dcf0(self, key, idx: int) -> int:
+        """`0x44DCF0(this, idx)` = `mov eax,[ecx+eax*4+0x4C]; ret` —— 取 `+0x4C` 起的 dword 数组第 idx 项。
+
+        `0x45FCB0` 用它把 0xE 项的层表逐条写进快照（`0x44DCF0(0x4AA7B0, i)`）。
+        `key` 是这块运行期内存的标识（复刻侧用 `p4_stat` 里的 `bytearray` 承载）。
+        """
+        buf = self.p4_stat.get(key)
+        off = idx * 4 + 0x4C
+        if not isinstance(buf, (bytes, bytearray)) or off + 4 > len(buf):
+            return 0
+        return int.from_bytes(buf[off:off + 4], "little")
+
+    def p4_4563d0(self, key, dst: bytearray, off: int = 0) -> int:
+        """`0x4563D0(mgr, dst)` = **memcpy `[mgr+4]*4` 字节，源是 `[mgr+0x10]` 指向的块**。
+
+        ```
+        0x4563D8 ecx = [eax+4]        ; 段字节数
+        0x4563DB esi = [eax+0x10]     ; 源指针
+        0x4563DE ecx <<= 2
+        0x4563E6 rep movsd / rep movsb
+        ```
+
+        返回拷贝的字节数（`[mgr+4]*4`）。`0x45FCB0` 用它在头部之后写入段数据块，
+        随后 `esi += [obj+0xC]*4`。
+        """
+        buf = self.p4_stat.get(key)
+        if not isinstance(buf, (bytes, bytearray)) or len(buf) < 0x14:
+            return 0
+        n = int.from_bytes(buf[4:8], "little") * 4          # 0x4563D8/0x4563DE
+        src_off = int.from_bytes(buf[0x10:0x14], "little")  # 0x4563DB
+        if not isinstance(self.p4_stat.get(("blk", key)), (bytes, bytearray)):
+            return 0
+        src = self.p4_stat[("blk", key)]
+        n = min(n, max(0, len(src) - src_off), max(0, len(dst) - off))
+        dst[off:off + n] = src[src_off:src_off + n]
+        return n
+
     def p4_45ff80(self, ents, buf, off: int = 0) -> int:
         """`0x45FF80(obj, head, dst)`：把一条实体链写进快照缓冲，**每条 0x20 字节**，返回写入字节数。
 

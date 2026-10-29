@@ -1501,6 +1501,20 @@ def main():
     _sn_n = _Z().p4_45ff80([_sn_e1, _sn_e2], _sn_buf, 0)
     _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
     _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
+    _dc = _Z()
+    _dc_tbl = bytearray(0x80)
+    _dc.p4_stat["LT"] = _dc_tbl
+    _st.pack_into("<I", _dc_tbl, 0x4C + 3 * 4, 0xBEEF)
+    _dc_m = bytearray(0x20)
+    _st.pack_into("<I", _dc_m, 4, 3)          # [mgr+4] = 3 ⇒ 0x4563D0 拷 3*4 = 12 字节
+    _st.pack_into("<I", _dc_m, 0x10, 8)       # 源偏移 8
+    _dc.p4_stat["MT"] = _dc_m
+    _dc.p4_stat[("blk", "MT")] = bytes(range(32))
+    _dc_dst = bytearray(0x40)
+    _dc_n = _dc.p4_4563d0("MT", _dc_dst, 0)
+    check("0x44DCF0 = [this+idx*4+0x4C]；0x4563D0 = memcpy [mgr+4]*4 字节（源 [mgr+0x10]）",
+          _dc.p4_44dcf0("LT", 3) == 0xBEEF and _dc.p4_44dcf0("LT", 99) == 0
+          and _dc_n == 12 and bytes(_dc_dst[:12]) == bytes(range(8, 20)), "")
     _cq = [page4.Ent(1, 2, 3, 0) for _ in range(3)]
     check("0x430860 = [queue+0x24] 计数；0x430880 = queue+4 头指针（**两个不同函数**）；"
           "0x45FF80 写的字节数 = 0x20 × 0x430860 的计数",
