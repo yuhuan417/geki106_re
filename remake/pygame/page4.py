@@ -3675,6 +3675,56 @@ class Page4Mixin:
             return
         self.spawn(self._p4_q("ui46c"), u, p.s32(0x04), p.s32(0x08), 0)   # 0x43C99D / 0x43C9BD
 
+    def _p4_43c9c2(self, p, a, k: int) -> None:
+        """`0x43C9C2` 共用尾 —— **命中反应**：减寿命 → 撞击特效 → 注销靶 → 结算分数。
+
+        ```
+        0x43C9C2 ecx = k（= byte[type+2]，即 (type>>16)&0xFF）
+        0x43C9C8 k == 0 → 0x43CAFA（**函数返回**，什么都不做）
+        0x43C9CE eax = [p+0x18]；==0 或 ==-1 不递减，否则 [p+0x18] = eax-1
+        0x43C9DE [p+0x18] == 0 → byte[p+0x10] = 0            ; 弹寿命耗尽
+        0x43C9E9 if ([a+0x18] > k) → 0x43CACF                ; 靶还硬
+        0x43CACF   if ([a+0x18] != -1) [a+0x18] -= k
+        0x43CAD9   if ([p+0x14] == 0x10FF0053) → 返回
+        0x43CAE2   0x450350(0x4AB4B0, 5, ([a+4]-0x140)<<4)   ; SE 5
+        0x43CAF5   → 返回
+        ---- 否则靶被击破 ----
+        0x43C9F4 if ([a+0xC] == 0x30 且 [a+0x14] 不在六个例外里)
+        0x43CA3B     0x430400(dst, [a+4], [a+8], 0x61000004, 0x30) → 0x445AA0(0x4AD52C, &rec)
+        0x43CA61 否则 0x430400(dst, [a+4], [a+8], 0x41000001, 0)   → 0x43A3C0(0x4AD4CC, &rec)
+        0x43CA99 [a+0x18] = 0 ; byte[a+0x10] = 0
+        0x43CAB9 0x45EFF0(0x4CD4A0, [a+0x14], [a+4], [a+8], [p+0x14])
+        ```
+
+        六个例外：`0x24000011` / `0x2300000E` / `0x27000011` / `0x29000013` / `0x2C00000B` / `0x2C00000A`。
+        """
+        if k == 0:                                             # 0x43C9C8 → 0x43CAFA
+            return
+        lt = p.g32(0x18)                                       # 0x43C9CE
+        if lt != 0 and lt != 0xFFFFFFFF:                       # 0x43C9D3 / 0x43C9D5
+            lt -= 1
+            p.d32(0x18, lt)                                    # 0x43C9DB
+        if p.g32(0x18) == 0:                                   # 0x43C9E1
+            p.d32(0x10, 0)                                     # 0x43C9E5
+        if a.s32(0x18) > k:                                    # 0x43C9EE ja
+            if a.g32(0x18) != 0xFFFFFFFF:                      # 0x43CACF
+                a.d32(0x18, (a.g32(0x18) - k) & 0xFFFFFFFF)    # 0x43CAD4
+            if p.g32(0x14) == 0x10FF0053:                      # 0x43CAD9
+                return
+            self.p4_se_pan(5, (a.s32(0x04) - 0x140) << 4)      # 0x43CAF5
+            return
+        ta = a.g32(0x14)
+        if a.g32(0x0C) == 0x30 and ta not in (0x24000011, 0x2300000E, 0x27000011,
+                                              0x29000013, 0x2C00000B, 0x2C00000A):
+            self.spawn(self._p4_q("ui52c"), 0x61000004,
+                       a.s32(0x04), a.s32(0x08), 0x30)         # 0x43CA5A
+        else:
+            self.spawn(self._p4_q("ui4cc"), 0x41000001,
+                       a.s32(0x04), a.s32(0x08), 0)            # 0x43CA94
+        a.d32(0x18, 0)                                         # 0x43CA9F
+        a.d32(0x10, 0)                                         # 0x43CAA6
+        self.p4_45eff0(ta, a.s32(0x04), a.s32(0x08), p.g32(0x14))   # 0x43CAB9
+
     def _p4_43c460_dispatch(self, p, a, t: int) -> None:
         """`0x43C508..0x43C9C2`：按**完整类型**做**无符号**二叉查找式的 cmp 链。
 
@@ -3710,14 +3760,10 @@ class Page4Mixin:
             self._p4_43c6c4(p, a, u)
         elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D
             self._p4_43c55d(p, a)
-        # 0x43C9C2 共用尾
-        if ((t >> 16) & 0xFF) != 0:                            # 0x43C9C6
-            n = p.s32(0x18)                                    # 0x43C9CE
-            if n != 0 and n != -1:                             # 0x43C9D3 / 0x43C9D8
-                n -= 1
-                p.d32(0x18, n & 0xFFFFFFFF)                    # 0x43C9DB
-            if p.s32(0x18) == 0:                               # 0x43C9E3
-                p.d32(0x10, 0)                                 # 0x43C9E5
+        # 0x43C9C2 共用尾（完整版，含撞击特效与击破结算）。
+        # `a is None` 只出现在审计桩里（真实调用点 0x43C0B2 一定有靶）。
+        if a is not None:
+            self._p4_43c9c2(p, a, (t >> 16) & 0xFF)
 
     def p4_43c060(self, qa, qb) -> int:
         """`0x43C060(a, b)`：与 `0x43BFD0` 同形，但有两处不同（**不是同一个函数**）。

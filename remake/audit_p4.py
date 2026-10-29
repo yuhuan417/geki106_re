@@ -1321,6 +1321,9 @@ def main():
     class _H(page4.Page4Mixin):
         def __init__(self):
             self.calls = []
+            self.p4_stat = {}
+        def p4_se_pan(self, se, pan):
+            self.calls.append(("SE", se, pan))
         def _p4_q(self, n):
             return n
         def spawn(self, *a):
@@ -1342,8 +1345,11 @@ def main():
         e.d32(0x30, extra30)
         e.d32(0x18, life)
         h = _H()
-        page4.Page4Mixin.p4_43c460(h, e)
-        return [(c[0], c[1]) for c in h.calls], e.s32(0x18)
+        tgt = page4.Ent(0, 0, 0x23000001, 0)
+        tgt.d32(0x18, 0x7FFFFFFF)      # 血量远大于 k ⇒ 共用尾只扣血放 SE，不毁靶
+        tgt.d32(0x10, 1)
+        page4.Page4Mixin.p4_43c460(h, e, tgt)
+        return [(c[0], c[1]) for c in h.calls if c[0] != "SE"], e.s32(0x18)
     _c1 = _hit(0x12061128)
     _c2 = _hit(0x12081123)
     _c3 = _hit(0x120C112C)
@@ -1380,7 +1386,7 @@ def main():
     _ja = page4.Ent(0x10, 0x10, 0x2A000001, 0)
     _jz = _Z()
     page4.Page4Mixin.p4_43c460(_jz, _j1, _ja)
-    _jhit = [c for c in _jz.calls if c[0] == "ui4cc"]
+    _jhit = [c for c in _jz.calls if c[0] == "ui4cc" and c[1] == 0x41000004]
     _bo = _Z({0x4AB5B0 + 4: 0x0F00})
     _bor1 = page4.Page4Mixin.p4_45af30(_bo, 0x1000)
     _bor2 = page4.Page4Mixin.p4_45af60(_bo, 0x0100)
@@ -1407,6 +1413,36 @@ def main():
     _ef1 = (_ef.p4_stat.get(0x4CD4A0 + 0x18), _ef.p4_stat.get(0x4CD4A0 + 0x08))
     _ef2 = _Z()
     page4.Page4Mixin.p4_45e670(_ef2, {"b0": 5, "b4": 3, "b5": 0, "w6": 0}, 1, 1, 1)
+    _t1 = page4.Ent(0x10, 0x10, 0x100001FF, 0)
+    _t1.d32(0x18, 3)
+    _t1.d32(0x10, 1)
+    _ta1 = page4.Ent(0x120, 0x90, 0x11000000, 0)
+    _ta1.d32(0x18, 0x200)
+    _ta1.d32(0x10, 1)
+    _tz1 = _Z()
+    page4.Page4Mixin._p4_43c9c2(_tz1, _t1, _ta1, 0xFF)
+    _t2 = page4.Ent(0x10, 0x10, 0x100001FF, 0)
+    _t2.d32(0x18, 3)
+    _t2.d32(0x10, 1)
+    _ta2 = page4.Ent(0x120, 0x90, 0x11000000, 0)
+    _ta2.d32(0x18, 0x10)
+    _ta2.d32(0x10, 1)
+    _ta2.d32(0x0C, 0x30)
+    _tz2 = _Z()
+    page4.Page4Mixin._p4_43c9c2(_tz2, _t2, _ta2, 0xFF)
+    _t3 = page4.Ent(0x10, 0x10, 0x100001FF, 0)
+    _t3.d32(0x18, 3)
+    _ta3 = page4.Ent(0x120, 0x90, 0x11000000, 0)
+    _tz3 = _Z()
+    page4.Page4Mixin._p4_43c9c2(_tz3, _t3, _ta3, 0)
+    check("0x43C9C2 共用尾：靶硬时 [a+0x18] -= k 且只放 SE 5（pan=(x-0x140)<<4）；"
+          "靶破时入列 0x61000004(半径 0x30) 并注销靶；k==0 直接返回",
+          _t1.g32(0x18) == 2 and _ta1.g32(0x18) == 0x101 and _ta1.g32(0x10) == 1
+          and [c for c in _tz1.calls if c[0] == "SE"] == [("SE", 5, -512)]
+          and not [c for c in _tz1.calls if c[0] != "SE"]
+          and _ta2.g32(0x10) == 0 and _ta2.g32(0x18) == 0
+          and any(c[0] == "ui52c" and c[1] == 0x61000004 for c in _tz2.calls)
+          and _t3.g32(0x18) == 3 and _ta3.g32(0x10) == 0 and _tz3.calls == [], "")
     check("0x45E670：f→[+0x20]/[+0x10]、g→[+0x18]/[+8]、h→[+0x1C]/[+0xC]；"
           "rec[4] 的 bit0/bit1 分别屏蔽两个分支",
           _ef1 == (0x21, 0x21) and _ef2.p4_stat == {}, "")
@@ -1444,11 +1480,13 @@ def main():
           and _mz.calls[0][2] == 0x40 and _mz.calls[0][3] == 0x50
           and _m1.g32(0x18) == 0 and _m1.g32(0x10) == 0, "")
     check("0x43C8CD（类型 0x10FF0053）：抖动 ±0x10/±0x20 的 0x41000004；"
-          "[a+0x14]==0x2A000001 时清零 [p+0x18]",
+          "[a+0x14]==0x2A000001 时清零 [p+0x18]；随后进共用尾击破靶（0x43C945 jmp）",
           len(_jhit) == 1 and _jhit[0][1] == 0x41000004
           and 0x200 - 0x10 <= _jhit[0][2] <= 0x200 + 0x0F
           and 0x100 - 0x20 <= _jhit[0][3] <= 0x100 + 0x1F
-          and _j1.g32(0x18) == 0, "")
+          and _ja.g32(0x18) == 0
+          and _ja.g32(0x10) == 0
+          and any(c[0] == "ui4cc" and c[1] == 0x41000001 for c in _jz.calls), "")
     check("0x430820 把 rec+0x10 覆盖成队列 的 this+4（所以 0x430400 的第 5 实参总是被丢弃）",
           img[0x430820 - ib:0x43082D - ib] == bytes([0x8B, 0x44, 0x24, 0x04, 0x83, 0xC1, 0x04,
                                                      0x89, 0x48, 0x10, 0xC2, 0x04, 0x00]), "")
