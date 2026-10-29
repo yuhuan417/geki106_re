@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 
@@ -302,6 +303,14 @@ BG_KIND_IDX = [0x0B] * 241
 for _k, _i in ((0, 0), (6, 1), (10, 2), (16, 3), (24, 4), (32, 5),
                (48, 6), (72, 7), (108, 8), (160, 9), (240, 10)):
     BG_KIND_IDX[_k] = _i
+
+# `0x4987F4` 调色板重映射表 A（0x44D290 的 COLORFILL 色号经它变换；remap_tables.json 提取件）
+try:
+    with open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), "remap_tables.json")) as _rf:
+        P4_REMAP_A = bytes(json.load(_rf)["remap_A"])
+except Exception:                                       # 文件缺失时按恒等
+    P4_REMAP_A = bytes(range(256))
 
 
 class BgBand:
@@ -2725,7 +2734,7 @@ def _beh_423A40(self, e) -> bool:
             e.d32(0x20, 0)
             e.d32(0x2C, (e.s32(0x2C) + r24 * 0xC8) & 0xFFFFFFFF)
             e.d32(0x24, 0)
-    self.p4_423820(e.s32(0x28), 0x90)              # 0x423AD9 数字绘制（桩，见 docstring）
+    self.p4_423820(e.s32(0x28), 0x90)              # 0x423AD9 数字分解绘制
     self.p4_423820(e.s32(0x2C), 0xF0)              # 0x423AE9
     return True
 
@@ -3465,8 +3474,8 @@ class Page4Mixin:
             nd.dst = (0xB0, 0x6C)                  # 0x4230DE 45A690(0xB0,0x6C)
             nd.active = 1 if (prm if isinstance(prm, int) else 0) != 0 else 0   # 0x423101 setne
             self.sysf.bits |= 0x4                  # 0x423104 0x45AF30(0x56CC84,4)
-            self.p4_423820(e.s32(0x20), 0x60)      # 0x42317A 0x423780(this,[+0x20],0x60)
-            self.p4_423820(e.s32(0x24), 0xC0)      # 0x42318A
+            self.p4_423780(e.s32(0x20), 0x60)      # 0x42317A 0x423780(this,[+0x20],0x60)
+            self.p4_423780(e.s32(0x24), 0xC0)      # 0x42318A 0x423780(this,[+0x24],0xC0)
         elif typ == 0x51000002:                    # case 1 @ 0x42319C
             if not self.layers.bind(13, 0xE):      # 0x4231AC 0x44C640(0x4AA7B0,0xD,0xE)
                 self.flags.set(2)                  # 0x4231CF
@@ -3575,13 +3584,144 @@ class Page4Mixin:
         本轮只登记调用次数——不臆造布局。"""
         self.p4_stat["45e7f0_calls"] = self.p4_stat.get("45e7f0_calls", 0) + 1
 
+    def p4_44d060(self, src_layer: int, dst_xy: tuple[int, int],
+                  dst_layer: int, src_rect: tuple[int, int, int, int]) -> None:
+        """`0x44D060(mgr, 源层, &目标点, 目标层, &源矩形)`：`call [src_vtable+0x1C]`、
+        flags 0x10 = DDBLTFAST_SRCCOLORKEY —— 层→层**色键** blit。
+        （实参角色由 0x423690 的字形流逐 esp 定案：arg2 = &{x,y}、arg4 = &源矩形。）"""
+        s = self.layers.tab.get(src_layer)
+        d = self.layers.tab.get(dst_layer)
+        if s is None or d is None:
+            return
+        l, t, r, b = src_rect
+        x, y = int(dst_xy[0]), int(dst_xy[1])
+        sh, sw = s.buf.shape
+        l = max(0, min(int(l), sw - 1)); r = max(0, min(int(r), sw - 1))
+        t = max(0, min(int(t), sh - 1)); b = max(0, min(int(b), sh - 1))
+        if r < l or b < t:
+            return
+        bw, bh = r - l + 1, b - t + 1              # 45A750 的矩形是闭区间
+        dx, dy = x, y
+        if dx < 0:
+            l2 = l - dx; bw += dx; dx = 0
+        else:
+            l2 = l
+        if dy < 0:
+            t2 = t - dy; bh += dy; dy = 0
+        else:
+            t2 = t
+        bw = min(bw, d.buf.shape[1] - dx); bh = min(bh, d.buf.shape[0] - dy)
+        if bw <= 0 or bh <= 0:
+            return
+        patch = s.buf[t2:t2 + bh, l2:l2 + bw]
+        if s.ckey >= 0:
+            region = d.buf[dy:dy + bh, dx:dx + bw]
+            m = patch != (s.ckey & 0xFF)
+            region[m] = patch[m]
+        else:
+            d.buf[dy:dy + bh, dx:dx + bw] = patch
+
+    def p4_44d290(self, layer: int, dst_rect: tuple[int, int, int, int],
+                  color: int) -> None:
+        """`0x44D290(mgr, 层, &目标矩形, 色号)`：Blt COLORFILL（flags 0x1000400 =
+        DDBLT_WAIT|DDBLT_COLORFILL，DDBLTFX.dwSize=0x64）；色号经
+        `byte[0x4987F4 + 色号]`（重映射表 A）——仅当 `byte[mgr+0x86]` 非零，
+        否则原色号（`byte[mgr+0x84]` 为 0 时还会查 `[mgr+0x888+色*4]` 的 DD 调色板
+        颜色值；索引面复刻按色号填充，本调用点色号恒 0 ⇒ remap_A[0]=0 无差异）。"""
+        lay = self.layers.tab.get(layer)
+        if lay is None:
+            return
+        idx = color & 0xFF
+        if self.p4_stat.get("0x4AA7B0+0x86", 0):
+            idx = P4_REMAP_A[idx] & 0xFF
+        l, t, r, b = dst_rect
+        sh, sw = lay.buf.shape
+        l = max(0, min(int(l), sw - 1)); r = max(0, min(int(r), sw - 1))
+        t = max(0, min(int(t), sh - 1)); b = max(0, min(int(b), sh - 1))
+        if r < l or b < t:
+            return
+        lay.buf[t:b + 1, l:r + 1] = idx
+
+    def p4_423690(self, code: int, x: int, y: int) -> None:
+        """`0x423690(this, code, x, y)`：层 13 字形表取 24×24 格，0x44D060 色键盖到层 0。
+        ```
+        0x4236A3 code==0xE → 45A750(0, 0x180, 0x17, 0x197)      （大行第 0 格）
+        0x4236C2 code≥0xA  → ((code−9)*24, 0x180, +0x17, 0x197) （大行）
+        0x4236EB code<0xA  → (code*24, 0x150, +0x17, 0x167)     （小行）
+        0x423705 45A750 → 0x42373D 0x44D060(mgr, 0xD, &{x,y}, 0, &rect)
+        ```"""
+        if code == 0xE:
+            rect = (0, 0x180, 0x17, 0x197)
+        elif code >= 0xA:
+            l = (code - 9) * 24
+            rect = (l, 0x180, l + 0x17, 0x197)
+        else:
+            l = code * 24
+            rect = (l, 0x150, l + 0x17, 0x167)
+        self.p4_44d060(0xD, (x, y), 0, rect)
+
+    def p4_423780(self, val: int, row: int) -> None:
+        """`0x423780(this, val, row)`：定距三连画（个/十/百位，x = 0xF0/0xC0/0x90、
+        间距 0x30），行 = arg2。0x462D71 = 普通截断除法（eax=商、edx=余数；
+        负数修正在 C idiv 下为死分支）。
+        ```
+        0x42378F div(val,10)  → 0x4237A8 0x423690(val%10,    0xF0, arg2)
+        0x4237B0 div(val/10,10) → 0x4237D3 0x423690((val/10)%10, 0xC0, arg2)
+        0x4237DB div(val/10,10) → 0x4237F0 0x423690(val/100, 0x90, arg2)
+        ```"""
+        q, r = divmod(int(val) & 0xFFFFFFFF if int(val) < 0x80000000
+                      else int(val) - 0x100000000, 10)
+        self.p4_423690(r, 0xF0, row)               # 0x4237A8（edx = val%10）
+        q2, r2 = divmod(q, 10)
+        self.p4_423690(r2, 0xC0, row)              # 0x4237D3（edx = (val/10)%10）
+        self.p4_423690(q2, 0x90, row)              # 0x4237F0（eax = val/100）
+
     def p4_423820(self, val: int, row: int) -> None:
-        """`0x423820(this, val, row)`：把 val 按 10 进制逐位经 `0x423690(code,x,y)`
-        盖到层 0/13（字形 24×24：code 0..9 在 t=0x150 行 l=code*24、code≥0xA 在
-        t=0x180 行 l=(code-9)*24，0x44D060 = 层→层色键 blit）。
-        逐位的 (x,y) 坐标推进（0x423896 循环里 esi 每次 −0x18、0x423780 三连调
-        0xF0/0xC0/0x90）尚未逐指令定案，本轮先登记调用——不臆造坐标。"""
-        self.p4_stat["423820_calls"] = self.p4_stat.get("423820_calls", 0) + 1
+        """`0x423820(this, val, row)`：先擦结果条，再把 val 按"十位组"分解画字形。
+        ```
+        0x42385C 0x44D290(13, &{0x48,row,0x11F,row+0x17}, 0)     擦 (72,row)-(287,row+23)
+        0x423869 0x423690(0xE, 0x108, row)                        前缀字形
+        0x423874 val==0 → 0x423690(0, 0xF0, row) 并返回
+        循环（esi 从 0xF0 每字左移 0x18；counter[帧-0x1C] 从 1 每轮 +1）：
+          units = val%10（0x42389A div）
+          units != 0：
+            counter > 3 → 0x423690(0xD, esi, row)、counter -= 4、esi -= 0x18   （0x4238C5/CE）
+            counter != 0 → 0x423690(counter+9, esi, row)、esi -= 0x18          （0x4238DD/E2）
+                          units != 1 → 0x423690(units, esi, row)               （0x4238EE）
+            counter == 0 → 0x423690(units, esi, row)                           （0x4238EC）
+          val /= 10、counter += 1，val != 0 则续（0x423907..0x423919）
+        ```
+        （counter+9 ≥ 0xA ⇒ 走层 13 大行字形；各组前缀/0xD/0xE 的具体图案由资源 6 决定。）"""
+        self.p4_44d290(13, (0x48, row, 0x11F, row + 0x17), 0)      # 0x42385C 擦条
+        self.p4_423690(0xE, 0x108, row)                            # 0x423869
+        v = int(val) & 0xFFFFFFFF
+        if v >= 0x80000000:
+            v -= 0x100000000
+        if v == 0:                                                 # 0x423874
+            self.p4_423690(0, 0xF0, row)
+            return
+        counter = 1                                                # 0x42383C
+        x = 0xF0
+        while True:                                                # 0x423896
+            q, units = divmod(v, 10)
+            if units != 0:                                         # 0x4238AD
+                if counter > 3:                                    # 0x4238B6
+                    self.p4_423690(0xD, x, row)                    # 0x4238C5
+                    counter -= 4                                   # 0x4238C1
+                    x -= 0x18                                      # 0x4238CE
+                if counter != 0:                                   # 0x4238D5
+                    self.p4_423690(counter + 9, x, row)            # 0x4238DD
+                    x -= 0x18                                      # 0x4238E2
+                    if units != 1:                                 # 0x4238E8
+                        self.p4_423690(units, x, row)              # 0x4238EF
+                        x -= 0x18                                  # 0x4238F4（je 只跳过绘制）
+                else:
+                    self.p4_423690(units, x, row)                  # 0x4238EC（je 落点）
+                    x -= 0x18                                      # 0x4238F4（fall-through）
+            v = q                                                  # 0x423911
+            counter += 1                                           # 0x423915
+            if v == 0:                                             # 0x423919
+                break
 
     def p4_448f50(self) -> None:
         """`0x448F50(0x4AD40C)`：0x449110（演员队列实体自尽）+ 0x430800（释放节点）。"""

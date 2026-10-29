@@ -2510,6 +2510,8 @@ def main():
             self.qs = {}
             self.p4_other = {}
             self.btn0 = False
+            self.paints = []
+            self.fills = []
             self.p4_player_pos = None
         def _p4_q(self, n):
             return self.qs.setdefault(n, [])
@@ -2517,6 +2519,10 @@ def main():
             return self.btn0
         def p4_cfg_word(self):
             return 0
+        def p4_44d060(self, src, dst, dstl, rect):
+            self.paints.append((src, dst, dstl, rect))
+        def p4_44d290(self, layer, rect, color):
+            self.fills.append((layer, rect, color))
     import sys as _sys51
     from geki import Flags as _Flags51
     _g51 = _G51()
@@ -2610,6 +2616,48 @@ def main():
           "[0x4CD4A0+4]/[+0x14] 并置 byte[+0xE1]、调 0x45E7F0",
           _g51.p4_stat.get("45e7f0_calls", 0) >= 1
           and _g51.p4_stat[0x4CD4A0 + 0xE1] == 1, "")
+    _gp = _G51()
+    _gp.p4_423690(0xE, 0x108, 0x90)
+    _gp.p4_423690(5, 0x200, 0x100)
+    _gp.p4_423690(0xB, 0x300, 0x110)
+    check("0x423690 字形几何：code 0xE → (0,0x180,0x17,0x197)、code<0xA → (code*24,0x150,…)、"
+          "code≥0xA → ((code−9)*24,0x180,…)；0x44D060(mgr,0xD,&{x,y},0,&rect) 层13→层0 色键",
+          _gp.paints == [(0xD, (0x108, 0x90), 0, (0, 0x180, 0x17, 0x197)),
+                         (0xD, (0x200, 0x100), 0, (0x78, 0x150, 0x8F, 0x167)),
+                         (0xD, (0x300, 0x110), 0, (0x30, 0x180, 0x47, 0x197))], "")
+    _gp.paints = []
+    _gp.p4_423780(27, 0x60)
+    check("0x423780 定距三连画：个位 val%10@0xF0、十位 (val/10)%10@0xC0、百位 val/100@0x90，"
+          "行 = arg2（0x462D71 = 截断除法：eax=商 edx=余数）",
+          _gp.paints == [(0xD, (0xF0, 0x60), 0, (7 * 24, 0x150, 7 * 24 + 0x17, 0x167)),
+                         (0xD, (0xC0, 0x60), 0, (2 * 24, 0x150, 2 * 24 + 0x17, 0x167)),
+                         (0xD, (0x90, 0x60), 0, (0, 0x150, 0x17, 0x167))], "")
+    _gp.paints = []
+    _gp.fills = []
+    _gp.p4_423820(16, 0xF0)
+    _p16 = _gp.paints
+    _f16 = _gp.fills
+    _gp.paints = []
+    _gp.fills = []
+    _gp.p4_423820(0, 0xF0)
+    _p0 = _gp.paints
+    _gp.paints = []
+    _gp.p4_423820(12345, 0xF0)
+    _p12345 = _gp.paints
+    check("0x423820 数字分解：先 0x44D290 擦 (0x48,row,0x11F,row+0x17) 色 0、"
+          "0x423690(0xE,0x108,row) 前缀；val=16 → 组形 0xA@0xF0+6@0xD8+组形 0xB@0xC0；"
+          "val=0 → 字形 0@0xF0；val=12345 → 第 4 组触发 counter>3：0xD@0x60 且 counter−4 后 "
+          "units@0x48（0x4238C5/CE/D5 分支）",
+          _f16 == [(13, (0x48, 0xF0, 0x11F, 0x107), 0)]
+          and _p16 == [(0xD, (0x108, 0xF0), 0, (0, 0x180, 0x17, 0x197)),
+                       (0xD, (0xF0, 0xF0), 0, (0x18, 0x180, 0x2F, 0x197)),
+                       (0xD, (0xD8, 0xF0), 0, (0x90, 0x150, 0xA7, 0x167)),
+                       (0xD, (0xC0, 0xF0), 0, (0x30, 0x180, 0x47, 0x197))]
+          and _p0 == [(0xD, (0x108, 0xF0), 0, (0, 0x180, 0x17, 0x197)),
+                      (0xD, (0xF0, 0xF0), 0, (0, 0x150, 0x17, 0x167))]
+          and [p[1][0] for p in _p12345] == [0x108, 0xF0, 0xD8, 0xC0, 0xA8, 0x90, 0x78, 0x60, 0x48, 0x30]
+          and [p[3][0] // 24 + (9 if p[3][1] == 0x180 else 0) for p in _p12345[1:]]
+              == [0xA, 5, 0xB, 4, 0xC, 3, 0xD, 2, 0xA], "")
     check("0x4606D4 = 15 项 opcode 跳表；op 1..5 分别入 ui40c/ui43c/ui4cc/ui4fc/ui52c；op 0xE 只跳过 0x14",
           _jt == [0x460686, 0x46044F, 0x4603AD, 0x460411, 0x460490,
                   0x4604D1, 0x460554, 0x460574, 0x4605C6, 0x460512,
