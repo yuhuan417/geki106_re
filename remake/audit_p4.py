@@ -1358,6 +1358,46 @@ def main():
           img[0x43C525 - ib:0x43C52B - ib] == bytes([0x0F, 0x87, 0x1C, 0x04, 0x00, 0x00])
           and img[0x43C53B - ib:0x43C541 - ib] == bytes([0x0F, 0x87, 0x8C, 0x03, 0x00, 0x00])
           and img[0x43C557 - ib:0x43C55D - ib] == bytes([0x0F, 0x85, 0x65, 0x04, 0x00, 0x00]), "")
+    class _Z(page4.Page4Mixin):
+        def __init__(self, stat=None):
+            self.calls = []
+            self.p4_stat = dict(stat or {})
+        def _p4_q(self, n):
+            return n
+        def spawn(self, *a):
+            self.calls.append(a)
+        def p4_se_pan(self, *a):
+            self.calls.append(("SE",) + a)
+    _za = _Z({0x4AB5B0 + 4: 0xC000})
+    _zb = _Z({0x4AB5B0 + 4: 0x4000})
+    _zc = _Z({0x4AB5B0 + 4: 0})
+    check("0x45AFC0 = 取 (word & mask) 并右移到 mask 最低位（0xC000 → 操作器 0..3）",
+          page4.Page4Mixin.p4_afc0(_za, 0xC000) == 3
+          and page4.Page4Mixin.p4_afc0(_zb, 0xC000) == 1
+          and page4.Page4Mixin.p4_afc0(_zc, 0xC000) == 0
+          and img[0x45AFC7 - ib:0x45AFC9 - ib] == bytes([0x23, 0xC1]), "")
+    _z1 = page4.Ent(1, 1, 0x23000001, 0)
+    _z1.d32(0x18, 0x40)
+    _z1.d32(0x54, 0)
+    _z2 = _Z({0x56CCA8: 0})
+    check("0x43AE60 = 剩余血量层数：([+0x18]+0x3F)>>6 - [+0x48]，0x56CCA8 未到则 0",
+          page4.Page4Mixin.p4_43ae60(_Z({0x56CCA8: 100}), _z1) == 1
+          and page4.Page4Mixin.p4_43ae60(_z2, _z1) == 0, "")
+    _zp = page4.Ent(0x300, 0x100, 0x10008041, 0)
+    _zp.d32(0x24, 7)
+    _zp.d32(0x10, 1)
+    _za2 = page4.Ent(0x200, 0x90, 0x23000001, 0)
+    _za2.d32(0x18, 0x40)
+    _za2.d32(0x48, 0)
+    _zs = _Z({0x56CCA8: 100, 0x4AB5B0 + 4: 0xC000})
+    page4.Page4Mixin.p4_43c460(_zs, _zp, _za2)
+    _kt = [c[1] for c in _zs.calls if c[0] == "ui4cc"]
+    check("0x43C6C4（类型 0x10008041）：1×0x41000006 + 4×0x41000005(y=4,-4,4,-4) + 1×0x41400507",
+          _kt == [0x41000006, 0x41000005, 0x41000005, 0x41000005, 0x41000005, 0x41400507]
+          and [c[3] for c in _zs.calls if c[0] == "ui4cc" and c[1] == 0x41000005] == [4, -4, 4, -4]
+          and _za2.g32(0x48) == 1 and _za2.m[0x4C] == 1
+          and _zp.m[0x10] == 0 and _zp.g32(0x1C) == 4
+          and _zs.calls[-1] == ("SE", 6, (0x300 - 0x140) << 4), "")
     check("0x43C460 前半段：(type&0x7000)==0x1000 用 [0x1C]>>7/[0x20]>>7，其它不生成",
           len(_h1.calls) == 1 and _h1.calls[0][1] == 0x41000004
           and _h1.calls[0][2] == 100 and _h1.calls[0][3] == 50

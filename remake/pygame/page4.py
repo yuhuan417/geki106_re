@@ -3334,7 +3334,87 @@ class Page4Mixin:
             return
         b.d32(0x10, 0)                                          # 0x43D0C6 byte
 
-    def p4_43c460(self, p) -> None:
+    def p4_43ae60(self, e) -> int:
+        """`0x43AE60(e)`：**剩余血量层数**（0 = 无可扣）。
+
+        ```
+        0x43AE60 if (word[0x56CCA8] <= [e+0x54]) → 0        ; 无敌/未到可伤时刻
+        0x43AE6C if ([e+0x18] & 0xF0000000) → return 1 - [e+0x48]   ; 特化实体（负数/一次性）
+        0x43AE84 H = ([e+0x18] + 0x3F) >> 6
+        0x43AE8C if (H <= [e+0x48]) → 0
+        0x43AE8E return H - [e+0x48]
+        ```
+        """
+        if (self.p4_stat.get(0x56CCA8, 0) & 0xFFFF) <= (e.g32(0x54) & 0xFFFF):   # 0x43AE68
+            return 0
+        hp = e.g32(0x18)
+        if hp & 0xF0000000:                                    # 0x43AE6F
+            return (1 - e.g32(0x48)) & 0xFFFFFFFF              # 0x43AE7E
+        h = ((hp + 0x3F) & 0xFFFFFFFF) >> 6                    # 0x43AE84
+        if h <= e.g32(0x48):                                   # 0x43AE8C
+            return 0
+        return (h - e.g32(0x48)) & 0xFFFFFFFF                  # 0x43AE8E
+
+    def p4_afc0(self, mask: int) -> int:
+        """`0x45AFC0(mgr, mask)`：取 `word[mgr+4] & mask`，**右移到 mask 的最低位**。
+
+        ```
+        0x45AFC0 eax = [ecx+4] & mask
+        0x45AFC9 eax == 0 → return 0
+        0x45AFCB mask & 1 → return eax（已经在最低位）
+        0x45AFD0 循环：mask >>= 1 ; eax >>= 1 ; 直到 mask & 1
+        ```
+        ⇒ `0x45AFC0(0x4AB5B0, 0xC000)` = **操作器选择（0..3）**。
+        """
+        v = (self.p4_stat.get(0x4AB5B0 + 4, 0) & mask) & 0xFFFFFFFF   # 0x45AFC0/0x45AFC7
+        if v == 0:                                              # 0x45AFC9
+            return 0
+        while not (mask & 1):                                   # 0x45AFCB / 0x45AFD4
+            mask >>= 1
+            v >>= 1
+        return v                                                # 0x45AFD9
+
+    def _p4_43c6c4(self, p, a, u: int) -> None:
+        """`0x43C6C4`（类型 `0x10008041`）：命中演出 —— 4 个 `0x41000005` 碎片 + 1 条 `0x41400507` 记录。
+
+        ```
+        0x43C6C6 0x43AE60(a) ; == 0 → 共用尾
+        0x43C6D3 if (byte[a+0x4C] == 0) {
+            byte[a+0x4C] = 1
+            0x430400(rec, [a+4], [a+8], 0x41000006, [p+0x24]) ; rec[4] = a（0x43C6FE 补写第 5 槽）
+            0x43A3C0(0x4AD4CC, &rec)
+        }
+        0x43C748 0x430400(rec, 4, 4, 0x41000005, a) → 入队          ; y = 4
+        0x43C78A rec[1] = -4 → 入队（0x43C78E）                      ; 注意 push 之后 [esp+0x18] = rec+0x14
+        0x43C7A1 rec[1] =  4 → 入队（0x43C7A9）
+        0x43C7BC rec[1] = -4 → 入队
+        0x43C7D4 0x430400(rec, p, [a+0x48], 0x41400507, a) → 入队    ; rec[0] 存的是**指针**
+        0x43C7FF [a+0x48]++ ; [a+0x54] = word[0x56CCA8] + 0x10
+        0x43C81B word[0x56CC98]++ ; 0x43C821 word[0x56CCA0]++
+        0x43C833 0x450350(0x4AB4B0, 6, ([p+4] - 0x140) << 4)
+        0x43C84A 0x45AFC0(0x4AB5B0, 0xC000) == 3 → byte[p+0x10] = 0、[p+0x1C] = 4
+        ```
+        """
+        if self.p4_43ae60(a) == 0:                              # 0x43C6C6
+            return
+        if a.m[0x4C] == 0:                                      # 0x43C6D3
+            a.m[0x4C] = 1                                       # 0x43C6DD
+            self.spawn(self._p4_q("ui4cc"), 0x41000006,
+                       a.s32(0x04), a.s32(0x08), p.g32(0x24))   # 0x43C703
+        for dy in (4, -4, 4, -4):                               # 0x43C748..0x43C7BC
+            self.spawn(self._p4_q("ui4cc"), 0x41000005, 4, dy, a)
+        self.spawn(self._p4_q("ui4cc"), 0x41400507,
+                   p.g32(0x00), a.g32(0x48), a)                 # 0x43C7D4
+        a.d32(0x48, (a.g32(0x48) + 1) & 0xFFFFFFFF)             # 0x43C7FF
+        a.d32(0x54, (self.p4_stat.get(0x56CCA8, 0) + 0x10) & 0xFFFFFFFF)   # 0x43C80A
+        self.p4_stat[0x56CC98] = (self.p4_stat.get(0x56CC98, 0) + 1) & 0xFFFF   # 0x43C81B
+        self.p4_stat[0x56CCA0] = (self.p4_stat.get(0x56CCA0, 0) + 1) & 0xFFFF   # 0x43C821
+        self.p4_se_pan(6, (p.s32(0x04) - 0x140) << 4)           # 0x43C83B
+        if self.p4_afc0(0xC000) == 3:                           # 0x43C84F
+            p.d32(0x10, 0)                                      # 0x43C858
+            p.d32(0x1C, 4)                                      # 0x43C85C
+
+    def p4_43c460(self, p, a=None) -> None:
         """`0x43C460(hit)`：`0x4AD46C × 0x4AD43C` 这对队列的命中处理（**目前只落地前半段**）。
 
         ★ `0x43C0B6` 的 `call 0x401136` 经 thunk 指向 **`0x43C460`**，不是 `0x43C170`
@@ -3368,10 +3448,10 @@ class Page4Mixin:
             ox = _random.randrange(0x20) - 0xF                 # 0x43C4C7
             oy = _random.randrange(0x20) - 0xF                 # 0x43C4D3
         else:
-            self._p4_43c460_dispatch(p, t0)                    # 0x43C4C0 jne 0x43C508 之前的分支
+            self._p4_43c460_dispatch(p, a, t0)                 # 0x43C4C0 jne 0x43C508 之前的分支
             return
         self.spawn(self._p4_q("ui4cc"), 0x41000004, x, y, (ox, oy))   # 0x43C488 / 0x43C503
-        self._p4_43c460_dispatch(p, t0)                        # 0x43C508 起
+        self._p4_43c460_dispatch(p, a, t0)                     # 0x43C508 起
 
     def _p4_43c987(self, p, u: int) -> None:
         """`0x43C987`（类型 `0x12061128` / `0x12081123`）：`[p+0x30] == 0` 时才造一份同类型实体入 `0x4AD46C`。
@@ -3386,7 +3466,7 @@ class Page4Mixin:
             return
         self.spawn(self._p4_q("ui46c"), u, p.s32(0x04), p.s32(0x08), 0)   # 0x43C99D / 0x43C9BD
 
-    def _p4_43c460_dispatch(self, p, t: int) -> None:
+    def _p4_43c460_dispatch(self, p, a, t: int) -> None:
         """`0x43C508..0x43C9C2`：按**完整类型**做**无符号**二叉查找式的 cmp 链。
 
         ```
@@ -3417,8 +3497,8 @@ class Page4Mixin:
             pass                                               # 未落地
         elif u == 0x10142214:                                  # 0x43C541 → 0x43C868（未落地）
             pass
-        elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4（依赖 0x43AE60，未落地）
-            pass
+        elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4
+            self._p4_43c6c4(p, a, u)
         elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D（见 §16.216）
             pass
         # 0x43C9C2 共用尾
@@ -3453,7 +3533,7 @@ class Page4Mixin:
                 if not t.g32(0x10):
                     continue
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):   # 0x43C0A9
-                    self.p4_43c460(t)                           # 0x43C0B2 0x43C0B6 → 0x43C460
+                    self.p4_43c460(e, t)                        # 0x43C0B2 push edi / 0x43C0B3 push esi
                     hits += 1
         return hits
 
