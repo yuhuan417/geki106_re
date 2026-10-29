@@ -561,8 +561,37 @@ def p4_446540(self, e) -> None:
 
 
 def p4_446470(self, e, a: int, b: int) -> None:
-    """`0x446470`：切换/复位（待展开）。"""
+    """`0x446470(e, bl, dl)`：头像帧号选择 + 方向位维护（`ret 8`）。
+
+    ```
+    0x446475 0x40208B(0x4AB5B0, 0x2) ; neg al; sbb eax,eax; and eax,8; add eax,7
+             ⇒ base = 7（位2 未置，操作器 A）或 0xF（已置，操作器 B）
+    0x446497 0x4019C9(0x4AB5B0, 0xC000) → mode ; 0x4464A4 mode <<= 1
+    0x4464A8 ecx = (bl != 0) ? 1 : 0
+    0x4464AF dl = [e+0x1C] & 1                       ; 方向位
+    0x4464B2 if (dl != 0) { ecx += mode*2 + base ; 0x4019B0(0x4AB454, ecx, e.x, e.y, dir) }
+    0x4464D1 else        { ecx += mode*2 + base ; 0x40115E(0x4AB454, ecx, dir) }
+    0x4464E4 if (bl) [e+0x1C] |= 2 else [e+0x1C] &= 1
+    ```
+    """
+    base = 0xF if self.keys.test(2) else 7            # 0x446481
+    mode = getattr(self, "p4_mode", 0) & 3            # 0x45AFC0(0x4AB5B0,0xC000)
+    fid = base + mode * 2 + (1 if a else 0)           # 0x4464A8/0x4464B7/0x4464C1
+    d = e.g32(0x1C) & 1                               # 0x4464AF
+    if b:
+        p4_446470_play(self, fid, e, d)                # 0x4019B0(0x4AB454, fid, x, y, dir)
+    else:
+        p4_446470_play(self, fid, e, d)                # 0x40115E(0x4AB454, fid, dir)
+    if a:                                             # 0x4464E7
+        e.d32(0x1C, e.g32(0x1C) | 2)
+    else:
+        e.d32(0x1C, e.g32(0x1C) & 1)
+
+
+def p4_446470_play(self, fid: int, e, d: int) -> None:
+    """`0x4019B0`/`0x40115E`(0x4AB454, …)：头像帧播放（两 thunk 目标待展开）。"""
     self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
+    self.p4_avatar_fid = fid
 
 
 def p4_446600(self, e) -> bool:
