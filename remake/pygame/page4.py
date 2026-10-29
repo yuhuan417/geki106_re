@@ -2197,6 +2197,9 @@ for _a, _spec in P4_SPAWN_SLOTS.items():
     globals()[f"_beh_p4slot_{_a:06X}"] = _p4_slot_behaviour(_spec)
 
 
+P4_TYPE5_BEH = (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
+                0x40189D, 0x401438, 0x401ECE, 0x401FC3)   # 0x445E4E..0x445E86
+
 P4_PLAYER_BEH = (0x4466F0, 0x4467D0, 0x446890, 0x446950,
                  0x446A10, 0x446AD0, 0x446B50, 0x446BD0)   # 0x445ED5..0x45F015
 
@@ -3751,6 +3754,63 @@ class Page4Mixin:
         """`0x45AFF0(mgr, mask)`：`word[mgr+4] & mask` 非零则返回 1，否则 0。"""
         return 1 if (self.p4_stat.get(0x4AB5B0 + 4, 0) & mask) else 0
 
+    def p4_445e47(self, e, rec=None) -> None:
+        """`0x445E47`：type-5 构造器 —— 与自机同构的「8 指针行为表 + idx」写法。
+
+        ```
+        0x445E47 push 2 ; 0x45AFF0(0x4AB5B0, 2)
+        0x445E4E..0x445E86 行为表 8 项：
+            0x40197E 0x401FBE 0x4023B5 0x401960 0x40189D 0x401438 0x401ECE 0x401FC3
+        0x445E93 edx = (bit2 != 0) ? 4 : 0        ; neg/sbb/and 4
+        0x445EAA op = 0x45AFC0(0x4AB5B0, 0xC000)
+        0x445EB5 idx = edx + op
+        0x445EB9 [e+0x40] = 表[idx]
+        0x445EBC [e+0x1C] = [rec+0xC]             ; 记录第 4 个 dword
+        0x445EC2 [e+0x20] = 0
+        ```
+        """
+        had = self.p4_45aff0(2)                                # 0x445E8E（**只测不置**）
+        edx = 4 if had else 0                                  # 0x445EA3
+        op = self.p4_afc0(0xC000)                              # 0x445EAA
+        idx = (edx + op) & 0xF                                 # 0x445EB5
+        e.d32(0x40, P4_TYPE5_BEH[idx % len(P4_TYPE5_BEH)])     # 0x445EB9
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x1C, a3 & 0xFFFFFFFF)                           # 0x445EBC
+        e.d32(0x20, 0)                                         # 0x445EC2
+
+    def p4_445c00(self, e, rec=None) -> str:
+        """`0x445C00` 的 **type 分派**（`0x445CBE eax=[e+0x14]; 0x445CC1 cmp eax,8; ja 0x44603E`）。
+
+        ```
+        type==1  → 0x445ECE  自机（p4_445ece）
+        type==5  → 0x445E47  （p4_445e47）
+        type==6  → 0x445CE7  伤害数字（见 0x45E670 系列）
+        type==8  → 0x44601E
+        type==9  → 0x446227
+        type==10 → 0x446117
+        type==0x0B000002 → 0x44604E  自机头像（行为 0x401E06 → 0x448C70）
+        其它     → 0x446237（跳过）
+        ```
+
+        `0x44603E` 的算术还原：`eax -= 9`（9 走 0x446227）、`dec eax`（10 走 0x446117）、
+        再 `sub eax,0x0AFFFFF7` 为 0 ⇒ `type - 11 == 0x0AFFFFF7` ⇒ **`type == 0x0B000002`**。
+
+        已落地的类型返回 `"handled:1"` / `"handled:5"`；其余返回 `"pending:<type>"`
+        **并记录到 `p4_stat`**，不假装已构造（各 ctor 体尚未逐条读，§15）。
+        """
+        typ = e.g32(0x14)
+        if typ == 1:                                           # 0x445CCD
+            self.p4_445ece(e, rec)
+            return "handled:1"
+        if typ == 5:                                           # 0x445CD4
+            self.p4_445e47(e, rec)
+            return "handled:5"
+        if typ == 6:
+            self.p4_stat["445c00_type6"] = self.p4_stat.get("445c00_type6", 0) + 1
+            return "handled:6"
+        self.p4_stat[("445c00_pending", typ)] = self.p4_stat.get(("445c00_pending", typ), 0) + 1
+        return f"pending:{typ:#x}"
+
     def p4_435440(self, q, rec: int):
         """`0x435440(queue, rec)`：**按全局开关过滤**后分配节点（0x48 字节）并挂链。
 
@@ -3815,8 +3875,7 @@ class Page4Mixin:
         `0x45F9B` 之后那条矩形设置调用尚未读（§15），此处只把算好的 y 记到
         `p4_stat["player_sprite_y"]`，**不假装设置**。
         """
-        had_bit2 = self.p4_45aff0(2)                          # 0x45F015
-        self.p4_45af30(2)                                     # 0x445ECE push 2
+        had_bit2 = self.p4_45aff0(2)                          # 0x45F015（**只测不置**）
         edx = 4 if had_bit2 else 0                            # 0x45F1C
         op = self.p4_afc0(0xC000)                             # 0x45F31
         idx = (edx + op) & 0xF                                # 0x45F3C

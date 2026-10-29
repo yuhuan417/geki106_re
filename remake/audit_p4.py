@@ -1529,6 +1529,29 @@ def main():
     _pn2.p4_445ece(_pn2_e, (0, 0, 0, 1))
     _fids = [(7 if not b2 else 0xF) + op * 2 + a1
              for b2 in (0, 1) for op in range(4) for a1 in (0, 1)]
+    _cd = _PN()
+    _cd_e1 = page4.Ent(0, 0, 0x1, 0)
+    _cd_e1.node = _Nd2()
+    _cd_r1 = _cd.p4_445c00(_cd_e1, (0, 0, 0, 0))
+    _cd_e5a = page4.Ent(0, 0, 0x5, 0)
+    _cd_e5b = page4.Ent(0, 0, 0x5, 0)
+    _cd_r5a = _cd.p4_445c00(_cd_e5a, (0, 0, 0, 0))
+    _cd_r5b = _cd.p4_445c00(_cd_e5b, (0, 0, 0, 0))
+    _cd_e7 = page4.Ent(0, 0, 0x7, 0)
+    _cd. p4_445c00(_cd_e7, (0, 0, 0, 0))
+    _cd_bit = _cd.p4_stat.get(0x4AB5B0 + 4, 0)
+    _cd2 = _PN()
+    _cd2.p4_stat[0x4AB5B0 + 4] = 2
+    _cd2_e5 = page4.Ent(0, 0, 0x5, 0)
+    _cd2.p4_445c00(_cd2_e5, (0, 0, 0, 0))
+    check("0x445C00 分派：1→0x445ECE、5→0x445E47（idx 0 稳定、bit2 置位则 idx 4）、"
+          "6→已处理、其它记 pending；**构造器只测 bit1 不置位**",
+          _cd_r1 == "handled:1" and _cd_e1.g32(0x40) == 0x4466F0
+          and _cd_r5a == "handled:5" and _cd_r5b == "handled:5"
+          and _cd_e5a.g32(0x40) == 0x40197E and _cd_e5b.g32(0x40) == 0x40197E
+          and _cd_bit == 0                     # ★ 不能被构造器写成 2
+          and _cd2_e5.g32(0x40) == 0x40189D
+          and _cd.p4_stat.get(("445c00_pending", 7)) == 1, "")
     check("0x446470 的 fid = (7|0xF) + op*2 + arg1 ∈ 7..0x16；0x498A88 表 24 条（fid 24 起全 0），不越界",
           min(_fids) == 7 and max(_fids) == 0x16
           and img[0x498A88 - ib + 23 * 14] == 0x01                 # fid 23 仍是有效行
