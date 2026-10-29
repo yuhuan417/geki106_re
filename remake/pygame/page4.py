@@ -766,6 +766,45 @@ def p4_atan2(a: int, b: int) -> int:
     return int(t["atan"][a & 0xFF, b & 0xFF])
 
 
+_P4_BG_TIER = (0, 6, 0x0A, 0x10, 0x18, 0x20, 0x30, 0x48, 0x6C, 0xA0, 0xF0, 0)
+
+
+def p4_bg_kind_ladder(grid, count: int, ratio: int, acc: int) -> int:
+    """`0x457050`：按累积量给每条分配「层级/带型」（写第 3 个 dword），返回新累积量。
+
+    ```
+    0x457053 edi(N) = [this+0x58]；0x457057 esi(acc) = [this+0x38]
+    0x45705D 12 字节常量表：[0,6,0xA,0x10,0x18,0x20,0x30,0x48,0x6C,0xA0,0xF0,0]
+    0x45709E ebp = this+0xD8                     ; grid[k] 的第 3 个 dword
+    0x4570A4 loop: edx = 1 ; al = 6
+        0x4570B3 while (acc >= (al<<6)):
+        0x4570B7     al = 表[edx+5] ; edx++ ; if (al == 0) break
+    0x4570C5 grid[k].kind = 表[edx+3]
+    0x4570CC acc += ([this+0x44] * acc) >> 6     ; 几何增长
+    ```
+
+    阈值阶梯 6,10,16,24,32,48,72,108,160,240（单位 = 值<<6）；层级值取自同表 `edx+3`。
+    """
+    n = min(int(count), len(grid))
+    if n <= 0:
+        return acc
+    tab = _P4_BG_TIER
+    acc = int(acc)
+    for k in range(n):
+        edx = 1                                        # 0x4570A4
+        al = 6                                         # 0x4570A9
+        while acc >= (al << 6):                        # 0x4570B3
+            idx = edx + 5
+            al = tab[idx] if idx < len(tab) else 0     # 0x4570B7
+            edx += 1                                   # 0x4570BB
+            if al == 0:                                # 0x4570BC
+                break
+        kidx = edx + 3
+        grid[k][2] = tab[kidx] if kidx < len(tab) else 0   # 0x4570C5
+        acc += (int(ratio) * acc) >> 6                 # 0x4570CC
+    return acc
+
+
 def p4_bg_strip_axis(slot, axis: int, count: int, step0: int, ratio: int) -> None:
     """`0x456FB0`（x）/ `0x457000`（y）：递增间距的带状排布。
 
