@@ -582,6 +582,26 @@ def main():
     check("0x4023EC→0x446540、0x4011AE→0x460EA0",
           thunk(0x4023EC) == 0x446540 and thunk(0x4011AE) == 0x460EA0, "")
 
+    print("== 11r. 0x446540 三连形态（§16.174）")
+    check("0x446548 push 0x01000001（立即数在 0x44654A）",
+          img[0x446549 - ib] == 0x68 and u32(0x44654A) == 0x01000001,
+          img[0x446548 - ib:0x44654E - ib].hex())
+    check("0x446594 把首个实体写入 [ebx+0x24]（形态链）",
+          img[0x446594 - ib:0x446597 - ib] == bytes([0x89, 0x43, 0x24]),
+          img[0x446594 - ib:0x446597 - ib].hex())
+    check("参数槽依次写 5 与 8",
+          img[0x446597 - ib:0x44659B - ib] == bytes([0xC7, 0x44, 0x24, 0x18])
+          and u32(0x44659B) == 5
+          and img[0x4465AE - ib:0x4465B2 - ib] == bytes([0xC7, 0x44, 0x24, 0x18])
+          and u32(0x4465B2) == 8,
+          f"{u32(0x44659B)} / {u32(0x4465B2)}")
+    calls = [i.address for i in md32.disasm(img[0x446540 - ib:0x4465C2 - ib], 0x446540)
+             if i.mnemonic == "call" and thunk(i.address + 5 + int.from_bytes(
+                 img[i.address + 1 - ib:i.address + 5 - ib], "little", signed=True)) == 0x448FF0]
+    check("0x446540 三次经 0x448FF0 入 0x4AD40C", len(calls) == 3, f"{len(calls)}")
+    check("0x01000001 的高字节命中生成器的特殊类判据",
+          (0x01000001 & 0xFF000000) == 0x01000000, "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
