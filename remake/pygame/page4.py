@@ -542,8 +542,22 @@ def _beh_23000009(self, e) -> bool:
 
 
 def p4_446540(self, e) -> None:
-    """`0x446540`：出场初始化（待展开）。"""
-    self.p4_stat[0x446540] = self.p4_stat.get(0x446540, 0) + 1
+    """`0x446540`：出场初始化 —— 生成"头像"实体 `0x1000001` 入 `0x4AD40C`，并记到 `[+0x24]`。
+
+    ```
+    0x446548 0x4023C4(&rec, 0, 0, 0x1000001, ebx)   ; (x=0, y=0, type, 控制器指针)
+    0x446580 0x4016E5(0x4AD40C, &rec) → eax         ; 入队并返回新实体
+    0x446594 [ebx+0x24] = eax                       ; 记住子实体（供后续驱动）
+    0x446597 第二发：记录 +0x18 = 5                  ; 子实体参数
+    ```
+    """
+    q = self._p4_q("ui40c")
+    c1 = self.spawn(q, 0x1000001, 0, 0)               # 0x446548
+    if c1 is not None:
+        e.d32(0x24, id(c1) & 0xFFFFFFFF)              # 0x446594
+    c2 = self.spawn(q, 0x1000001, 0, 0)               # 0x44658A 第二发
+    if c2 is not None:
+        c2.d32(0x18, 5)                               # 0x446597 参数 5
 
 
 def p4_446470(self, e, a: int, b: int) -> None:
