@@ -5011,6 +5011,31 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_430400_rec(x: int, y: int, type_word: int, a3: int = 0, a4: int = 0):
+        """`0x430400(&rec, x, y, type, a3)`：把 5 个 dword 记录填进 `&rec`。
+
+        逐条跟踪 `esp` 后（以进入时 `esp` 为 0 基准，`sub esp,0x14` 后 `S=-0x14`）：
+
+        | 指令 | 当时 esp | 有效偏移 | 落点 |
+        |---|---|---|---|
+        | `0x43040F mov [esp],eax` | S | S+0 | **slot0 = arg2 = x** |
+        | `0x430418 mov [esp+0x10],eax` | S-4 | S+0xC | **slot3 = arg5 = a3** |
+        | `0x430421 mov [esp+0xC],ecx` | S-8 | S+4 | **slot1 = arg3 = y** |
+        | `0x430430 mov [esp+0x10],edx` | S-8 | S+8 | **slot2 = arg4 = type** |
+        | `0x430434 rep movsd` (5) | S-8 | 源 = S+0 | 拷 slot0..slot4 |
+
+        ⇒ `rec = [x, y, type, a3, **slot4**]`，而 **slot4（S+0x10）在函数体内从未被写**，
+        拷贝的却是 5 个 dword —— 也就是说 `rec[0x10]`（最终落到实体 `+0x3C`）
+        是**调用者栈上的残留值**，不是参数。这是原码的真实怪癖，不是笔误：
+        `0x430400` 只接受 4 个有效参数（`ret` 无清栈，cdecl）。
+
+        ⇒ 第 5 个实参（`a3`）**总是原样存成 dword**：传 `&{jx,jy}` 就是指针、
+        传 `0x30` 就是数值 —— 两者的区别由**该类型实体的构造函数**去解释，
+        `0x430400` 自己不做任何区分。这也解释了为什么同一个函数两种用法都能跑。
+        """
+        return (x, y, type_word, a3, a4)
+
+    @staticmethod
     def p4_4590_tri(v: int) -> int:
         """`0x45900C`（键16）对 `[0x4AB5B0+4]` 的 `0x18` 字段做**三态轮转**。
 

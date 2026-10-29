@@ -1604,6 +1604,36 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    import re as _re
+    _esp, _slotw = 0, {}
+    _movsd = 0
+    for _i in _mdk.disasm(img[0x430400 - ib:0x43043C - ib], 0x430400):
+        if _i.mnemonic == "sub" and _i.op_str.startswith("esp"):
+            _esp -= 0x14
+            continue
+        if _i.mnemonic == "mov" and _i.op_str.startswith("dword ptr [esp"):
+            _m = _re.search(r"\[esp \+ (0x[0-9a-f]+)\]", _i.op_str) or \
+                 _re.search(r"\[esp\]", _i.op_str)
+            _off = int(_m.group(1), 16) if _m.groups() else 0
+            _s = (_esp + _off) + 0x14                      # 相对 S 的槽号
+            if _s % 4 == 0:
+                _slotw[_s // 4] = _i.address
+        if _i.mnemonic == "rep movsd":
+            _movsd = 5
+        if _i.mnemonic == "push":
+            _esp -= 4
+        elif _i.mnemonic == "pop":
+            _esp += 4
+    _rec = page4.Page4Mixin.p4_430400_rec
+    check("0x430400 是 cdecl 4 参记录填充：slot0=x(arg2)、slot1=y(arg3)、slot2=type(arg4)、"
+          "slot3=a3(arg5)；rep movsd 拷 5 个 dword 而 **slot4 从未被写** "
+          "⇒ rec[0x10] 是调用者栈残留；a3 是 dword 指针还是数值由实体构造函数解释",
+          _movsd == 5
+          and sorted(_slotw) == [0, 1, 2, 3]
+          and _slotw[0] == 0x43040F and _slotw[1] == 0x430421
+          and _slotw[2] == 0x430430 and _slotw[3] == 0x430418
+          and _rec(1, 2, 3, 4, 5) == (1, 2, 3, 4, 5)
+          and img[0x43043B - ib] == 0xC3, "")
     _hit = open(page4.__file__, encoding="utf-8").read()
     _anchor = _hit.index("—— 最后一击")
     _lf = _hit[_anchor: _anchor + 1600]
