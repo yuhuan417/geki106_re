@@ -766,6 +766,38 @@ def p4_atan2(a: int, b: int) -> int:
     return int(t["atan"][a & 0xFF, b & 0xFF])
 
 
+def p4_bg_strip_axis(slot, axis: int, count: int, step0: int, ratio: int) -> None:
+    """`0x456FB0`（x）/ `0x457000`（y）：递增间距的带状排布。
+
+    ```
+    0x456FB0  edx = [this+0x30]      ; y 版 0x457000 读 [+0x34]
+    0x456FB3  eax = [this+0x3C]      ; y 版读 [+0x40]  ← 首段间距
+    0x456FB8  edi = [this+0x58]      ; 条数 N
+    0x456FBD  if (N <= 0) return
+    0x456FC2  edi = this+0xD0        ; y 版 +0xD4
+    0x456FC8  loop:
+                ebx = edx
+                edx += eax                     ; 位置前进 step
+                [edi] = sar ebx,6              ; 存的是**前进之前**的 edx>>6
+                ebx = eax * [this+0x48]        ; y 版 [+0x4C] ← 间距增长率
+                eax += sar ebx,6               ; step += (step*ratio)>>6（几何增长）
+                ebx = [this+0x58]; i++; edi += 0xC
+    ```
+
+    ⇒ 每格间距按 `1 + ratio/64` 递增（等比排布），第 k 格位置为累积和。
+    """
+    n = min(int(count), len(slot.grid))
+    if n <= 0:
+        return
+    pos = int(slot.params[axis])                  # 0x456FB0/0x457000 的 edx
+    step = int(step0)                             # 0x3C / 0x40
+    ratio = int(ratio)                            # 0x48 / 0x4C
+    for k in range(n):
+        slot.grid[k][axis] = pos >> 6             # 存前进之前的值（sar 6）
+        pos += step                               # 0x456FCA
+        step += (step * ratio) >> 6               # 0x456FD3/0x456FD7
+
+
 def p4_bg_place_axis(slot, axis: int, count: int) -> None:
     """`0x456F30`（x 轴，`+0x30`→`+0xD0`）/ `0x456F70`（y 轴，`+0x34`→`+0xD4`）。
 
