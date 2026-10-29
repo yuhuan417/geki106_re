@@ -184,6 +184,9 @@ class ScriptVM:
                 return 1
 
     def exec_op(self, op: int, body: bytes) -> None:
+        import os as _os
+        if _os.environ.get("P4_VMTRACE"):
+            print(f"[vm] f={self.frame} op={op:#x} body={body[:0x14].hex()}", flush=True)
         if op == 0xE:                                            # 0x4603E9 注释
             self.out[0xE].append(body.split(b"\0")[0])
         elif 1 <= op <= 5:                                       # 0x46044F/3AD/411/490/4D1
@@ -2421,10 +2424,12 @@ P4_BEH: dict[int, object] = {
 
 
 class Page4Mixin:
-    # ---- 0x4505B0 参数块 -----------------------------------------------
     @staticmethod
     def _p4_block_data() -> dict:
-        """`remake/p4_block.json`（`remake/build_p4_block.py` 从 `0x4505B0` 机械提取）。"""
+        """`remake/p4_block.json` 的**其它**数据（目前只有 `vm_chains`）。
+
+        参数块常量已改由 `p4_block_tables.py`（从反汇编机械提取）提供，见 `p4_block()`。
+        """
         global _P4_BLOCK
         if _P4_BLOCK is None:
             import json
@@ -2433,69 +2438,75 @@ class Page4Mixin:
             _P4_BLOCK = json.loads(f.read_text(encoding="utf-8"))
         return _P4_BLOCK
 
+    # ---- 0x4505B0 参数块 -----------------------------------------------
+    # 常量表由 `remake/gen_p4_block.py` 从 `docs/p4_listings/01_enter_4505B0.txt`
+    # （递归下降反汇编）机械提取 ⇒ `remake/p4_block_tables.py`。不要手改那个文件。
+    #
+    # 块基址 B = esp+0x10；`mov [esp+X],imm` 的块偏移 = X-0x10-pend（pend = 已压参数个数）。
+    # 三条分支（si=关 [0x4AB5C8]、bp=周目 word[0x4AB5CA]）：
+    #   A_flag 0x450651  0x45B030(0x4AB5B0,1) 为真（bit1 已置）
+    #   A      0x45069A  si<8 且 bp<=3
+    #   B      0x450943  si<8 且 bp>3
+    #   C      0x45096E  si>=8
     def p4_block(self) -> bytearray:
-        """`0x4505B0` 的参数块：`esp+0x10..esp+0xE3` = 0xD4 字节。
+        import sys as _sys
+        from pathlib import Path as _P
+        _r = str(_P(__file__).resolve().parent.parent)
+        if _r not in _sys.path:
+            _sys.path.insert(0, _r)
+        from p4_block_tables import BLOCK_SIZE, LITERALS, TABLES
 
-        分支选择：
-          · `0x450648 0x45B030(0x4AB5B0,1)`（位已置返回 0）⇒ `je 0x450686` 继续分 A/B/C；
-            位清零 → 落 `0x450651`（`A_flag` 变体，只有 5 个字段非零）。
-          · A `0x45069A`（关<8 且 周目<=3）、B `0x450943`（周目>3）、C `0x45096E`（关>=8）。
-        块内 `+0x10/+0x12/+0x14/+0x16` 是 (关,周目) 查表结果，其余是四组常量表。
-        """
-        d = self._p4_block_data()
         si = int(self.stage_no) & 0xFFFF          # [0x4AB5C8]
         bp = int(self.loop_no) & 0xFFFF           # word[0x4AB5CA]
-        tbl = d["tables"]
-        blk = bytearray(d["size"])
+        blk = bytearray(BLOCK_SIZE)
 
         def put(o: int, v: int) -> None:
             blk[o] = v & 0xFF
             blk[o + 1] = (v >> 8) & 0xFF
 
-        if not self.keys.test(1):                 # 0x450648 → 0x450651 变体
-            for off, val in d["branches"]["A_flag"]["imm"].items():
-                o = int(off, 16) - 0x10
-                blk[o] = val & 0xFF
-                blk[o + 1] = (val >> 8) & 0xFF
-            blk[0x1A] = 0x06                      # [esp+0x2A]=6（0x450665）
-            blk[0x14] = 0x00                      # [esp+0x24]=0
-            blk[0x12] = 0x00                      # [esp+0x22]=0
-            blk[0x16] = 0x00                      # [esp+0x26]=0
-            blk[0x19] = 0x64                      # [esp+0x29]=0x64（0x45065C..0x450678）
+        def literals(name: str) -> None:
+            """把该分支的全部**字面量**写入（动态字段随后覆盖）。"""
+            for off, val in LITERALS[name].items():
+                if val <= 0xFF:
+                    blk[off] = val
+                else:
+                    put(off, val)
+
+        # 0x450648 `0x45B030(0x4AB5B0,1)`：bit1 已置 → A_flag 变体（只写 5 个字段）
+        if self.keys.test(1):
+            literals("A_flag")
+            # 0x450651 `push ebx`(ebx=0) ⇒ `0x45AFC0(0x4AB5B0, 0)`：mask=0 恒返回 0
+            # ⇒ neg/sbb/and 0x9F/add 0x64 的链条恒得 al = 0x64（与任何位无关）。
+            blk[0x19] = 0x64
             return blk
 
         name = "A" if (si < 8 and bp <= 3) else ("B" if si < 8 else "C")
-        for off, val in d["branches"][name]["imm"].items():
-            o = int(off, 16) - 0x10
-            blk[o] = val & 0xFF
-            blk[o + 1] = (val >> 8) & 0xFF
+        literals(name)
+
         if name == "A":
-            put(0x10, si * 4 + 0x0B)               # 0x4506F1/0x450700
-            put(0x12, tbl["0xa4"][si + bp * 8])    # 0x450833 → 0x450908
-            v = tbl["0x64"][si + bp * 8]           # 0x450903 → 0x45090D
+            idx = si + bp * 8
+            put(0x10, si * 4 + 0x0B)                   # 0x4506F1/0x450700 lea ecx,[esi*4+0xB]
+            put(0x12, TABLES["0xa4"][idx])             # 0x450833/0x450908 → [esp+0x22]
+            v = TABLES["0x64"][idx]                    # 0x450903/0x45090D → [esp+0x24]
             put(0x14, v)
-            put(0x16, min(v // 7, 0x0C))           # 0x450915..0x450932（魔数 0x92492493，/7 后钳 0xC）
-            blk[0x1A] = 0xFF                       # 0x450939
+            put(0x16, min(v // 7, 0x0C))               # 0x450915 魔数 0x92492493（/7）→ 钳 0xC
+            blk[0x1A] = 0xFF                           # 0x450939
         elif name == "B":
-            put(0x10, si * 4 + 0x38)               # 0x450943
-            put(0x12, 0x320)                       # 0x45094A
-            put(0x14, 0x64)                        # 0x450956
-            put(0x16, 0x0C)                        # 0x45095D
-            blk[0x1A] = 0xFF                       # 0x450964
-        else:                                      # C：四张按周目查的表（0x4509B7..0x450A21）
-            put(0x10, tbl["0x54"][bp])
-            put(0x12, tbl["0x4c"][bp])
-            put(0x14, tbl["0x5c"][bp])
-            put(0x16, tbl["0x3c"][bp])
-            blk[0x19] = 0                          # [esp+0x29]=bl
-            blk[0x1A] = tbl["0x44"][bp] & 0xFF     # [esp+0x2A]=dl
-        # 这 4 个字节都在**多压了一个参数**之后才写（esp 已 -4），故块内偏移比 esp 偏移小 4：
-        #   0x450611 `mov byte[esp+0x2F],al` (esp=X-4) ⇒ 块 +0x1B；0x450621 ⇒ +0x1C；
-        #   0x450634 ⇒ +0x1D；0x450644 (push 0xc000 后) ⇒ +0x18。
-        blk[0x18] = (self.keys.bits >> 14) & 3         # 0x450638/0x450644 0x45AFC0(0x4AB5B0,0xC000)
-        blk[0x1B] = 1 if self.keys.test(0x200) else 0  # 0x450605/0x450611 0x40208B(…,0x200)
-        blk[0x1C] = 1 if self.keys.test(1) else 0      # 0x450615/0x450621 0x40208B(…,1)
-        blk[0x1D] = 1 if self.keys.test(2) else 0      # 0x450625/0x450634 0x40208B(…,2)
+            put(0x10, si * 4 + 0x38)                   # 0x450943 lea ecx,[esi*4+0x38]
+            # 0x45094A..0x450964：0x320 / 0x64 / 0xC / 0xFF 已在 LITERALS["B"] 里
+        else:                                          # C：四张按周目查的表
+            put(0x10, TABLES["0x54"][bp])              # 0x4509B7 dx=[esp+eax+0x54] → [esp+0x20]
+            put(0x12, TABLES["0x4c"][bp])              # 0x4509CF cx=[esp+eax+0x4c] → [esp+0x22]
+            put(0x14, TABLES["0x5c"][bp])              # 0x4509E5 dx=[esp+eax+0x5c] → [esp+0x24]
+            put(0x16, TABLES["0x3c"][bp])              # 0x450A0A cx=[esp+eax+0x3c] → [esp+0x26]
+            blk[0x19] = 0                              # 0x450A1D mov byte[esp+0x29],bl
+            blk[0x1A] = TABLES["0x3c"][4 + bp] & 0xFF  # 0x450A14 mov dl,byte[esp+eax+0x44]
+
+        # 0x450605..0x450644：四个位段回读（这 4 条写时已压入下一次调用的实参 ⇒ 块偏移 -4）
+        blk[0x18] = (self.keys.bits >> 14) & 3         # 0x450638/0x450644 0x45AFC0(…,0xC000)
+        blk[0x1B] = 1 if self.keys.test(0x200) else 0  # 0x450605/0x450611 0x45AFF0(…,0x200)
+        blk[0x1C] = 1 if self.keys.test(1) else 0      # 0x450615/0x450621 0x45AFF0(…,1)
+        blk[0x1D] = 1 if self.keys.test(2) else 0      # 0x450625/0x450634 0x45AFF0(…,2)
         return blk
 
     @staticmethod

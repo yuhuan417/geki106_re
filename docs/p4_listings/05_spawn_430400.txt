@@ -1,0 +1,22 @@
+; func 0x430400  (20 insns)
+
+0x00430400  sub     esp, 0x14
+0x00430403  mov     eax, dword ptr [esp + 0x1c]
+0x00430407  mov     ecx, dword ptr [esp + 0x20]
+0x0043040b  mov     edx, dword ptr [esp + 0x24]
+0x0043040f  mov     dword ptr [esp], eax
+0x00430413  mov     eax, dword ptr [esp + 0x28]
+0x00430417  push    esi
+0x00430418  mov     dword ptr [esp + 0x10], eax
+0x0043041c  mov     eax, dword ptr [esp + 0x1c]
+0x00430420  push    edi
+0x00430421  mov     dword ptr [esp + 0xc], ecx
+0x00430425  mov     ecx, 5
+0x0043042a  lea     esi, [esp + 8]
+0x0043042e  mov     edi, eax
+0x00430430  mov     dword ptr [esp + 0x10], edx
+0x00430434  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x00430436  pop     edi
+0x00430437  pop     esi
+0x00430438  add     esp, 0x14
+0x0043043b  ret     
