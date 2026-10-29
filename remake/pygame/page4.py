@@ -334,7 +334,9 @@ class BgBand:
 class BgSlot:
     """`0x4AD55C` 的 12 个背景槽之一（元素 0x2A98 字节，`0x457B60` → `0x463C4F`）。"""
 
-    __slots__ = ("params", "rates", "grid", "bands", "rem", "flags", "active", "acc")
+    # _t / _base：带状体对象（0x34 字节，`0x457540`）的 `[+0xC]` 计时器与 `[+0x10]` base
+    __slots__ = ("params", "rates", "grid", "bands", "rem", "flags", "active", "acc",
+                 "_t", "_base")
 
     def __init__(self):
         self.params = [0] * 20     # +0x30（0x456D50 拷入）
@@ -4733,9 +4735,11 @@ class Page4Mixin:
                 slot.params = list(vals)                 # 0x456D50 直拷 20 dword
                 self._bg_dispatch(slot)                  # 0x456EB0
                 if getattr(self, "p4_trace_bg", False):
-                    _b = slot.bands[0] if getattr(slot, "bands", None) else None
-                    print(f"[bgslot] op{op} i={i} nbands={len(getattr(slot,'bands',[]) or [])} "
-                          f"first={(_b.layer, _b.kind, _b.visible, _b.src, _b.dst) if _b else None}", flush=True)
+                    _b = (slot.grid[0] if getattr(slot, "grid", None) else None)
+                    print(f"[bggrid] i={i} ngrid={len(getattr(slot,'grid',[]) or [])} "
+                          f"first={_b} count={slot.params[10]} flags=0x{slot.flags:X}", flush=True)
+                    print(f"[bgslot] op{op} i={i} ngrid={len(getattr(slot,'grid',[]) or [])} "
+                          f"first={_b} count={slot.params[10]} flags=0x{slot.flags:X}", flush=True)
             else:                                        # 0x457330
                 if not slot.active:
                     continue
@@ -5062,21 +5066,65 @@ class Page4Mixin:
         for slot in self.p4_bg:
             self._bg_update(slot)
 
+    # k 斜坡值 → 层号（`0x457938` 0xF1 项字节表 → `0x457908` 跳表，逐个读取得出）
+    P4_BG_K2LAYER = {0x06: 3, 0x0A: 4, 0x10: 5, 0x18: 6, 0x20: 7,
+                     0x30: 8, 0x48: 9, 0x6C: 0x0A, 0xA0: 0x0B, 0xF0: 0x0C}
+
     def p4_bg_draw(self) -> None:
-        """S22 第一条 `0x458EF5` → `0x457CB0` → 12× `0x457490`（add ecx,0xC → 0x45A170 → 0x44D010）。"""
+        """`0x458EF5` → `0x457CB0`（12 槽，槽步长 0x2A98）→ `0x457490`（单槽）。
+
+        `0x457490`：`if (![slot+0x2A90]) return; 0x45A170(slot+0xC)`，即每槽挂**一个**
+        标准显示节点（`0x457540` 里 `[obj+0x2C]` 建的那个）。节点每帧由 `0x457750` 更新：
+
+        ```
+        0x457760 t = [obj+0xC] += [slot+0x38]         ; 计时器 += 步长
+        0x4577AB k = [ [obj+4] + t*12 + 8 ]           ; 第 t 条的第三 dword
+        0x4577DD jmp [byte[0x457938+k]*4 + 0x457908]  ; k ⇒ 层 3..0xC（k=0 不可见）
+        0x45787E rect = (0, base*k, k-1, (base+1)*k-1)
+        0x4578C7 dst  = (条目x + (seedX*k>>6), 条目y + (seedY*k>>6))
+        ```
+        """
         c = self.canvas
+        if getattr(self, "_bgdbg0", 0) < 3:
+            self._bgdbg0 = getattr(self, "_bgdbg0", 0) + 1
+            print(f"[bgloop] slots={len(self.p4_bg)} act={[s.active for s in self.p4_bg][:4]} "
+                  f"n={[len(s.grid) for s in self.p4_bg][:4]} t={[getattr(s,'_t',None) for s in self.p4_bg][:4]}",
+                  flush=True)
         for slot in self.p4_bg:
             if not slot.active:
                 continue
-            for band in slot.bands:
-                if not band.visible or band.kind <= 0 or band.kind > 0xF0:
-                    continue
-                lay = self.layers.tab.get(band.layer)
-                if lay is None:
-                    continue
-                l, t, r, b = band.src
-                c.blit(lay.buf, (l, t, r + 1, b + 1), band.dst, key=lay.ckey)
-                self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
+            grid = getattr(slot, "grid", None)
+            if not grid:
+                continue
+            import os as _os
+            if not _os.environ.get("P4_BG_EXPERIMENT"):
+                continue          # 计时器步长来源未定（见 §15），默认不画，避免出错的画面
+            t = getattr(slot, "_t", 0) + slot.params[2]        # 0x457760 step = [+0x38]
+            slot._t = t
+            if t < 0 or t >= len(grid):                        # 0x457795 播放窗口
+                continue
+            ent = grid[t]
+            k = ent[2]
+            if getattr(self, "_bgdbg", 0) < 6:
+                self._bgdbg = getattr(self, "_bgdbg", 0) + 1
+                print(f"[bgdraw] t={t} step={slot.params[2]} n={len(grid)} k={k} "
+                      f"ent={ent} p0..3={slot.params[0:4]}", flush=True)
+            if k == 0:                                         # 0x4578B5
+                continue
+            layer = self.P4_BG_K2LAYER.get(k)
+            if layer is None:                                  # 0x457861 支：不动层号
+                continue
+            base = getattr(slot, "_base", 0)                   # [obj+0x10]
+            l, tp, r, b = 0, base * k, k - 1, (base + 1) * k - 1
+            # 0x4578C1/0x4578C4：种子 = rand() % ([slot+0x20]+1) / ([slot+0x24]+1)，
+            # 槽这两项本轮没读出来；若为 0 则 rand()%1 == 0，即无偏移（保持 0，不臆造）。
+            dx = ent[0]
+            dy = ent[1]
+            lay = self.layers.tab.get(layer)
+            if lay is None:
+                continue
+            c.blit(lay.buf, (l, tp, r + 1, b + 1), (dx, dy), key=lay.ckey)
+            self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
 
     def p4_render_ents(self) -> None:
         """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），
