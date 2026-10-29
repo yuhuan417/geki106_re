@@ -2014,7 +2014,7 @@ def _beh_10000001(self, e) -> bool:
     n = (e.s32(0x20) - 1) & 0xFFFFFFFF              # 0x448DAE 剩余重生次数
     e.d32(0x20, n)
     if n:
-        self.spawn(self._p4_q("ui40c"), 0x0B000001, 200, 200)      # 0x448DB9
+        self.spawn(self._p4_q("ui40c"), 0x0B000001, 200, 200, n)  # 0x448DB9 a3=n
         return False
     self.p4_key_raw_set(0x40)                        # 0x448DFB → 0x45AF30(0x56CCC0,0x40)
     return False
@@ -3998,7 +3998,7 @@ class Page4Mixin:
         0x45F45 byte[e+0x10] = 0                     ; ★ alive 初值 0
         0x45F49 [e+0x1C] = 0
         0x45F4C [e+0x40] = 行为表[idx]
-        0x45F56 eax = ([rec+0xC] == 1) ? -1 : 0      ; 0x45F59 dec/neg/sbb
+        0x45F56 eax = ([rec+0xC] == 1) ? **0** : **-1** ; 0x45F59 dec/neg/sbb（§16.272 勘误）
         0x45F67 [e+0x20] = eax
         0x45F5A..0x45F6A [e+0x24]/[0x28]/[0x2C]/[0x30] = 0
         0x45F6D [e+0x18] = 1                         ; HP
@@ -4019,7 +4019,7 @@ class Page4Mixin:
         e.d32(0x1C, 0)                                        # 0x45F49
         e.d32(0x40, P4_PLAYER_BEH[idx % len(P4_PLAYER_BEH)])  # 0x45F4C
         a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
-        e.d32(0x20, 0xFFFFFFFF if a3 == 1 else 0)             # 0x45F56/0x45F67
+        e.d32(0x20, 0 if a3 == 1 else 0xFFFFFFFF)             # 0x45F56/0x45F67（★见 §16.272 勘误）
         for off in (0x24, 0x28, 0x2C, 0x30):                  # 0x45F5A..0x45F6A
             e.d32(off, 0)
         e.d32(0x18, 1)                                        # 0x45F6D

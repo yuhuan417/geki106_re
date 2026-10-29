@@ -1604,6 +1604,18 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _ct20 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x445F56 - ib:0x445F68 - ib], 0x445F56)}
+    _src = open(page4.__file__, encoding="utf-8").read()
+    check("0x445F56..0x445F64 自机 ctor 的 [+0x20] = (rec[3]==1) ? **0** : **-1**"
+          "（dec/neg/sbb 链：a3==1 ⇒ CF=0 ⇒ sbb 得 0；否则得 -1）；"
+          "0x448DB9 复活时 a3 = 剩余次数 n",
+          _ct20.get(0x445F59) == ("dec", "eax")
+          and _ct20.get(0x445F5D) == ("neg", "eax")
+          and _ct20.get(0x445F5F) == ("sbb", "eax, eax")
+          and _ct20.get(0x445F64) == ("mov", "dword ptr [ebx + 0x20], eax")
+          and "e.d32(0x20, 0 if a3 == 1 else 0xFFFFFFFF)" in _src
+          and "0x0B000001, 200, 200, n)" in _src, "")
     _rs = page4.Page4Mixin.p4_self_respawn_rec
     _rd = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x44370A - ib:0x443790 - ib], 0x44370A)}
@@ -1904,11 +1916,11 @@ def main():
     _pl2_e = page4.Ent(0, 0, 0x1, 0)
     _pl2.p4_445ece(_pl2_e, (0, 0, 0, 0))
     check("0x445ECE 自机构造器：半径 0xA、alive=0、HP=1、索引 {0,5,6,7}、"
-          "[+0x20]=([rec+0xC]==1 ? -1 : 0)、精灵 y = op*0x30+0x2F",
+          "[+0x20]=([rec+0xC]==1 ? 0 : -1)（§16.272 勘误：原先写反）、精灵 y = op*0x30+0x2F",
           _pl_e.g32(0x0C) == 0xA and _pl_e.m[0x10] == 0 and _pl_e.g32(0x18) == 1
-          and _pl_e.g32(0x40) == 0x4466F0 and _pl_e.g32(0x20) == 0xFFFFFFFF
+          and _pl_e.g32(0x40) == 0x4466F0 and _pl_e.g32(0x20) == 0          # a3==1 → 0
           and _pl.p4_stat["player_sprite_y"] == 0x2F
-          and _pl2_e.g32(0x40) == 0x446A10 and _pl2_e.g32(0x20) == 0
+          and _pl2_e.g32(0x40) == 0x446A10 and _pl2_e.g32(0x20) == 0xFFFFFFFF  # a3!=1 → -1
           and page4.P4_PLAYER_BEH == (0x4466F0, 0x4467D0, 0x446890, 0x446950,
                                       0x446A10, 0x446AD0, 0x446B50, 0x446BD0), "")
     _sb = _Z()
