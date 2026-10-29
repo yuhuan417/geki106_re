@@ -102,7 +102,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 python3 - "$TMP/beep.wav" <<'PY'
 import math, struct, sys, wave
-sr, dur = 44100, 1.5
+sr, dur = 44100, 2.0
 with wave.open(sys.argv[1], 'wb') as w:
     w.setnchannels(2); w.setsampwidth(2); w.setframerate(sr)
     buf = bytearray()
@@ -112,16 +112,21 @@ with wave.open(sys.argv[1], 'wb') as w:
         buf += struct.pack('<hh', v, v)
     w.writeframes(bytes(buf))
 PY
-ok "已生成 1.5s / 440Hz 蜂鸣（峰值 12000）"
+ok "已生成 2.0s / 440Hz 蜂鸣（峰值 12000）"
 
+# 注意顺序：**先开录音再播放**。parec 连上 monitor 要 1s 左右（sink 从挂起唤醒更慢），
+# 反过来做会把整段蜂鸣错过、录到一串静音，误判成"没声音"。
 probe() {   # 播一次蜂鸣并回环录音，设置 STATE / PEAK / BYTES
+    timeout 4 parec --device="$SINK.monitor" --format=s16le --rate=44100 --channels=2 \
+        --raw > "$TMP/rec.raw" 2>/dev/null &
+    local rec=$!
+    sleep 0.8
     paplay "$TMP/beep.wav" &
     local pid=$!
-    sleep 0.4
+    sleep 1.0          # paplay 自己也要 ~0.5s 才把流建起来，太早采样会读到 IDLE
     STATE=$(sink_prop state)
-    timeout 2.5 parec --device="$SINK.monitor" --format=s16le --rate=44100 --channels=2 \
-        --raw > "$TMP/rec.raw" 2>/dev/null
     wait "$pid" 2>/dev/null
+    wait "$rec" 2>/dev/null
     PEAK=$(python3 - "$TMP/rec.raw" <<'PY'
 import struct, sys
 data = open(sys.argv[1], 'rb').read()
@@ -138,18 +143,18 @@ if [[ "$WATCH" -gt 0 ]]; then
     while :; do
         probe
         printf '[%s] peak=%-6s sink=%-9s crash=%s\n' \
-            "$(date +%T)" "$PEAK" "${STATE:-?}" "$(grep -c 'signal 11' /mnt/wslg/stderr.log 2>/dev/null || echo 0)"
+            "$(date +%T)" "$PEAK" "${STATE:-?}" "$(grep -c 'signal 11' /mnt/wslg/stderr.log 2>/dev/null || true)"
         sleep "$WATCH"
     done
 fi
 
 probe
-printf '  播放中 sink 状态: %s\n' "${STATE:-?}"
-if [[ "$STATE" == "RUNNING" ]]; then
-    ok "sink 正在运行（数据在流出）"
-else
-    warn "状态 ${STATE:-?}（可能赶在挂起边界，看回环结果）"
-fi
+printf '  播放中 sink 状态: %s（本 build 播放时也常报 IDLE，仅作参考）\n' "${STATE:-?}"
+case "${STATE:-}" in
+    RUNNING) ok "sink 正在运行（数据在流出）" ;;
+    IDLE)    ok "sink 已接收流（状态机报 IDLE，以回环峰值为准）" ;;
+    *)       warn "状态 ${STATE:-?}（以回环峰值为准）" ;;
+esac
 printf '  回环录音: %s 字节, 峰值 %s\n' "$BYTES" "$PEAK"
 
 hr "判定"
