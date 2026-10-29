@@ -604,6 +604,81 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
         self.p4_avatar_rec = rec
 
 
+_P4TAB = {}
+
+
+def p4_tables():
+    """按 `0x45A7E7`/`0x45A82E`/`0x45A863` 的填表代码生成的定点表（`build_p4_tables.py`）。"""
+    if not _P4TAB:
+        try:
+            import pathlib
+            import numpy as np
+            f = pathlib.Path(__file__).resolve().parent.parent / "p4_tables.npz"
+            z = np.load(f)
+            _P4TAB["sin"] = z["sin1800"]
+            _P4TAB["cos"] = z["cos1800"]
+            _P4TAB["isqrt"] = z["isqrt65536"]
+            _P4TAB["atan"] = z["atan256"]
+        except Exception:
+            return None
+    return _P4TAB
+
+
+def p4_isqrt(v: int) -> int:
+    """`0x5B3AB4` 表：`trunc(4096/sqrt(i))`，i 由 1 起（`0x45A82E` 段）。"""
+    t = p4_tables()
+    if t is None or v <= 0:
+        return 0
+    i = min(int(v), 65535)
+    return int(t["isqrt"][65535 - i])      # 表按 i 递减存放：i=0xFFFF → 首项
+
+
+def p4_atan2(a: int, b: int) -> int:
+    """`0x5D3E36` 表：`trunc(atan2(a,b)*3600/(2*3.1416))`，单位 0.1°。"""
+    t = p4_tables()
+    if t is None:
+        return 0
+    return int(t["atan"][a & 0xFF, b & 0xFF])
+
+
+def p4_sin_q(arg: int, which: str = "sin") -> int:
+    """`0x45ABB0`（cos 表）/`0x45AAF0`（sin 表）：`|arg|%3600` 归一 + 象限重组。
+
+    四个分支（`0x45ABEA`/`0x45ABF4`/`0x45AC03`/`0x45AC0F` 与
+    `0x45AB2D`/`0x45AB37`/`0x45AB44`/`0x45AB50`）的取值方式：
+
+    ```
+    idx = (|arg| / 900) & 3 ; rem = |arg| % 900
+    idx0: al = byte[基址 + rem]          ; 正向
+    idx1: al = byte[中心 - rem] ; neg eax ; 负镜像
+    idx2: al = byte[基址 + rem] ; neg eax ; 负正向
+    idx3: al = byte[中心 - rem]           ; 镜像
+    ```
+
+    其中 `中心 = 基址 + 899`（`0x5D41BF = 0x5D3E3C+899`、`0x5B3E37 = 0x5B3AB4+899`），
+    表里中心项对应角度 0、负半区以补码字节存放。
+
+    **注意**：本函数只复现"取哪个字节、是否取负"这两件事，返回值就是
+    `mov al, byte[...]` 得到的 0..255 或 `neg eax` 后的 -0..-255。
+    它是不是语义上的"sin(arg·0.1°)"取决于调用方怎么解读（基址对应表首而非中心，
+    故 `rem` 是**相对表首**的偏移）—— 该解读待核对，此处不臆断。
+    """
+    t = p4_tables()
+    if t is None:
+        return 0
+    a = abs(int(arg))
+    idx = (a // 900) & 3
+    rem = a % 900
+    tab = t["cos"] if which == "cos" else t["sin"]
+    if idx == 0:
+        return int(tab[rem])                   # 0x45ABEA / 0x45AB2D
+    if idx == 1:
+        return -int(tab[899 - rem])            # 0x45ABF4 / 0x45AB37
+    if idx == 2:
+        return -int(tab[rem])                  # 0x45AC03 / 0x45AB44
+    return int(tab[899 - rem])                 # 0x45AC0F / 0x45AB50
+
+
 class P4Replay:
     """回放三数组（`0x4CD5D8` 对象内 +0x30 / +0x34BF0 / +0x697B0）。
 
