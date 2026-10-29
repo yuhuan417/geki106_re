@@ -215,7 +215,9 @@ class ScriptVM:
             self.out[0xA].append((int.from_bytes(body[0:4], "little"),
                                   int.from_bytes(body[4:8], "little")))
         elif op == 0xB:                                          # 0x460600 装层
-            res = [int.from_bytes(body[i:i + 4], "little") for i in range(0, 0x38, 4)]
+            # 实测记录体正好 0x38=56 字节 = 14 个 dword，**没有**额外头；
+            # `0x46060C add esi,4` 跳的是记录里的 op 字段（esi 进来时指向 op）。
+            res = [int.from_bytes(body[4 * i:4 + 4 * i], "little") for i in range(14)]
             self.out[0xB].append(res)
             if self.owner is not None:
                 self.owner.p4_load_layers(res)
@@ -2577,6 +2579,7 @@ class Page4Mixin:
         if os.environ.get("P4_DIAG") and self.p4_frames % 120 == 0:
             print(f"[p4diag] f={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)} "
                   f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
+                  f"ent0={[(hex(e.g32(0x14)), e.node.layer, e.node.rect) for e in self.p4_q43c[:3] if e.node]} "
                   f"other={ {k: len(v) for k, v in getattr(self, 'p4_other', {}).items()} } "
                   f"chain={getattr(self.vm, 'chain', None)} q={self.vm.queue[:6]} "
                   f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
@@ -2677,7 +2680,7 @@ class Page4Mixin:
                   f"vm_chain={getattr(self.vm, 'chain', None)} vm_queue={self.vm.queue[:6]}",
                   flush=True)
         if self.audio is not None:
-            self.audio.stop_bgm()
+            self.audio.bgm_stop()
         if not self.timer.kill():                     # 0x451C62 0x45A510
             self.flags.set(0x40)                      # 0x451C72
         low = self.flags.lowest()                     # 0x451C7C 0x45B070
@@ -5997,6 +6000,8 @@ class Page4Mixin:
             if v == 5:
                 continue
             if not self.layers.bind(i, v):        # 0x44C640
+                if os.environ.get("P4_DIAG"):
+                    print(f"[p4layers] bind FAIL layer={i} id={v} res={res}")
                 self.flags.set(2)                 # 0x4606B3
                 self.vm.flags |= 1                # 0x4606BD
                 break
