@@ -709,6 +709,32 @@ def main():
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
 
+    print("== 11w. 组 A 槽 1 镜像对（§16.180）")
+    check("0x42CC87 弹型 0x12071126、速度 0xF4000A00",
+          u32(0x42CC83) == 0xF4000A00 and u32(0x42CC88) == 0x12071126,
+          f"{hex(u32(0x42CC83))} / {hex(u32(0x42CC88))}")
+    check("0x42CCCD 把记录 +0xC 改成 0xC000A00",
+          img[0x42CCCD - ib:0x42CCD1 - ib] == bytes([0xC7, 0x44, 0x24, 0x1C])
+          and u32(0x42CCD1) == 0x0C000A00,
+          img[0x42CCCD - ib:0x42CCD5 - ib].hex())
+    import struct as _s2
+
+    def vpair(v):
+        lo, hi = _s2.unpack("<hh", _s2.pack("<I", v))
+        return (hi / 256, lo / 256)
+
+    check("速度对解出 (-12,+10) 与 (+12,+10)",
+          vpair(0xF4000A00) == (-12.0, 10.0) and vpair(0x0C000A00) == (12.0, 10.0),
+          f"{vpair(0xF4000A00)} / {vpair(0x0C000A00)}")
+    enq = [i for i in md32.disasm(img[0x42CC50 - ib:0x42CCF0 - ib], 0x42CC50)
+           if i.mnemonic == "call" and thunk(i.address + 5 + int.from_bytes(
+               img[i.address + 1 - ib:i.address + 5 - ib], "little", signed=True)) == 0x430290]
+    check("0x42CC50 一帧入队两次（镜像对）", len(enq) == 2, f"{len(enq)}")
+    check("与槽 0 共用 btn0 门槛与 5 帧跳发",
+          img[0x42CC61 - ib:0x42CC67 - ib] == bytes([0x8A, 0x0D, 0x94, 0xB5, 0x4A, 0x00])
+          and img[0x42CC71 - ib:0x42CC77 - ib] == bytes([0x83, 0xF8, 0x05, 0x0F, 0x8E, 0x92]),
+          img[0x42CC71 - ib:0x42CC77 - ib].hex())
+
     print("== 13. 目标书条目覆盖表（地址可达性 × 文档定案）")
     doc = (HERE.parent / "ANALYSIS.md").read_text(encoding="utf-8")
     items = [
