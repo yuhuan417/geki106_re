@@ -296,6 +296,29 @@ def main():
     check("0x43CF1A 用位 0x10 作门槛（push 0x10）",
           img[0x43CF1A - ib] == 0x6A and img[0x43CF1B - ib] == 0x10, "")
 
+    print("== 11g. 三个 enqueue → 三种构造器（§16.163）")
+    enq = {0x448FF0: (0x401352, None), 0x430290: (0x401352, 0x2C), 0x43A3C0: (0x401352, None)}
+    ctors = {0x448FF0: 0x445C00, 0x430290: 0x42D780, 0x43A3C0: 0x4355E0}
+    for fn, want in ctors.items():
+        got = []
+        for ins in md32.disasm(img[fn - ib:fn - ib + 0x70], fn):
+            if ins.mnemonic == "call":
+                got.append(deep(ins.address))
+        check(f"{fn:#x} 的构造器是 {want:#x}", want in got,
+              f"{[hex(x) for x in got]}")
+    check("0x448FF0 的构造器正是实体生成器 0x445C00",
+          0x445C00 in [deep(i.address) for i in md32.disasm(img[0x448FF0-ib:0x449060-ib], 0x448FF0)
+                       if i.mnemonic == "call"], "")
+    # `mov dword [esi+0x2c], eax` = 89 46 2C
+    tail = b"\x89\x46\x2c"
+    check("只有 0x430290 维护尾指针（89 46 2C）",
+          img[0x430290 - ib:0x4302F0 - ib].count(tail) == 2
+          and img[0x448FF0 - ib:0x449060 - ib].count(tail) == 0
+          and img[0x43A3C0 - ib:0x43A430 - ib].count(tail) == 0,
+          f"430290={img[0x430290-ib:0x4302F0-ib].count(tail)} "
+          f"448FF0={img[0x448FF0-ib:0x449060-ib].count(tail)} "
+          f"43A3C0={img[0x43A3C0-ib:0x43A430-ib].count(tail)}")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
