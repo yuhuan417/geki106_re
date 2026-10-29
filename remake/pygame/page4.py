@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 _P4_BLOCK: dict | None = None
@@ -438,6 +439,21 @@ class Ent:
 
     def __repr__(self) -> str:
         return f"<Ent 0x{self.g32(0x14):08X} beh=0x{self.beh:06X} a={self.g32(4)} b={self.g32(8)} d={self.g32(0x1C)}>"
+
+# `0x593AB4` 起的 65536 项倒数平方根表：`word[i] = (int)(4096 / sqrt(i))`（截断）
+# 由启动期 `0x45A7E0` 用 FPU 建表（`0x45A83B fild i ; fsqrt ; fdivr [0x499388]`，
+# `[0x499388] = 4096.0`，`0x463F30` 是"截断取整"的 ftol）。此表运行期才生成，磁盘上是全 0。
+P4_RSQRT: dict[int, int] = {}
+
+
+def _p4_rsqrt(s: int) -> int:
+    """`word[0x593AB4 + s*2]`：`(int)(4096 / sqrt(s))`（截断）。`s == 0` 原版会得到 FPU 的 inf，不用。"""
+    v = P4_RSQRT.get(s)
+    if v is None:
+        v = int(4096.0 / math.sqrt(s)) if s > 0 else 0
+        P4_RSQRT[s] = v
+    return v
+
 
 def _beh_43AEB0(self, e) -> bool:
     """`0x401E2E → 0x43AEB0`（类型 `0x21000001`）：底部条带块的横向滑出 + 纵向摆动。
@@ -5141,6 +5157,58 @@ class Page4Mixin:
         返回 `None` 表示该值不在表里（按 `0x447C2D` 直接进公共尾）。
         """
         return cls.P4_447640_STATES.get(state & 0xF000)
+
+    @staticmethod
+    def p4_45aa80(a: int, b: int) -> int:
+        """`0x45AA80`：**倒数距离** `4096 / hypot(a, b)`（截断取整），不是 atan2。
+
+        ```
+        0x45AA88 if (a == 0 && b == 0) return 0x7FFFFFFF
+        0x45AA98 eax = a*a + b*b                 ; 32 位有符号相乘，会回绕
+        0x45AAA2 cl = 0
+        0x45AAA9 while (eax >= 0x10000) { eax >>= 2 ; cl++ }   ; 算术右移 2
+        0x45AAB6 eax = word[0x593AB4 + eax*2]    ; 倒数平方根表（见 `_p4_rsqrt`）
+        0x45AAC0 eax >>= cl                      ; 补回 >>2 的倍数
+        0x45AAC6 if (eax == 0) eax = 1
+        ```
+
+        表项 `word[i] = (int)(4096/sqrt(i))`，所以结果 ≈ `4096 / |(a,b)|`。
+        调用方拿它做**归一化系数**：`0x40E9DF` 用它算出固定速度的追踪向量。
+        """
+        if a == 0 and b == 0:
+            return 0x7FFFFFFF
+        s = (a * a + b * b) & 0xFFFFFFFF                # 0x45AA98 32 位回绕
+        s = s - 0x100000000 if s & 0x80000000 else s
+        cl = 0
+        while s >= 0x10000:                             # 0x45AAA2
+            s >>= 2                                     # 0x45AAA9（sar）
+            cl += 1
+        v = (_p4_rsqrt(s) >> cl) if s > 0 else 0        # 0x45AAB6/0x45AAC0
+        return v if v else 1                            # 0x45AAC6
+
+    @staticmethod
+    def p4_4305f0(e, r: int) -> int:
+        """`0x4305F0(ent, r)`：**带半径的在屏判据**，返回 1/0。
+
+        ```
+        0x4305F0 edx = [ecx+4]
+        0x4305FA if (edx - r > 0x27F) return 0     ; x-r 超过 639
+        0x430607 if (edx + r <= 0)    return 0     ; x+r 不 > 0
+        0x43060B ecx = [ecx+8]
+        0x430610 if (ecx - r > 0x1DF) return 0     ; y-r 超过 479
+        0x43061C if (ecx + r <= 0)    return 0     ; y+r 不 > 0
+        0x430620 return 1
+        ```
+
+        即 `(x-r <= 639) && (x+r > 0) && (y-r <= 479) && (y+r > 0)`。
+        """
+        x = e.s32(0x04)
+        y = e.s32(0x08)
+        if x - r > 0x27F or x + r <= 0:
+            return 0
+        if y - r > 0x1DF or y + r <= 0:
+            return 0
+        return 1
 
     @staticmethod
     def p4_447c2d_angle(counter: int) -> int:

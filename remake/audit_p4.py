@@ -1686,6 +1686,34 @@ def main():
           and _t5.get(0x445EC9) == ("jmp", "0x446237")
           and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
                                      0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
+    _sq = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45AA80 - ib:0x45AACC - ib], 0x45AA80)}
+    _bd = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x4305F0 - ib:0x43062B - ib], 0x4305F0)}
+    _bl = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45A7E0 - ib:0x45A862 - ib], 0x45A7E0)}
+    _eb = page4.Ent(320, 240, 0x23000006, 0)
+    _eo = page4.Ent(700, 240, 0x23000006, 0)
+    check("0x45AA80 = 倒数距离 4096/hypot(a,b)（不是 atan2！）：先 a²+b² 再 >>2 到 <0x10000，"
+          "查 0x593AB4 的倒数平方根表 word[i]=(int)(4096/sqrt(i))（启动期 0x45A7E0 用 fsqrt+fdivr 建表），"
+          "结果 >>cl；0x4305F0 是带半径在屏判据 (x-r<=0x27F && x+r>0 && y-r<=0x1DF && y+r>0)",
+          _sq.get(0x45AA98) == ("imul", "eax, eax")
+          and _sq.get(0x45AAA2) == ("cmp", "eax, 0x10000")
+          and _sq.get(0x45AAB6) == ("mov", "dx, word ptr [eax*2 + 0x593ab4]")
+          and _sq.get(0x45AAC0) == ("shr", "eax, cl")
+          and _bl.get(0x45A83F) == ("fsqrt", "")
+          and _bl.get(0x45A841) == ("fdivr", "qword ptr [0x499388]")
+          and _bl.get(0x45A850) == ("mov", "word ptr [esi], ax")
+          and _bd.get(0x45AA98 - 0x45AA98 + 0x4305FC) == ("cmp", "esi, 0x27f")
+          and _bd.get(0x430612) == ("cmp", "edx, 0x1df")
+          and _bd.get(0x430620) == ("mov", "eax, 1")
+          and page4.Page4Mixin.p4_45aa80(0, 0) == 0x7FFFFFFF
+          and page4.Page4Mixin.p4_45aa80(3, 4) == 819
+          and page4.Page4Mixin.p4_45aa80(300, 400) == 8
+          and page4._p4_rsqrt(1) == 4096 and page4._p4_rsqrt(4) == 2048
+          and page4._p4_rsqrt(0xFFFF) == 16
+          and page4.Page4Mixin.p4_4305f0(_eb, 0x18) == 1
+          and page4.Page4Mixin.p4_4305f0(_eo, 0x18) == 0, "")
     _opq = {i.address: (i.mnemonic, i.op_str)
             for a0, a1 in ((0x460411, 0x46044E), (0x46044F, 0x46048C), (0x460490, 0x4604CC))
             for i in _mdk.disasm(img[a0 - ib:a1 - ib], a0)}
