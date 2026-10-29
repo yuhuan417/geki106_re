@@ -600,7 +600,8 @@ class Page4Mixin:
             self.p4_stat[a] = 0
         self.sysf.clear()                         # 0x450B05 0x45AF10(0x56CC84,0)
         self.p4_replay_reset()                    # 0x450B17 0x40224D
-        self.p4_layer_params()                    # 0x450B3D..0x450B68
+        self.p4_layer_params()                    # 0x450B3D..0x450B68（含 0x44CDF0 载调色板 1）
+        self.p4_load_palette(1)                   # 0x450B60 0x44CDF0(0x4AA7B0,1,…) = bm_pal
 
         # 0x450B90 0x4013DE(0x4AB454,0,0)=SetBase(0,0)；0x450BA5 首次输入记录
         # 复刻侧：`run.py` 已在每次 `advance()` 之前调过 `0x44EB60`（`inp.build`），
@@ -1124,9 +1125,12 @@ class Page4Mixin:
               f"bg_layer={sorted({b.layer for x in self.p4_bg for b in x.bands})} "
               f"bg_flags={[hex(x.flags) for x in self.p4_bg[:8]]} "
               f"bg_kind0={[x.grid[0][2] if x.grid else None for x in self.p4_bg[:8]]} "
-              "blits=%d;layers=%s;bb0=%s;p=%s;acc=%d" % (self.p4_stat.get(0xB6,0), sorted(self.layers.tab),
+              "palB4=%s bg=%s acc=%d idxU=%d palU=%d" % (
+                  self.pal_now[0xB4].tolist(), 
                   [[b.pos, b.visible, b.kind, b.layer, b.dst] for b in self.p4_bg[0].bands[:2]],
-                  self.p4_bg[0].params[10:15], self.p4_bg[0].acc if self.p4_bg[0].acc < 0x80000000 else self.p4_bg[0].acc - 0x100000000), flush=True)
+                  self.p4_bg[0].acc if self.p4_bg[0].acc < 0x80000000 else self.p4_bg[0].acc - 0x100000000,
+                  len(set(self.canvas.buf.ravel().tolist())),
+                  len({tuple(int(v) for v in x) for x in self.pal_now}),), flush=True)
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。
