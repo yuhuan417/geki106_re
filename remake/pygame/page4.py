@@ -1293,6 +1293,33 @@ def _beh_type1_follow(self, e) -> bool:
     return True
 
 
+def _beh_446950(self, e) -> bool:
+    """`0x401XXX` → `0x446950`（type 1 变体）：只有 `0x446600` 门 + 1/4 步进逼近，**无**锁定击破分支。
+
+    ```
+    0x446953 0x40212B→0x446600(e) ; al == 0 → ret（本帧不继续）
+    0x44695E eax = [0x4AB59C] − [esi+4] ; 0x44696B ecx = [0x4AB5A0] − [esi+8]
+    0x446973 if (eax >= 0) eax += 3 ; 0x44697D sar 2      ; 朝零取整的 /4
+    0x446980 [esi+4] += eax       ; 0x446992 [esi+8] += ecx
+    0x44699E [0x56CC8C] = x ; [0x56CC90] = y             ; 0x401753 恒等透传后写回
+    0x4469AF 节点 +0x14/+0x18 = (x−0x18, y−0x18)          ; 48px 字形居中
+    0x4469CA 返回 ([esi+0x18] != 0)
+    ```
+    """
+    if not p4_446600(self, e):                       # 0x446953 / 0x44695A
+        return False
+    px, py = self.p4_ptr()                           # 0x44695E / 0x44696B
+    dx = px - e.s32(0x04)
+    dy = py - e.s32(0x08)
+    dx = (dx + 3) >> 2 if dx >= 0 else dx >> 2       # 0x446977 / 0x44697D sar
+    dy = (dy + 3) >> 2 if dy >= 0 else dy >> 2       # 0x446989 / 0x44698F sar
+    e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)     # 0x446980
+    e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)     # 0x446992
+    if e.node is not None:                           # 0x4469BC 节点镜像
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0                          # 0x4469CA setne
+
+
 def _beh_10000001(self, e) -> bool:
     """`0x401E06` → `0x448C70`（自机，类型 0x10000001）。
 
@@ -1532,6 +1559,7 @@ P4_BEH: dict[int, object] = {
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
+    0x446950: _beh_446950,
     0x448C70: _beh_10000001,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,

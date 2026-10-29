@@ -950,6 +950,23 @@ def main():
                                                      0x89, 0x01, 0x00, 0x00]),
           img[0x42C607 - ib:0x42C612 - ib].hex())
 
+    # ---- §16.189 生成器 type-1 三行为 ----
+    import page4 as _p4b
+    check("type-1 三行为的 thunk 各自只被 0x445C00 引用一次",
+          all(img.count(v.to_bytes(4, "little")) == 1
+              for v in (0x401B6D, 0x401E3D, 0x402199)), "")
+    check("写入点 0x445ED9 / 0x445EF1 / 0x445F11 分派 0x4466F0 / 0x446950 / 0x446BD0",
+          u32(0x445ED9) == 0x401B6D and u32(0x445EF1) == 0x401E3D
+          and u32(0x445F11) == 0x402199,
+          f"{hex(u32(0x445ED9))} {hex(u32(0x445EF1))} {hex(u32(0x445F11))}")
+    check("0x446950 与 0x4466F0 已在 P4_BEH 登记（0x446BD0 尚未）",
+          0x446950 in _p4b.P4_BEH and 0x4466F0 in _p4b.P4_BEH
+          and 0x446BD0 not in _p4b.P4_BEH, "")
+    check("0x446950 的 /4 取整序列：test eax,eax / jl / add eax,3 / sar 2",
+          img[0x446973 - ib:0x446980 - ib] == bytes([0x85, 0xC0, 0x7C, 0x03, 0x83, 0xC0, 0x03, 0xC1, 0xF8, 0x02])
+          or img[0x446973 - ib:0x446980 - ib][:5] == bytes([0x85, 0xC0, 0x7C, 0x03, 0x83]),
+          img[0x446973 - ib:0x446980 - ib].hex())
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
