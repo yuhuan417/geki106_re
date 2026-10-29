@@ -1563,6 +1563,14 @@ def main():
     _jt = [int.from_bytes(img[0x4606D4 - ib + i * 4:0x4606D8 - ib + i * 4], "little")
            for i in range(15)]
     _ac = page4.Page4Mixin.p4_457380_acc
+    check("0x457750：+8 是参数区指针（[+0x38]=params[14] 步进）、+0xC 是位置、"
+          "+4 是格子表（表项 3 dword、kind 在 +8）；抖动按 kind 缩放 >>6",
+          img[0x457757 - ib:0x457757 - ib + 6] == bytes([0x8B, 0x46, 0x08, 0x8B, 0x7E, 0x0C])
+          and img[0x45775D - ib:0x45775D - ib + 3] == bytes([0x8B, 0x48, 0x38])
+          and img[0x4577A4 - ib:0x4577A4 - ib + 3] == bytes([0x8D, 0x14, 0x40])
+          and img[0x4577AB - ib:0x4577AB - ib + 4] == bytes([0x8B, 0x44, 0x90, 0x08])
+          and img[0x4577C3 - ib:0x4577C3 - ib + 2] == bytes([0xC1, 0xF9])
+          and img[0x4577D1 - ib:0x4577D1 - ib + 3] == bytes([0x89, 0x4E, 0x20]), "")
     check("0x457540 节点 ctor：vtable 0x499140、next 清 0、phase→+4、抖动 = "
           "rand % ([p8+0x20]+1) / rand % ([p8+0x24]+1)（X 先 Y 后）、+0x1C=-1、+0x20/+0x24=0",
           img[0x457553 - ib:0x457553 - ib + 5] == bytes([0xC7, 0x06, 0x40, 0x91, 0x49])
