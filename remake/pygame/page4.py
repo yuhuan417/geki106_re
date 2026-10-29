@@ -38,6 +38,22 @@ P4_STAT_ZERO = [0x56CC98, 0x56CC9C, 0x56CCA0, 0x56CCA4, 0x56CCA8, 0x56CCAC,
 # ---------------------------------------------------------------------------
 # 脚本流状态机（`0x56CC4C`）：`0x460350` 一帧一步
 # ---------------------------------------------------------------------------
+_P4_TBL_4993C4 = None
+
+
+def p4_tbl_4993c4():
+    """`0x4993C4` 的 256 项 dword 表（由 `remake/build_p4_str.py` 一并导出）。"""
+    global _P4_TBL_4993C4
+    if _P4_TBL_4993C4 is None:
+        try:
+            import json as _j
+            from pathlib import Path as _P
+            _P4_TBL_4993C4 = _j.loads((_P(__file__).with_name("p4_tbl_4993c4.json")).read_text())
+        except Exception:
+            _P4_TBL_4993C4 = []
+    return _P4_TBL_4993C4
+
+
 _P4_STR_TABLE = None
 
 
@@ -3017,6 +3033,50 @@ class Page4Mixin:
             i += 1
         o.d16(0x0A + n * 2, 0)                          # 0x460315
         self.p4_4600f0(o)                               # 0x46031C
+
+    def p4_45dfb0(self, v: int) -> dict:
+        """`0x45DFB0(out, v)`：把 32 位值拆成 8 字节记录（**无返回值**，只写 `out`）。
+
+        ```
+        0x45DFBA out[0] = v & 0x1F
+        0x45DFC1 m = (v >> 5) & 7
+        0x45DFCC while (m--) out[0] *= 10            ; lea [ecx+ecx*4] 再 shl 1 = ×10
+        0x45DFDB out[4] = (v >> 8)  & 0xF
+        0x45DFE6 out[5] = (v >> 0xC) & 0xF
+        0x45DFEC out[6] = word(v >> 0x10)
+        ```
+        """
+        out = {"b0": v & 0x1F}                          # 0x45DFBA
+        m = (v >> 5) & 7                                # 0x45DFC1
+        while m:                                        # 0x45DFC7
+            out["b0"] *= 10                             # 0x45DFCE/0x45DFD1
+            m -= 1
+        out["b4"] = (v >> 8) & 0xF                      # 0x45DFE1
+        out["b5"] = (v >> 0xC) & 0xF                    # 0x45DFEF
+        out["w6"] = (v >> 0x10) & 0xFFFF                # 0x45DFF2
+        return out
+
+    def p4_45fad0(self, typ: int) -> int:
+        """`0x45FAD0(mgr, type)`：按 `type & 0xFF` 查表，返回表项的**高 16 位**。
+
+        ```
+        0x45FAD0 ecx = [mgr+0xEC] ; 为 0 直接返回 0
+        0x45FAF1 (type & 0xFF000000) == 0x21000000 → eax = [0x4993C4 + (type&0xFF)*4]
+        0x45FB12 否则                              → eax = [[mgr+0xEC] + (type&0xFF)*4]
+        0x45FB1B 0x45DFB0(&out, eax)                ; 只为了…不，下面直接读 out 的高字
+        0x45FB20 return word[out+6] & 0xFFFF        ; = (entry >> 16) & 0xFFFF
+        ```
+        """
+        base = self.p4_stat.get(0x4CD4A0 + 0xEC, 0)      # 0x45FAD0
+        if not base:
+            return 0                                    # 0x45FADD
+        i = typ & 0xFF
+        if (typ & 0xFF000000) == 0x21000000:            # 0x45FAF1
+            tbl = p4_tbl_4993c4()
+            entry = tbl[i] if 0 <= i < len(tbl) else 0
+        else:
+            entry = self.p4_stat.get(base + i * 4, 0) & 0xFFFFFFFF
+        return (entry >> 0x10) & 0xFFFF                 # 0x45FB20
 
     def p4_460800(self, o) -> int:
         """`0x460800(obj)` = `mov ax,[ecx+0x2A]; ret` —— 取当前字形队列 id（`0x4602D0` 存的那个）。"""

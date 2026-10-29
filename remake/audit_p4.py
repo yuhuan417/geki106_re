@@ -1311,6 +1311,15 @@ def main():
                 self.p4_stat = {0x4CD590 + 0x30: 7, 0x4CD4A0 + 0x08: 50,
                                 0x4CD4A0 + 0x0C: 25, 0x4CD4A0 + 0x10: 200}
         return _S()
+    check("0x45DFB0 位域拆包：低5位×10^m、两个 nibble、高字",
+          img[0x45DFBA - ib:0x45DFBD - ib] == bytes([0x83, 0xE1, 0x1F])
+          and img[0x45DFCC - ib:0x45DFD8 - ib] == bytes([0x8B, 0x08, 0x8D, 0x0C, 0x89, 0xD1, 0xE1, 0x4E,
+                                                              0x89, 0x08, 0x75, 0xF4])
+          and page4.Page4Mixin.p4_45dfb0(None, 0x32042) == {"b0": 200, "b4": 0, "b5": 2, "w6": 3}, "")
+    check("0x45FAD0 返回表项高 16 位；0x21 族查 0x4993C4（256 项、215 项非零）",
+          len(page4.p4_tbl_4993c4()) == 256
+          and sum(1 for v in page4.p4_tbl_4993c4() if v) == 215
+          and page4.p4_tbl_4993c4()[:4] == [160, 4161, 160, 204866], "")
     check("0x460800 就是 mov ax,[ecx+0x2A]; ret（字形队列 id 取值器）",
           img[0x460800 - ib:0x460805 - ib] == bytes([0x66, 0x8B, 0x41, 0x2A, 0xC3])
           and page4.Page4Mixin.p4_460800(None, page4.Ent(0, 0, 0x23000001, 0)) == 0, "")
