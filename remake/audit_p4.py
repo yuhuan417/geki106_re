@@ -1563,6 +1563,15 @@ def main():
     _jt = [int.from_bytes(img[0x4606D4 - ib + i * 4:0x4606D8 - ib + i * 4], "little")
            for i in range(15)]
     _ac = page4.Page4Mixin.p4_457380_acc
+    check("0x457540 节点 ctor：vtable 0x499140、next 清 0、phase→+4、抖动 = "
+          "rand % ([p8+0x20]+1) / rand % ([p8+0x24]+1)（X 先 Y 后）、+0x1C=-1、+0x20/+0x24=0",
+          img[0x457553 - ib:0x457553 - ib + 5] == bytes([0xC7, 0x06, 0x40, 0x91, 0x49])
+          and img[0x457559 - ib:0x457559 - ib + 3] == bytes([0x89, 0x5E, 0x30])
+          and img[0x45755C - ib:0x45755C - ib + 2] == bytes([0x89, 0x46])
+          and img[0x457567 - ib:0x457567 - ib + 2] == bytes([0x8B, 0x4F])
+          and img[0x457576 - ib:0x457576 - ib + 2] == bytes([0x8B, 0x4F])
+          and img[0x457579 - ib:0x457579 - ib + 6] == bytes([0xC7, 0x46, 0x1C, 0xFF, 0xFF, 0xFF])
+          and img[0x4575A5 - ib:0x4575A5 - ib + 2] == bytes([0x89, 0x18]), "")
     check("0x457120：节点 0x34 字节、头 [+4]、尾 [+8]、next 在 +0x30；"
           "890 (=0xA6E) 上限在 0x457282（摘链路径）而不是 0x457120",
           img[0x457139 - ib:0x457139 - ib + 2] == bytes([0x6A, 0x34])
