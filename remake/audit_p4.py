@@ -1604,6 +1604,18 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _rs = page4.Page4Mixin.p4_self_respawn_rec
+    _rd = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x44370A - ib:0x443790 - ib], 0x44370A)}
+    check("0x443729 自机复活：清 ui4cc → 在 (0xC8,0xC8) 生成 0x0B000001（a3=3）入 ui40c；"
+          "另一支 0x4AB597 非 0 → 置页旗标 0x200 退页；触发条件是死亡计时器 == 0xF0",
+          _rs() == (0xC8, 0xC8, 0x0B000001, 3)
+          and _rd.get(0x44370A) == ("cmp", "ebp, 0xf0")
+          and _rd.get(0x443716) == ("mov", "al, byte ptr [0x4ab596]")
+          and _rd.get(0x443729) == ("push", "3")
+          and _rd.get(0x44372B) == ("push", "0xb000001")
+          and _rd.get(0x443742) == ("call", "0x4023c4")     # thunk → 0x430400
+          and _rd.get(0x443787) == ("mov", "ecx, 0x4ab5c0"), "")
     import re as _re
     _esp, _slotw = 0, {}
     _movsd = 0

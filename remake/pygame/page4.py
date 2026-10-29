@@ -5011,6 +5011,34 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_self_respawn_rec():
+        """`0x443729..0x443767`：自机复活——清空 ui4cc 后在 **(200,200)** 生成 `0x0B000001`（a3=3）。
+
+        ```
+        0x44370A cmp ebp, 0xF0 ; jne 0x4437B2        ; ebp = 死亡计时器，满 240 才进入
+        0x443716 al = byte[0x4AB596]                  ; 输入记录 +2（e0）
+        0x44371B test al,al ; je 0x443779
+        0x44371F 0x43A320(0x4AD4CC)                   ; 清 ui4cc
+        0x443729 push 3 ; 0x44372B push 0x0B000001
+        0x443730 push 0xC8 ; 0x44373C push 0xC8 ; push &rec
+        0x443742 0x430400(&rec, 0xC8, 0xC8, 0x0B000001, 3)
+        0x443767 0x448FF0(0x4AD40C, &rec)             ; 生成到 ui40c
+        ```
+
+        另一支：`0x443779 al = byte[0x4AB597]`（输入 +3）非 0 → `0x45AF30(0x4AB5C0, 0x200)` 退页。
+
+        坐标常量 **0xC8 = 200**（屏幕中心是 (0x140,0xF0)=(320,240)，所以 200 是偏左上的复活点，
+        不是正中）。`a3 = 3` 进实体 `+0x20`，与 §10 里自机 ctor 的 `rec[3]==1 ? -1 : 0` 判定无关
+        （那里看的是 1，这里是 3，走 else 支 = 0）。
+
+        ⚠ 调用点未定位：`0x4435C0`（该块所在函数里 `sub esp,0x334` 的位置）在全镜像里
+        **既无数据引用也无 call/jmp 指向**，`0x4020EF → 0x4435C0` 那个 thunk 也无任何 call 者，
+        `0x43D794` 处的 `0x4020EF` 是**指令内错位字节**（邻域是 `40 46 C7 00 40 20 EF 00`）。
+        故这一块只能靠前向落入，函数入口仍是悬案，暂不接进帧循环。
+        """
+        return (0xC8, 0xC8, 0x0B000001, 3)
+
+    @staticmethod
     def p4_430400_rec(x: int, y: int, type_word: int, a3: int = 0, a4: int = 0):
         """`0x430400(&rec, x, y, type, a3)`：把 5 个 dword 记录填进 `&rec`。
 
