@@ -1563,6 +1563,13 @@ def main():
     _jt = [int.from_bytes(img[0x4606D4 - ib + i * 4:0x4606D8 - ib + i * 4], "little")
            for i in range(15)]
     _ac = page4.Page4Mixin.p4_457380_acc
+    check("0x457120：节点 0x34 字节、头 [+4]、尾 [+8]、next 在 +0x30；"
+          "890 (=0xA6E) 上限在 0x457282（摘链路径）而不是 0x457120",
+          img[0x457139 - ib:0x457139 - ib + 2] == bytes([0x6A, 0x34])
+          and img[0x45713B - ib:0x45713B - ib + 2] == bytes([0x8B, 0x46])
+          and img[0x457175 - ib:0x457175 - ib + 4] == bytes([0x89, 0x46, 0x04, 0xEB])
+          and img[0x4571BB - ib:0x4571BB - ib + 3] == bytes([0x89, 0x41, 0x30])
+          and img[0x457282 - ib:0x457282 - ib + 5] == bytes([0xB9, 0x6E, 0x0A, 0x00, 0x00]), "")
     check("0x457380 累加器：acc += step；|acc| < 阈值 不触发；"
           "step>=0 → 相位 acc-阈值、acc-=阈值；step<0 → acc += 阈值 且相位 = [+0x58]+acc-1（32 位回绕）",
           _ac(0, 3, 10, 0) == (None, 3)
