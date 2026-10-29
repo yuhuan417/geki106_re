@@ -1604,6 +1604,21 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _ph = page4.Page4Mixin.p4_43c344_player_hit
+    _phd = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x43C344 - ib:0x43C3A6 - ib], 0x43C344)}
+    check("0x43C344 自机被弹判定：+0x30!=0 免疫；[+0x20] **有符号** <=0x12C 免疫（-1 也免疫）；"
+          "攻击者 0x27000011/0x29000013 不致死；[+0x28]==3 → 不死分支(清零并把 +0x20 置 0x79)",
+          _ph(1, 1000, 0, 0) == "immune"
+          and _ph(0, -1, 0, 0) == "immune"
+          and _ph(0, 0x12C, 0, 0) == "immune"
+          and _ph(0, 0x12D, 0, 0) == "dead"
+          and _ph(0, 0x12D, 0x27000011, 0) == "immune"
+          and _ph(0, 0x12D, 0, 3) == "special"
+          and _phd.get(0x43C34D) == ("cmp", "dword ptr [esi + 0x20], 0x12c")
+          and _phd.get(0x43C354) == ("jle", "0x43c3a5")
+          and _phd.get(0x43C377) == ("mov", "dword ptr [esi + 0x20], 0x79")
+          and _phd.get(0x43C39F) == ("mov", "byte ptr [esi + 0x10], bl"), "")
     import struct as _st14
     _kind = page4.Page4Mixin.p4_446470_kind
     _pre = page4.Page4Mixin.p4_input_preset

@@ -5010,6 +5010,40 @@ class Page4Mixin:
         """`[0x4AB596]`：输入记录 +2 的 btn0 按下沿。"""
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
+    @staticmethod
+    def p4_43c344_player_hit(v30: int, v20: int, atk_type: int, v28: int) -> str:
+        """`0x43C170` 的 **type==1（自机）** 分支 `0x43C344`：自机被弹判定。
+
+        ```
+        0x43C344 eax = [e+0x30] ; cmp eax,0 ; jne 0x43C3A5   ; +0x30 非 0 → 免疫
+        0x43C34D cmp [e+0x20], 0x12C ; jle 0x43C3A5          ; **有符号** <= 300 → 免疫
+        0x43C356 eax = 攻击者[+0x14]（type）
+        0x43C360 cmp eax, 0x27000011 ; je 免疫
+        0x43C367 cmp eax, 0x29000013 ; je 免疫
+        0x43C36E cmp [e+0x28], 3 ; jne 0x43C38B
+        0x43C374 [e+0x28]=0 ; [e+0x20]=0x79 ; ret          ; 特殊：不死，只重置
+        0x43C38B 0x460C00(0x4CD590)                          ; 死亡链
+        0x43C39A 0x45F570(0x4CD4A0)                          ; 计分/结果
+        0x43C39F byte[e+0x10]=0 ; 0x43C3A2 [e+0x18]=0        ; alive=0 / HP=0
+        ```
+
+        ⇒ 免疫条件：`[+0x30] != 0`（无敌/状态计数器，非 0 即免打）
+        或 `[+0x20] <= 0x12C`（**有符号比较**，所以 `-1` 也算免疫）。
+        攻击者 type 为 `0x27000011` / `0x29000013` 时不致死。
+        `[+0x28] == 3` 走**不死分支**：`[+0x28]=0`、`[+0x20]=0x79`，直接返回。
+
+        返回 `'immune' | 'special' | 'dead'`。
+        """
+        if v30 != 0:
+            return "immune"
+        if v20 <= 0x12C:            # 有符号；-1 → 免疫
+            return "immune"
+        if atk_type in (0x27000011, 0x29000013):
+            return "immune"
+        if v28 == 3:
+            return "special"
+        return "dead"
+
     # 0x498A88 输入预设表，**stride 14 字节**（3 dword + 1 word），**24 项（kind 0..23）**；
     # kind 24 起全 0（表尾）。0x446470 只产出 7..22，是这 24 项的子集。
     P4_INPUT_PRESET = (
