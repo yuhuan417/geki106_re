@@ -53,8 +53,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--debug-hud", action="store_true", help="叠加调试信息（非原作内容）")
     ap.add_argument("--ptr", action="store_true",
                     help="叠加虚拟指针十字（非原作内容；原作只有硬件光标，见 0x458CB0）")
-    ap.add_argument("--inv-x", action="store_true", help="位移取反 X（平台方向异常时的兜底）")
-    ap.add_argument("--inv-y", action="store_true", help="位移取反 Y（平台方向异常时的兜底）")
+    ap.add_argument("--inv-x", action="store_true", help="强制位移取反 X（覆盖自动判定）")
+    ap.add_argument("--inv-y", action="store_true", help="强制位移取反 Y（覆盖自动判定）")
+    ap.add_argument("--no-inv", action="store_true",
+                    help="关掉自动取反（WSLg 下自动开启，实测不取反时十字全方向反向）")
     ap.add_argument("--no-grab", action="store_true",
                     help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
@@ -114,6 +116,17 @@ def main(argv: list[str] | None = None) -> int:
     # 采样方式照抄原作：**每帧把光标钉回窗口中心 (320,240)，再读它离中心多远**当位移
     # （0x454759 `SetCursorPos(0x140,0xF0)` + 下一帧 0x44EB60 读指针）。
     # 不用 SDL 的 set_relative_mode：WSLg 下它给的 rel 方向不可靠（实测十字与手相反）。
+    # WSLg 实测：`set_pos(中心)` 之后 `get_pos()` 的偏移**两轴都取反**（用户实测，加 --inv-x/--inv-y
+    # 后方向才对）。这是 WSLg/XWayland 的坐标怪癖，与游戏逻辑无关，故在运行器里自动补偿。
+    def _is_wsl() -> bool:
+        try:
+            with open("/proc/sys/kernel/osrelease", "r", encoding="utf-8", errors="ignore") as f:
+                return "microsoft" in f.read().lower()
+        except OSError:
+            return False
+    _inv_auto = _is_wsl() and not args.no_inv
+    if _inv_auto and not args.headless:
+        print("[input] 检测到 WSL ⇒ 自动取反鼠标两轴（--no-inv 关闭）", flush=True)
     _grab = not args.headless and not args.no_grab
     if _grab:
         try:
@@ -234,8 +247,8 @@ def main(argv: list[str] | None = None) -> int:
             # 0x44EB60 + 0x44E660：**每帧**建一次记录（原件在 step 开头做）。
             # 注意：不能放在帧门之外 —— Input.build 会推进按键的"上帧状态"，
             # 非到期帧也调用会把按下沿（e0/e1）吃掉，导致"按 C 没反应"。
-            _dx = -pend_dx if args.inv_x else pend_dx
-            _dy = -pend_dy if args.inv_y else pend_dy
+            _dx = -pend_dx if (args.inv_x or _inv_auto) else pend_dx
+            _dy = -pend_dy if (args.inv_y or _inv_auto) else pend_dy
             inp.build(state, pygame.mouse.get_pressed(), (_dx, _dy), pend_key)
             pend_dx = pend_dy = 0
             pend_key = 0
