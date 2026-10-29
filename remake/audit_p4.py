@@ -251,6 +251,29 @@ def main():
           u32(0x43C9B9) == 0x4AD46C and img[0x43C9B8 - ib] == 0xB9,
           f"{u32(0x43C9B9):#x}")
 
+    print("== 11e. 9 型落点（§16.160）")
+    lands = {0x12061128: 0x43C987, 0x12081123: 0x43C987, 0x120C112C: 0x43C97E,
+             0x10008041: 0x43C6C4, 0x10142214: 0x43C868}
+    ins_list = list(md32.disasm(img[0x43C508 - ib:0x43C9C8 - ib], 0x43C508))
+    # 二分链里"相等"落点不一定紧跟 cmp（如 0x10142214 是先 ja 再 je），
+    # 故对每个 cmp 向后最多 3 条寻找 `je`；找不到才算落空。
+    got = {}
+    for k, ins in enumerate(ins_list):
+        if ins.mnemonic == "cmp" and ins.op_str.startswith("eax, 0x"):
+            v = int(ins.op_str.split("0x")[1], 16)
+            for nxt in ins_list[k + 1:k + 4]:
+                if nxt.mnemonic == "je" and nxt.op_str.startswith("0x"):
+                    got.setdefault(v, int(nxt.op_str, 16))
+                    break
+    bad = [(hex(k), hex(got.get(k, 0))) for k, v in lands.items() if got.get(k) != v]
+    check("重排为 je 落点后 5 型全部对上", not bad, f"不符 {bad}")
+    check("0x12061128 与 0x12081123 共用落点 0x43C987",
+          got.get(0x12061128) == got.get(0x12081123) == 0x43C987,
+          f"{got.get(0x12061128)} / {got.get(0x12081123)}")
+    check("0x43C8D8 对 0x2A000001 使子弹作废",
+          img[0x43C8D8 - ib:0x43C8DF - ib] == bytes([0x81, 0x7D, 0x14, 0x01, 0x00, 0x00, 0x2A]),
+          img[0x43C8D8 - ib:0x43C8DF - ib].hex())
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
