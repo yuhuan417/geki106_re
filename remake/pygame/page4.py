@@ -5414,6 +5414,17 @@ class Page4Mixin:
     P4_BG_K2LAYER = {0x06: 3, 0x0A: 4, 0x10: 5, 0x18: 6, 0x20: 7,
                      0x30: 8, 0x48: 9, 0x6C: 0x0A, 0xA0: 0x0B, 0xF0: 0x0C}
 
+    def p4_457120(self, slot, acc: int) -> None:
+        """`0x457120(this, acc)`：绕回时重建 0x34 字节"带状体"。
+
+        ```
+        0x457139 push 0x34 ; call 0x47C7C0        ; operator new(0x34)
+        0x45715A lea ecx, [esi+0xC] ; lea edx, [esi+0x30]
+        ```
+        还没读全它如何写 `[+0xC]`（索引），所以这里不做任何事——**不臆造公式**。
+        """
+        return
+
     def p4_bg_draw(self) -> None:
         """`0x458EF5` → `0x457CB0`（12 槽，步长 0x2A98）→ `0x457490`（单槽 → `0x45A170`）。
 
@@ -5453,13 +5464,14 @@ class Page4Mixin:
                 if step >= 0:                            # 0x457410
                     while acc >= period:
                         acc -= period
-                    slot._t = acc
                 else:                                    # 0x457426
                     while acc <= -period:
                         acc += period
-                    slot._t = count + acc - 1
-            else:
-                slot._t = getattr(slot, "_t", count - 1) + step   # 0x457760
+                # 0x45741D `0x457120(slot, acc)`：为 0x34 字节的"带状体"做 operator new
+                # （`push 0x34; call 0x47C7C0`），本复刻尚未读定它如何写 [+0xC]，先不臆造
+                self.p4_457120(slot, acc)
+            # 0x457760 `add edi, ecx`：索引每帧**无条件**推进 step（初值＝槽内存清零＝0）
+            slot._t = getattr(slot, "_t", 0) + step
             slot.acc = acc                               # 0x4573FB
             t = slot._t
             if t < slot.params[11] or t > slot.params[12]:   # 0x45776A 窗口
