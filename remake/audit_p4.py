@@ -1318,6 +1318,28 @@ def main():
     _r1 = page4.Page4Mixin.p4_45e710(_e, bytes([7, 0, 0, 0, 0, 2]), 5)
     _r2 = page4.Page4Mixin.p4_45e710(_e, bytes([7, 0, 0, 0, 0, 0]), 5)
     _r3 = page4.Page4Mixin.p4_45e710(_e, bytes([7, 0, 0, 0, 0, 2]), 0x200)
+    class _H(page4.Page4Mixin):
+        def __init__(self):
+            self.calls = []
+        def _p4_q(self, n):
+            return n
+        def spawn(self, *a):
+            self.calls.append(a)
+    _he = page4.Ent(100, 50, 0x23000001, 0)
+    _he.d32(0x14, 0x1000)
+    _he.d32(0x1C, 0x400)
+    _he.d32(0x20, 0x600)
+    _h1 = _H()
+    page4.Page4Mixin.p4_43c460(_h1, _he)
+    _he.d32(0x14, 0x3000)
+    _h2 = _H()
+    page4.Page4Mixin.p4_43c460(_h2, _he)
+    check("0x43C460 前半段：(type&0x7000)==0x1000 用 [0x1C]>>7/[0x20]>>7，其它不生成",
+          len(_h1.calls) == 1 and _h1.calls[0][1] == 0x41000004
+          and _h1.calls[0][2] == 100 and _h1.calls[0][3] == 50
+          and _h1.calls[0][4] == (8, 12) and _h2.calls == [], "")
+    check("0x43C0B6 经 thunk 0x401136 指向 0x43C460（不是 0x43C170）—— p4_43c060 的接线已改正",
+          img[0x43C0B6 - ib:0x43C0BB - ib] == bytes([0xE8, 0x7B, 0x50, 0xFC, 0xFF]), "")
     check("0x45E710 倍率：(min(word[0x2C],10) + min(d,100)) * rec[5] * rec[0]",
           _r1 == (3 + 5) * 2 * 7 and _r2 == 7 and _r3 == (3 + 0x64) * 2 * 7
           and _e.p4_stat[0x4CD4A0 + 0x5A] == 0x200, "")

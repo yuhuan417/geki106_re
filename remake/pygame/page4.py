@@ -3334,6 +3334,42 @@ class Page4Mixin:
             return
         b.d32(0x10, 0)                                          # 0x43D0C6 byte
 
+    def p4_43c460(self, p) -> None:
+        """`0x43C460(hit)`：`0x4AD46C × 0x4AD43C` 这对队列的命中处理（**目前只落地前半段**）。
+
+        ★ `0x43C0B6` 的 `call 0x401136` 经 thunk 指向 **`0x43C460`**，不是 `0x43C170`
+        （后者是 `0x43BFD0` 那条链的回调）。此前 `p4_43c060` 误接了 `p4_hit_cb`，本轮改正。
+
+        前半段（已落地）：按 `hit[0x14] & 0x7000` 决定爆炸的初速，然后生成一个 `0x41000004`
+        特效记录并入队 `0x4AD4CC`。
+
+        ```
+        0x43C46B ebx = hit
+        0x43C474/0x43C481 x = hit[4]、y = hit[8]
+        0x43C488 0x430400(rec, x, y, 0x41000004, …)
+        0x43C49D t = hit[0x14] & 0x7000
+        0x43C4B2 t == 0x1000 → 0x45A690(hit[0x1C] >> 7, hit[0x20] >> 7)   ; 用速度当偏移
+        0x43C4BB t == 0x2000 → 0x45A690(rand()&0x1F - 0xF, rand()&0x1F - 0xF)  ; 随机抖动
+        0x43C4F5 rec[5] = eax ; rec[6] = edx
+        0x43C503 0x43A3C0(0x4AD4CC, &rec)
+        ```
+
+        后半段 `0x43C508` 起是 **20+ 个类型的线性 cmp 链**（`0x12061128` / `0x10142214` /
+        `0x10008041` / `0x10008431` …），尚未落地（§15）。
+        """
+        x = p.s32(0x04)                                        # 0x43C474
+        y = p.s32(0x08)                                        # 0x43C477
+        t = p.s32(0x14) & 0x7000                               # 0x43C49D
+        if t == 0x1000:                                        # 0x43C4B9
+            ox = p.s32(0x1C) >> 7                              # 0x43C4E5
+            oy = p.s32(0x20) >> 7                              # 0x43C4E1
+        elif t == 0x2000:                                      # 0x43C4C0
+            ox = _random.randrange(0x20) - 0xF                 # 0x43C4C7
+            oy = _random.randrange(0x20) - 0xF                 # 0x43C4D3
+        else:
+            return                                             # 0x43C4C0 jne 0x43C508 的前半
+        self.spawn(self._p4_q("ui4cc"), 0x41000004, x, y, (ox, oy))   # 0x43C488 / 0x43C503
+
     def p4_43c060(self, qa, qb) -> int:
         """`0x43C060(a, b)`：与 `0x43BFD0` 同形，但有两处不同（**不是同一个函数**）。
 
@@ -3357,7 +3393,7 @@ class Page4Mixin:
                 if not t.g32(0x10):
                     continue
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):   # 0x43C0A9
-                    self.p4_hit_cb(t, e)                        # 0x43C0B2
+                    self.p4_43c460(t)                           # 0x43C0B2 0x43C0B6 → 0x43C460
                     hits += 1
         return hits
 
