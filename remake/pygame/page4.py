@@ -766,6 +766,41 @@ def p4_atan2(a: int, b: int) -> int:
     return int(t["atan"][a & 0xFF, b & 0xFF])
 
 
+def p4_angle(a: int, b: int) -> int:
+    """`0x401091 → 0x45A9A0`：**atan2，单位 0.1°，整圈 = 3600**。
+
+    ```
+    0x45A9A9  if (b == 0 && a == 0) return 0
+    0x45A9B5  归一化：while (|b| >= 0x100 || |a| >= 0x100) { b >>= 1; a >>= 1 }
+    0x45A9D7  四象限查表（表 0x5B3E38，word，index = (a<<8) + b）
+                b>=0, a>=0 → v                     ; 第一象限
+                b>=0, a<0  → 0xE10(3600) - v       ; 第二象限
+                b<0,  a>=0 → 0x708(1800) - v       ; 第三象限
+                b<0,  a<0  → 0x708(1800) + v       ; 第四象限（负索引镜像寻址）
+    ```
+
+    表内容由 `0x45A863` 段生成、`fpatan` 栈序给出 `atan2(外层 i, 内层 j)`，
+    配合 `index = (a<<8)+b` ⇒ **表值 = atan2(a, b)**（第一参数在前）。
+    """
+    if a == 0 and b == 0:
+        return 0
+    while abs(b) >= 0x100 or abs(a) >= 0x100:
+        if a == 0 and b == 0:
+            return 0
+        b >>= 1
+        a >>= 1
+    t = p4_tables()
+    if t is None:
+        return 0
+    # 四个象限都用**绝对值**做索引（第二象限 `sub esi,ecx`、第三象限
+    # `sub ecx,esi`、第四象限负索引镜像，等价于取模），符号只由下面的
+    # 3600-v / 1800-v / 1800+v 三个修正式体现。
+    v = int(t["atan"][abs(a) & 0xFF, abs(b) & 0xFF])   # 表值 = atan2(|a|, |b|)
+    if b >= 0:
+        return v if a >= 0 else 0xE10 - v      # 第一/第二象限
+    return 0x708 - v if a >= 0 else 0x708 + v  # 第三/第四象限
+
+
 def p4_sin_q(arg: int, which: str = "sin") -> int:
     """`0x45ABB0`（cos 表）/`0x45AAF0`（sin 表）：`|arg|%3600` 归一 + 象限重组。
 
