@@ -1595,6 +1595,18 @@ def main():
                    and _w.endswith(bytes([0xB9, 0xB0, 0xA7, 0x4A, 0x00]))
                    and bytes([0x68, 0xD9, 0x00, 0x00, 0x00, 0x6A, 0x10, 0x68]) in _w
                    and _t.to_bytes(4, "little") in _w)
+    _lbl = {0x4A4020: b"Gekihaden(2) version 1.0",
+            0x4A3FEC: b"Copyright 2001,2004 by Tatsuya Miyamoto.",
+            0x4A3FD0: b"Over 23431 bytes free",
+            0x4A4040: b"run", 0x4A4044: b"list", 0x4A404C: b"goto",
+            0x4A4054: b"auto", 0x4A405C: b"color"}
+    _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
+    check("0x43DFxx 八段是**调试覆盖层**：版本/版权/剩余内存 + run/list/goto/auto/color；"
+          "真正状态栏在 0x451316（高 0xC、y 0x1D4、x 0、文本来自栈缓冲）",
+          _okl
+          and img[0x451303 - ib:0x451303 - ib + 2] == bytes([0x6A, 0x0C])
+          and img[0x4512F2 - ib:0x4512F2 - ib + 5] == bytes([0x68, 0xB4, 0x00, 0x00, 0x00])
+          and img[0x451306 - ib:0x451306 - ib + 5] == bytes([0x68, 0xD4, 0x01, 0x00, 0x00]), "")
     _g = page4.Page4Mixin.p4_43df_hud_gate
     check("HUD 主体：8 段文字（底行 y=0x1B0 x=0x20/0x93/0x106/0x179/0x1EC，"
           "顶行 y=0x20 x=0x20/0x30/0x40），色 0xD3 底 0xD9 高 0x10；"
