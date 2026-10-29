@@ -2307,6 +2307,12 @@ class Pages:
         e.aux = 0                                 # [+0xC] = 0xC（本行为不用）
         e.p["slot"] = self.keys.field(0xC000)     # [+0x20]
         e.p["x"], e.p["y"] = int(x), int(y)       # [+4]/[+8]
+        # 0x4461D1..0x4461F9：ctor 末尾调用 `0x401753(x,y)`（= `0x45A690`，**原样返回**）
+        # 并把它写进自机镜像 `0x56CC8C/0x56CC90` ⇒ 页13 的"自机位置"= 机体大字的位置
+        # (0xA0,0x78)=(160,120)。0x12 特效的追踪/贴线行为都读这个镜像。
+        _mx, _my = int(x), int(y)
+        self.mirror["x"], self.mirror["y"] = _mx, _my
+        self.log(f"0x4461DF 自机镜像 := ({_mx},{_my})")
         n = e.p["slot"]
         e.disp = DisplayNode(0, [0, 0x30 * n, 0x2F, 0x30 * n + 0x2F],
                              [int(x) - 0x18, int(y) - 0x18])
