@@ -1751,6 +1751,20 @@ def main():
           and page4.Page4Mixin._p4_div3(9) == 3
           and page4.Page4Mixin._p4_div3(-9) == -3
           and page4.Page4Mixin._p4_div3(8) == 2, "")
+    _rs = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x44370A - ib:0x4437A6 - ib], 0x44370A)}
+    check("0x44370A：自机复活/生成点——`ebp == 0xF0` 且 `byte[0x4AB596]`（btn0 按下沿）非 0 时，"
+          "清 ui4cc 后在 (0xC8,0xC8) 生成 `0x0B000001`（a3=3）进 **0x4AD40C**；"
+          "`byte[0x4AB597]` 非 0 → `0x4AB5C0 |= 0x200` 退页；否则 `[esi+0x1C] = 0xEF` 重试",
+          _rs.get(0x44370A) == ("cmp", "ebp, 0xf0")
+          and _rs.get(0x443716) == ("mov", "al, byte ptr [0x4ab596]")
+          and _rs.get(0x44372B) == ("push", "0xb000001")
+          and _rs.get(0x443730) == ("push", "0xc8")
+          and _rs.get(0x443761) == ("mov", "ecx, 0x4ad40c")
+          and _rs.get(0x443767) == ("call", "0x4016e5")
+          and _rs.get(0x443779) == ("mov", "al, byte ptr [0x4ab597]")
+          and _rs.get(0x44379E) == ("mov", "dword ptr [esi + 0x1c], 0xef")
+          and page4.Page4Mixin.p4_self_respawn_rec() == (0xC8, 0xC8, 0x0B000001, 3), "")
     check("0x45AA80 = 倒数距离 4096/hypot(a,b)（不是 atan2！）：先 a²+b² 再 >>2 到 <0x10000，"
           "查 0x593AB4 的倒数平方根表 word[i]=(int)(4096/sqrt(i))（启动期 0x45A7E0 用 fsqrt+fdivr 建表），"
           "结果 >>cl；0x4305F0 是带半径在屏判据 (x-r<=0x27F && x+r>0 && y-r<=0x1DF && y+r>0)",
