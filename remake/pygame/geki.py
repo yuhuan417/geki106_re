@@ -1027,6 +1027,7 @@ class Pages(Page4Mixin):
             self.page13_enter()
         elif self.page == 4:
             self.p4_enter()                       # 0x4593C4 0x4505B0
+            self.p4_454950_init()                 # 0x45952C → 0x401B4F → 0x454950
             self.p4_enter_ok = self.flags.is_empty()   # 0x4593C9 test al ⇒ 决定是否进帧循环
         else:
             self.log(f"page {self.page} 未实现 → quit")

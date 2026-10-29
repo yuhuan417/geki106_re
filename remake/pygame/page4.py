@@ -2566,12 +2566,6 @@ class Page4Mixin:
               f"intro_gate={self.p4_intro_gate}", flush=True)
 
 
-        # 0x454A6A：`0x454950` 末尾把开场状态机实体生成到 **0x4AD52C**（ui52c）。
-        # 行为 = `0x4435C0`（ctor `0x43D791` 直接写 `[+0x40] = 0x4020EF`）。
-        from geki import UiEntity as _Ui       # 延迟导入：geki 反过来 import 本模块
-        _intro = _Ui(type_word=0x6B000001)
-        _intro.beh = _beh_6B000001
-        self.ui52c.append(_intro)
 
     def p4_write_state(self, b: bytearray) -> None:
         """`0x450A3D..0x450A83`：参数块 → 状态字四个位段。
@@ -5408,62 +5402,67 @@ class Page4Mixin:
         return True
 
     def p4_454950_init(self) -> None:
-        """`0x454950`：页面机 `0x45952C` 调用的**阶段初始化**（在 `0x4505B0` 之后）。
+        """`0x454950`：页面机 `0x45952C` 调用的**阶段初始化**（在 `0x4505B0` 之后、首帧之前）。
 
         ```
         0x454953 [0x56CCA8] = 0                            帧计数复位
-        0x454961 0x45AFC0(0x4AB5B8, 0x1FC0000) → eax
-        0x454972 eax = eax*4 - 0xC8                        v1
-        0x45497F 0x45AFC0(0x4AB5B8, 0xFE000000) → eax
-        0x454989 eax = eax*4 - 0xC8                        v2
-        0x454998 0x44CDF0(0x4AA7B0, 1, v2, v1)             调色板参数（4 参，thunk 0x4010C3）
-        0x4549A1 0x44C640(0x4AA7B0, 0, 0xF0) → al          层0 ← 资源 0xF0（240）
-        0x4549B6 0x44C640(0x4AA7B0, 1, 0xF1) → al          层1 ← 资源 0xF1（241）
-        0x4549CB 0x44CE60(0x4AA7B0, 0, 0) → al             层0 色键 0
-        0x4549DD 0x44CE60(0x4AA7B0, 1, 0) → al             层1 色键 0
-                 任一 al == 0 → 0x45AF30(0x4AB5C0, 2)      退页
-        0x4549FB 0x44E620(0x4AB454, 0x17, 0, 0, 0)         指针预设（[+0x14]=0,[+0x18]=0）
-        0x454A0D 0x44EDA0(0x4AB454, 0)                     Poll
-        0x454A19 0x450140(0x4AB4B0, 0xB, 0x15) → al        波形槽 0x0B ← 资源 0x15
-        0x454A2B 0x450140(0x4AB4B0, 0,   0x2A) → al        波形槽 0x00 ← 资源 0x2A
-        0x454A3D 0x450140(0x4AB4B0, 1,   0x2B) → al        波形槽 0x01 ← 资源 0x2B
+        0x454961 0x45AFC0(0x4AB5B8, 0x1FC0000) → *4-0xC8   → 0x44CDF0 的 arg3
+        0x45497F 0x45AFC0(0x4AB5B8, 0xFE000000) → *4-0xC8  → 0x44CDF0 的 arg2
+        0x454998 0x44CDF0(0x4AA7B0, 1, f(FE), f(1FC), 0)   RT_STRING 1 = bm_pal（基础调色板）
+        0x4549A1 0x44C640(0x4AA7B0, 0, 0xF0) → al         层0 ← 资源 0xF0
+        0x4549B6 0x44C640(0x4AA7B0, 1, 0xF1) → al         层1 ← 资源 0xF1
+        0x4549CB 0x44CE60(0x4AA7B0, 0, 0) → al            层0 色键 0
+        0x4549DD 0x44CE60(0x4AA7B0, 1, 0) → al            层1 色键 0
+                 任一 al == 0 → 0x45AF30(0x4AB5C0, 2)     退页
+        0x4549FB 0x44E620(0x4AB454, 0x17, 0, 0, 0)        指针预设 0x17、基址 (0,0)
+        0x454A0D 0x44EDA0(0x4AB454, 0)                    Poll
+        0x454A19 0x450140(0x4AB4B0, 0xB, 0x15) → al       波形槽 0x0B ← 资源 0x15
+        0x454A2B 0x450140(0x4AB4B0, 0,   0x2A) → al       波形槽 0x00 ← 资源 0x2A
+        0x454A3D 0x450140(0x4AB4B0, 1,   0x2B) → al       波形槽 0x01 ← 资源 0x2B
                  任一 al == 0 → 0x45AF30(0x4AB5C0, 8)
-        0x454A5B 0x458D60(esi, 0, 0, 0, 0)                 子系统 Reset
-        0x454A6A 0x430400(&rec, 0, 0, 0x6B000001, 0)        开场状态机实体
+        0x454A5B 0x458D60(esi, 0, 0, 0, 0)                子系统 Reset
+        0x454A6A 0x430400(&rec, 0, 0, 0x6B000001, 0)      开场状态机实体
         0x454A99 0x40201D(0x4AD52C, &rec)                 进 ui52c
         ```
 
-        thunk 全表：`0x4019C9`→`0x45AFC0`（位读）、`0x4010C3`→`0x44CDF0`（调色板）、
-        `0x4012DF`→`0x44C640`（层装载）、`0x4012F3`→`0x44CE60`（色键）、
-        `0x4019B0`→`0x44E620`（指针预设）、`0x401113`→`0x44EDA0`（Poll）、
-        `0x40127B`→`0x450140`（波形槽）。
+        `0x44CDF0` 的定位（这轮查清）：`0x44CDF6 call 0x49033B` 取模块句柄 →
+        `0x44CE0B call [0x5E7220]` = **LoadStringA(hInst, id, buf, 0x40)** → 得到文件名 →
+        `0x44CE27 call 0x4018ED`（= `0x44CAA0`）按名字载调色板。所以参数是
+        **(mgr, RT_STRING id, 亮度/对比两个调整值, 0)**，与 `0x45168E` 的 5 参调用同构。
 
-        ⚠ 本方法**尚未接进帧循环**：`0x44CDF0` 那 4 参调色板语义（v1/v2 = `*4-0xC8`）
-        还没定，接了会把调色板设错。层 0/1 的资源 id 0xF0/0xF1 也还没核对到具体文件名。
+        thunk：`0x4019C9`→`0x45AFC0`、`0x4010C3`→`0x44CDF0`、`0x4012DF`→`0x44C640`、
+        `0x4012F3`→`0x44CE60`、`0x4019B0`→`0x44E620`、`0x401113`→`0x44EDA0`、
+        `0x40127B`→`0x450140`。
         """
-        self.p4_frames = 0                                  # 0x454953
-        cfg = getattr(self, "p4_cfg", None)
-        _bits = cfg.bits if cfg is not None and hasattr(cfg, "bits") else 0
-        _v1 = ((_bits >> 17) & 0x1F) * 4 - 0xC8 if _bits else None    # 0x1FC0000（5 位）
-        _v2 = ((_bits >> 25) & 0x7F) * 4 - 0xC8 if _bits else None    # 0xFE000000（7 位）
-        if _v1 is not None:
-            self.p4_44cdf0_palette(1, _v2, _v1)              # 0x454998（语义待定，见 docstring）
+        self.p4_frames = 0                                   # 0x454953
+        _w = self.p4_cfg_word()
+        _br, _ct = self.p4_451630_adjust(_w) if _w else (0, 0)
+        if not self.p4_load_palette(1, _ct, _br):            # 0x454998（id 1 = bm_pal）
+            self.flags.set(2)
         _ok = True
-        _ok = self.p4_layer_load(0, 0xF0) and _ok            # 0x4549A1
-        _ok = self.p4_layer_load(1, 0xF1) and _ok            # 0x4549B6
-        _ok = self.p4_layer_colorkey(0, 0) and _ok           # 0x4549CB
-        _ok = self.p4_layer_colorkey(1, 0) and _ok           # 0x4549DD
+        for _l, _id in ((0, 0xF0), (1, 0xF1)):               # 0x4549A1 / 0x4549B6
+            if not self.layers.bind(_l, _id):
+                _ok = False
+                break
+            self.layers.color_key(_l, 0)                     # 0x4549CB / 0x4549DD
         if not _ok:
             self.flags.set(2)                                # 0x4549EF 0x45AF30(0x4AB5C0,2)
-        self.p4_ptr_preset(0x17, 0, 0, 0)                    # 0x4549FB
-        self.p4_ptr_poll(0)                                  # 0x454A0D
+        self.inp.set_preset(0x17)                            # 0x4549FB 0x44E620(...,0x17,0,0,0)
+        self.inp.set_pos(0, 0)
+        # 0x454A0D 0x44EDA0(0x4AB454,0) = Poll；复刻侧每帧由 run.py 在 advance() 前调
+        # `inp.build()`（0x44EB60）重建记录，这里不重复轮询，只保留预设。
         _snd = True
-        _snd = self.p4_wave_slot(0x0B, 0x15) and _snd        # 0x454A19
-        _snd = self.p4_wave_slot(0x00, 0x2A) and _snd        # 0x454A2B
-        _snd = self.p4_wave_slot(0x01, 0x2B) and _snd        # 0x454A3D
+        if self.audio is not None:
+            for _slot, _res in ((0x0B, 0x15), (0x00, 0x2A), (0x01, 0x2B)):   # 0x454A19..0x454A46
+                if not self.audio.load_wave(_slot, _res):
+                    _snd = False
         if not _snd:
             self.flags.set(8)                                # 0x454A4F 0x45AF30(0x4AB5C0,8)
-        self.p4_subsys_reset(0, 0, 0, 0)                     # 0x454A5B 0x458D60
+        # 0x454A6A：开场状态机实体进 **0x4AD52C**（ui52c），行为 = 0x4435C0（ctor 0x43D791）
+        from geki import UiEntity as _Ui
+        _intro = _Ui(type_word=0x6B000001)
+        _intro.beh = _beh_6B000001
+        self.ui52c.append(_intro)
 
     def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,
                      beh: int | None = None):
