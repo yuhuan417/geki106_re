@@ -1604,6 +1604,35 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _se = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45F760 - ib:0x45F7E9 - ib], 0x45F760)}
+    _e7 = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45E7A0 - ib:0x45E7D5 - ib], 0x45E7A0)}
+    _c = _Z()
+    _c.p4_stat[0x4CD4A0 + 8] = 0x1000
+    _c.p4_stat[0x4CD4A0 + 0x10] = 0x800
+    _c.p4_stat[0x4CD4A0 + 0xC] = 0x400
+    _c.p4_stat[0x4CD590 + 0x30] = 3
+    _c.stage_globals_end()
+    _sr1 = (1000 * 0x1000) // 0x800
+    _sr2 = (1000 * 0x400) // 0x1000
+    check("0x45F760 阶段结算：score += 400*(r1+r2) + 200000*n，"
+          "r1=1000*[+8]/[+0x10]、r2=1000*[+0xC]/[+8]（各取低 16 位），n=[0x4CD590+0x30]（-1 不计），"
+          "末置 byte[+0xE1]=1；0x45E7A0 = b?(1000*a)/b:0（先右移防溢出）",
+          _se.get(0x45F76D) == ("call", "0x40233d")
+          and _se.get(0x45F783) == ("shl", "edx, 4")
+          and _se.get(0x45F7B7) == ("cmp", "eax, -1")
+          and _se.get(0x45F7D8) == ("shl", "eax, 6")
+          and _se.get(0x45F7E0) == ("mov", "byte ptr [esi + 0xe1], 1")
+          and _e7.get(0x45E7B2) == ("cmp", "eax, 0x200000")
+          and _e7.get(0x45E7CF) == ("shl", "eax, 3")
+          and _e7.get(0x45E7D2) == ("div", "ecx")
+          and page4.Page4Mixin.p4_45e7a0(_c, 0x1000, 0x800) == _sr1
+          and page4.Page4Mixin.p4_45e7a0(_c, 0x400, 0x1000) == _sr2
+          and page4.Page4Mixin.p4_45e7a0(_c, 5, 0) == 0
+          and _c.p4_stat[0x4CD4A0 + 4] == (400 * (_sr1 & 0xFFFF) + 400 * (_sr2 & 0xFFFF)
+                                           + 200000 * 3) & 0xFFFFFFFF
+          and _c.p4_stat[0x4CD4A0 + 0xE1] == 1, "")
     _sg = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x45F5C0 - ib:0x45F5E0 - ib], 0x45F5C0)}
     _er = {i.address: (i.mnemonic, i.op_str)

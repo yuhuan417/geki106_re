@@ -5663,5 +5663,5 @@ class Page4Mixin:
         self.p4_stat_w8(0x38, 1)
 
     def stage_globals_end(self) -> None:
-        """0x45F760(0x4CD4A0)：结算/收尾。"""
-        return
+        """`0x45F760(0x4CD4A0)`：阶段结算 —— 转调 `p4_45f760`（该函数已按 §16.2xx 实现）。"""
+        self.p4_45f760()
