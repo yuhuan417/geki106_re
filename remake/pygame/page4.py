@@ -552,6 +552,8 @@ def _beh_6B000001(self, e) -> bool:
     idx = P4_44408C[st]                               # 0x4435F9
     if idx == 0:
         return self._p4_443606(e, cnt)
+    if idx == 1:
+        return self._p4_4437e0(e, cnt, st)
     k = (0x4435C0, idx)
     self.p4_beh_missing_types[k] = self.p4_beh_missing_types.get(k, 0) + 1
 
@@ -2640,6 +2642,7 @@ class Page4Mixin:
                   f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
                   f"ent0={[(hex(e.g32(0x14)), e.node.layer, e.node.rect) for e in self.p4_q43c[:3] if e.node]} "
                   f"actor={[(hex(x.g32(0x14)), x.s32(0x04), x.s32(0x08)) for x in self.actorq]} "
+                  f"intro={[((x.g32(0x1C)>>28)&0xF, x.g32(0x1C)&0x0FFFFFFF) for x in self.ui52c if getattr(x,'raw',None) and x.type_word==0x6B000001]} "
                   f"other={ {k: len(v) for k, v in getattr(self, 'p4_other', {}).items()} } "
                   f"chain={getattr(self.vm, 'chain', None)} q={self.vm.queue[:6]} "
                   f"cur={self.vm.cur}/{len(self.vm.buf)} next_t={int.from_bytes(self.vm.buf[self.vm.cur + 2:self.vm.cur + 4], 'little') if self.vm.cur + 4 <= len(self.vm.buf) else None} "
@@ -5139,6 +5142,106 @@ class Page4Mixin:
             self.spawn(self._p4_q("ui46c"), 0x12061124,
                        ox + dx, oy + dy, v)            # 0x42C6A0 / 0x42C75C
 
+
+    def _p4_4437e0(self, e, ebp: int, st: int) -> bool:
+        """`0x4437E0`：状态 1..7 —— 每相位画血条刻度、放一次 UI，并按计时推进状态。
+
+        ```
+        ebp == 0：
+          0x4437ED 0x43A320(0x4AD4CC)                      清 ui4cc
+          0x4437F5 bl == 7 → 跳过血条
+          0x4437FB edi = ((bl << 5) - 0x20) & 0xFFFF | 0x300000   ; y
+          0x443801 ebx = 0x40 .. < 0x23F 步 0x20             ; x = ebx & 0xFFFF | 0x1AE0000
+          0x44383E 0x430400(&rec, x, y, 0x4B000001, 0x200020) → 0x43A3C0(0x4AD4CC)
+          0x44387B bl == 1 → 0x430400(&rec, 0x1F4, rand%0x12C+0x3C, 0x2B000001, 1) → ui4cc
+          0x4438C9 bl == 2 → 0x430400(&rec, 0x1F4, rand%0x64 +0x12C, 0x2B000001, 2) → ui4cc
+          0x44391A bl == 3 → (0x1F4, rand%0x64+0x12C) a3=3 → ui43c；再 (0, 同 y) a3=3 → ui43c
+          0x4439B3 bl == 4 → (0xFA, rand%0x64+0xAA) a3=4 → ui43c；(0xFA, y-0x64) a3=5 → ui43c
+          0x443A56 bl == 5 → (0x14, 0xC8) a3=6 → ui4cc
+          0x443A96 bl == 6 → (0x190, 0xC8) a3=7 → ui4cc
+        0x443B33 0x44F600(0x4AB514, 1, 0x10 + (bl == 7))    ; BGM 曲目
+        ebp != 0：
+          0x443B4D ebp == 0xFFFF → [esi+0x1C] = ([+0x1C]&0xF0000000) + 0xFFFE
+        0x443B62 if (0x45AFF0(0x56CCC0, 0x20)) {
+          0x443B7C if (ebp < 0xFFFF) {
+            0x43BC40(0x4AD43C)                              清 ui43c
+            bl==1 [+0x20]=ebp ; bl==2 [+0x20]=低16|(ebp<<16)
+            bl==3 [+0x24]=ebp ; bl==4 [+0x24]=低16|(ebp<<16)
+            bl==5 [+0x28]=ebp ; bl==6 [+0x28]=低16|(ebp<<16)
+            bl==7 [+0x2C]=ebp
+            0x443BF9 [esi+0x1C] = ([+0x1C]&0xF0000000) + 0x10000   计数清零、状态进一级
+            0x443C10 0x44FDD0(0x4AB514)                      ; 停 BGM
+          }
+          0x443C15 if (0x45B030(0x56CCC0, 4)) [+0x1C] = ([+0x1C]+0x10000000) & 0xF0000000
+        }
+        0x443C35 if (0x45AFF0(0x56CCC0, 0x40)) { 0x44FDD0(0x4AB514) ; [+0x1C] = 0x90000000 }
+        ```
+        """
+        q4 = self._p4_q("ui4cc")
+        q3 = self._p4_q("ui43c")
+        _clr = lambda _q: (getattr(_q, "clear", None) or (lambda: None))()
+
+        if ebp == 0:                                       # 0x4437E2
+            _clr(q4)                                       # 0x4437ED
+            if st != 7:                                    # 0x4437F5
+                _y = (((st << 5) - 0x20) & 0xFFFF) | 0x300000       # 0x4437FB..0x44380C
+                _x = 0x40                                  # 0x443801
+                while _x < 0x23F:                          # 0x44386B
+                    self.spawn(q4, 0x4B000001, (_x & 0xFFFF) | 0x1AE0000, _y, 0x200020)
+                    _x += 0x20
+            if st == 1:                                    # 0x44387B
+                self.spawn(q4, 0x2B000001, 0x1F4, rng.randrange(0x12C) + 0x3C, 1)
+            elif st == 2:                                  # 0x4438C9
+                self.spawn(q4, 0x2B000001, 0x1F4, rng.randrange(0x64) + 0x12C, 2)
+            elif st == 3:                                  # 0x44391A
+                _yy = rng.randrange(0x64) + 0x12C
+                self.spawn(q3, 0x2B000001, 0x1F4, _yy, 3)
+                self.spawn(q3, 0x2B000001, 0, _yy, 3)      # 0x443985 第二发 x=0
+            elif st == 4:                                  # 0x4439B3
+                _yy = rng.randrange(0x64) + 0xAA
+                self.spawn(q3, 0x2B000001, 0xFA, _yy, 4)
+                self.spawn(q3, 0x2B000001, 0xFA, _yy - 0x64, 5)
+            elif st == 5:                                  # 0x443A56
+                self.spawn(q4, 0x2B000001, 0x14, 0xC8, 6)
+            elif st == 6:                                  # 0x443A96
+                self.spawn(q4, 0x2B000001, 0x190, 0xC8, 7)
+            elif st == 7:                                  # 0x443AD5 区段线性反汇编失步，待核
+                _k = (0x4437E0, "st7")
+                self.p4_beh_missing_types[_k] = self.p4_beh_missing_types.get(_k, 0) + 1
+            # 0x443B33
+            if self.audio is not None:
+                self.audio.bgm(0x10 + (1 if st == 7 else 0))
+            return True
+
+        if ebp == 0xFFFF:                                  # 0x443B4D
+            e.d32(0x1C, (e.g32(0x1C) & 0xF0000000) + 0xFFFE)
+        if self.p4_in_bits() & 0x20:                       # 0x443B62
+            if ebp < 0xFFFF:                               # 0x443B7C
+                _clr(q3)                                   # 0x43BC40
+                if st == 1:                                # 0x443B8C
+                    e.d32(0x20, ebp)
+                elif st == 2:                              # 0x443B96
+                    e.d32(0x20, (e.g32(0x20) & 0xFFFF) | (ebp << 16))
+                elif st == 3:                              # 0x443BAE
+                    e.d32(0x24, ebp)
+                elif st == 4:                              # 0x443BB8
+                    e.d32(0x24, (e.g32(0x24) & 0xFFFF) | (ebp << 16))
+                elif st == 5:                              # 0x443BCF
+                    e.d32(0x28, ebp)
+                elif st == 6:                              # 0x443BD9
+                    e.d32(0x28, (e.g32(0x28) & 0xFFFF) | (ebp << 16))
+                elif st == 7:                              # 0x443BF1
+                    e.d32(0x2C, ebp)
+                e.d32(0x1C, (e.g32(0x1C) & 0xF0000000) + 0x10000)   # 0x443BF9
+                if self.audio is not None:
+                    self.audio.bgm_stop()                  # 0x443C10 0x44FDD0
+            if not (self.p4_in_bits() & 4):                # 0x443C15
+                e.d32(0x1C, ((e.g32(0x1C) + 0x10000000) & 0xF0000000))
+        if self.p4_in_bits() & 0x40:                       # 0x443C35
+            if self.audio is not None:
+                self.audio.bgm_stop()                      # 0x44FDD0
+            e.d32(0x1C, 0x90000000)                        # 0x443C53
+        return True
 
     def _p4_ent_into(self, queue: list, typ: int, x: int, y: int, a3: int = 0,
                      beh: int | None = None):

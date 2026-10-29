@@ -1751,6 +1751,20 @@ def main():
           and page4.Page4Mixin._p4_div3(9) == 3
           and page4.Page4Mixin._p4_div3(-9) == -3
           and page4.Page4Mixin._p4_div3(8) == 2, "")
+    _s17 = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x4437E0 - ib:0x443C67 - ib], 0x4437E0)}
+    check("0x4437E0 状态 1..7：血条 x 从 0x40 步 0x20 到 < 0x23F、y=((st<<5)-0x20)&0xFFFF|0x300000，"
+          "a3=0x200020 进 ui4cc；相位记录 [+0x20]/[+0x24]/[+0x28]/[+0x2C] 各存低/高 16 位；"
+          "推进时 [0x4AB5C0] 位 0x20 触发、位 4 清 → 状态+1、位 0x40 → 状态 9",
+          _s17.get(0x4437FB) == ("shl", "edi, 5")
+          and _s17.get(0x44380C) == ("or", "edi, 0x300000")
+          and _s17.get(0x44381E) == ("push", "0x200020")
+          and _s17.get(0x44386B) == ("cmp", "ebx, 0x23f")
+          and _s17.get(0x443B91) == ("mov", "dword ptr [esi + 0x20], ebp")
+          and _s17.get(0x443BB3) == ("mov", "dword ptr [esi + 0x24], ebp")
+          and _s17.get(0x443BD4) == ("mov", "dword ptr [esi + 0x28], ebp")
+          and _s17.get(0x443BF6) == ("mov", "dword ptr [esi + 0x2c], ebp")
+          and _s17.get(0x443C53) == ("mov", "dword ptr [esi + 0x1c], 0x90000000"), "")
     check("0x4435C0 状态机落地：`P4_44408C` = 0x44408C 的 10 项字节表；"
           "`0x443606` 计数 0 建三块 0x4B000001、0xF0 等 btn0 才生成自机、"
           "否则 `[+0x1C]=0xEF` 重试；`[+0x1C]` 高 4 位状态 / 低 28 位计数",
