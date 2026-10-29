@@ -2213,9 +2213,11 @@ class Page4Mixin:
         if not slot.active:
             return
         if slot.rem:
-            for i in range(20):                              # 0x456D80
+            # 0x456D80(params@+0x30, rates@+0x80)：**完全展开的 19 项** dword 加法
+            # （偏移 0x00..0x48，最后一条写 [eax+0x48]；函数体到 0x456E6D 结束）。
+            # 第 20 项（+0x4C）不在本函数里推进 —— 那属于紧随其后的 0x456EB0。
+            for i in range(19):
                 slot.params[i] = (slot.params[i] + slot.rates[i]) & 0xFFFFFFFF
-            slot.params[19] = (slot.params[19] & ~0xFF) | (slot.rates[19] & 0xFF)
             slot.rem -= 1
             self._bg_dispatch(slot)
         alive = []
