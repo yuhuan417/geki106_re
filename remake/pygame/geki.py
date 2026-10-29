@@ -916,7 +916,8 @@ class Pages:
         self.sysf = Flags()          # 0x56CC84：系统旗标（0x10 = 离开本页）
         # 0x56CC8C/0x56CC90：自机位置镜像（页面重置清零）。页13 无自机 ⇒ 恒 0，
         # 但 `0x42BB9E` 会读 `[0x56CC90]`，故仍需存在。
-        self.mirror = {"x": 0, "y": 0}
+        self.mirror = {"x": 0, "y": 0}     # 0x56CC8C/0x56CC90
+        self.g56cc94 = 0                   # byte[0x56CC94]（0x42F159 等写入，页13 无消费者）
         # 0x4AD4CC：特效/尾迹队列。0x458E70 的第 6 项（call 0x40161D→0x43A350）每帧 tick 它；
         # 记录 `0x401686`→`0x43A3C0` 会 new 出实体再走 `0x4355E0`（按 type&0xFF000000 分类构造）。
         # 类 0x41 的显示/行为尚未解，故此处先按原序记录，不上屏。
@@ -1668,6 +1669,8 @@ class Pages:
                 self._fx12(e)
             elif e.beh == "kanji_actor":
                 self._kanji_actor(e)
+            elif e.beh == "dot10":
+                self._dot10(e)
             elif e.beh == "psel_hint":
                 self._psel_hint(e)
             elif e.beh == "menu_root":
@@ -2317,8 +2320,132 @@ class Pages:
         e.disp = DisplayNode(0, [0, 0x30 * n, 0x2F, 0x30 * n + 0x2F],
                              [int(x) - 0x18, int(y) - 0x18])
         self.actorq.append(e)                     # 0x4AD40C 演员队列（不是 0x4AD46C）
+        # 0x4461E5..0x4461FE：ctor 末尾再生成一条 **0x10008043**（x=0xA0,y=0x78,a3=本实体），
+        # 经 `0x446220 0x40100F` 入 **0x4AD46C**。0x4AD40C 先 tick、0x4AD46C 后 tick ⇒ 同帧即开始跑。
+        self._dot_spawn(0xA0, 0x78, e)
         self.log(f"actor 0x0A slot={n} dst=({x-0x18},{y-0x18}) rect={e.disp.rect}")
         return e
+
+    def _dot_spawn(self, x: int, y: int, parent: "UiEntity | None" = None) -> UiEntity:
+        """ctor `0x42DABC`（type **0x10008043**，0x10 类；`0x42D988 cmp eax,0x10008043 / je 0x42DABC`）。
+
+        `[+0x40]=0x4021A3`（→ 行为 `0x42F080`）、`[+0xC]=0x30`、`byte[+0x10]=1`、`[+0x1C]=0`、
+        `[+0x20]=0`、`[+0x24]=rec[0xC]`（父实体）、`[+0x28]=field(0xC000)`（选中槽）、`[+0x18]=-1`；
+        显示节点：层 **0**（`0x42DB86 mov [ecx],ebx`，ebx=0）、rect `(0x8D,0x2D,0x93,0x32)`（7×6 小方块）、
+        dst `= 0x401753(x-3, y-3)`、`byte[dst+0x1C] = byte[0x56CCC8]`。
+        槽 3 特例（`0x42DBE8..0x42DC40`）：`[+0xC]=0x10000`、rect `(0x60,0x60,0xBF,0xBF)`（96×96）、
+        `byte[+0x10]=0`、`dst.x=0x280`、类型改写成 **0x10008041**（改用行为表）。
+        """
+        e = UiEntity(type_word=0x10008043, a3=int(parent.p.get("slot", 0)) if parent else 0)
+        e.beh = "dot10"
+        e.aux = 0x30                              # [+0xC]
+        e.p["slot"] = self.keys.field(0xC000)     # [+0x28]
+        e.p["t"] = 0                              # [+0x20] 计时器
+        e.p["f1c"] = 0                            # [+0x1C]
+        e.p["blink"] = 1                          # byte[+0x10]
+        e.p["x"], e.p["y"] = int(x), int(y)       # [+4]/[+8]
+        e.p["parent"] = id(parent) if parent else 0
+        rect = [0x8D, 0x2D, 0x93, 0x32]
+        dst = [int(x) - 3, int(y) - 3]
+        if e.p["slot"] == 3:                      # 0x42DBE0 cmp eax,3 / jne
+            if e.type_word == 0x10008043:         # 0x42DBEA..0x42DBF3
+                e.aux = 0x10000
+            rect = [0x60, 0x60, 0xBF, 0xBF]       # 0x42DBFA..0x42DC10
+            e.p["blink"] = 0
+            dst = [0x280, dst[1]]                 # 0x42DC39 mov [edx+0x14],0x280
+            e.type_word = 0x10008041              # 0x42DC40
+        e.disp = DisplayNode(0, rect, dst, active=False)   # byte[0x56CCC8] 页13 = 0
+        self.ui46c.append(e)                      # 0x4AD46C
+        self.log(f"dot 0x10008043 slot={e.p['slot']} dst={dst} rect={rect}")
+        return e
+
+    def _dot10(self, e: UiEntity) -> None:
+        """行为 `0x42F080`（`0x4021A3` thunk）——0x10008041/043 的小方块指示器。
+
+        1. `0x42F095`：`[+0x28] != field(0xC000)` ⇒ 返回 0（换槽即销毁）。
+        2. `0x4012E4`→`0x42F4B0(blink)`：blink 时 `rect += (-3,-3,+3,+3)`、`dst -= 3`（`dst.x==0x60` 停）；
+           否则 `rect += (+3,+3,-3,-3)`、`dst += 3`（`dst.x==0x90` 停）。
+        3. `0x42F0B6`：`dst.active = (dst.y != 0x90)`；`t < 0x180 && 槽 != 2` ⇒ 隐藏，直接到尾部。
+        4. `0x42F0F9 jmp [槽*4+0x42F3C0]` ⇒ 四个槽各自的轨迹（见下）。
+        5. 尾部 `0x42F35F`：不可见 ⇒ `x,y := (0xA0,0x78)`；`t += (t<0x39C ? 1 : -t)`（到 0x39C 归零）；
+           `dst = (x + rect.l - 0x90, y + rect.t - 0x90)`。
+        """
+        d = e.disp
+        if d is None:
+            e.alive = False
+            return
+        if e.p["slot"] != self.keys.field(0xC000):     # 0x42F095
+            e.alive = False
+            self.log("dot 0x10008043：换槽 ⇒ 销毁")
+            return
+        # 0x42F0AE 0x4012E4(al) → 0x42F4B0。注意守卫读的是 **`[dst+4]` = rect.left**（不是 dst.x）：
+        # `0x42F4C4 cmp ecx,0x60` / `0x42F4FE cmp ecx,0x90`，且 `0x42F4C1 add eax,4` 才是传给
+        # `0x401A0A` 的矩形指针 ⇒ rect.l 从 0x8D 起每帧 ∓3，正好落在 0x60 / 0x90。
+        if e.p["blink"]:
+            if d.rect[0] != 0x60:
+                d.grow(-3, -3, 3, 3)
+                d.dst[0] -= 3; d.dst[1] -= 3
+        else:
+            if d.rect[0] != 0x90:
+                d.grow(3, 3, -3, -3)
+                d.dst[0] += 3; d.dst[1] += 3
+        d.active = d.rect[0] != 0x90                   # 0x42F0B6..0x42F0C0（同样读 [eax+4]）
+
+        t = e.p["t"]; x = e.p["x"]; y = e.p["y"]; slot = e.p["slot"]
+        if t < 0x180 and slot != 2:                    # 0x42F0CC..0x42F0E8
+            d.active = False
+        elif slot <= 3:
+            if slot == 0:                              # 0x42F100
+                if t < 0x234:
+                    if x < 0x250:
+                        x += 0xA
+                    if y > 0x30:
+                        y -= 0xA
+                elif t < 0x26B:
+                    if x > 0x30:
+                        x -= 0xA
+                    if y < 0xC0:
+                        y += 0xA
+                else:
+                    if y > 0x30:
+                        y -= 0xA
+                e.p["blink"] = 1 if t < 0x284 else 0            # 0x42F146
+                self.g56cc94 = 1 if t == 0x284 else 0           # 0x42F159
+                e.p["f1c"] = 1 if t < 0x284 else 0              # 0x42F164..0x42F16D
+            elif slot == 1:                            # 0x42F175 追自机；页13 无自机 ⇒ 0x42F1C9
+                e.p["blink"] = 1 if t < 0x28E else 0            # 0x42F1CC
+                self.g56cc94 = 1 if t == 0x284 else 0           # 0x42F1DC
+                e.p["f1c"] = 1 if 0x1F8 < t < 0x28E else 0      # 0x42F1E4..0x42F204
+            elif slot == 2:                            # 0x42F20C
+                x, y = 0x170, 0x78
+                e.p["f1c"] = 1
+                self.g56cc94 = 1 if t >= 0x216 else 0
+            else:                                      # 0x42F234（槽3：圆运动）
+                ang = 20 * (3 * t - 0x480)                        # 0x42F252..0x42F25C
+                if t < 0x2AC:
+                    a = max(5 * (0x220 - t), 0xC8)                # 0x42F23B..0x42F24D
+                    x = 0xA0 + (fcos(ang) * a >> 8)               # 0x42F260..0x42F271
+                    y = 0x78 + (fsin(ang) * a >> 8)               # 0x42F29F..0x42F308
+                else:                                             # 0x42F2AC
+                    k = 10 * (t - 0x298)                          # 0x42F2C2..0x42F2CE
+                    x = 0xA0 + (fcos(ang) * k >> 8)
+                    y = 0x78 + (fsin(ang) * k >> 8)
+                if 0x1F8 <= t < 0x306:                            # 0x42F314..0x42F32C
+                    e.p["f1c"] -= 1
+                    e.p["blink"] = 1 if e.p["f1c"] == 0 else 0
+                else:
+                    e.p["blink"] = 0
+                if e.p["f1c"] == 0:                               # 0x42F333..0x42F33A
+                    e.p["f1c"] = 1
+                self.g56cc94 = 1 if (t >= 0x1F8 and t < 0x324) else 0   # 0x42F341..0x42F358
+        e.p["x"], e.p["y"] = x, y
+
+        if not d.active:                               # 0x42F364..0x42F372
+            x, y = 0xA0, 0x78
+        t = t + 1 if t < 0x39C else t - t              # 0x42F379..0x42F391
+        e.p["t"] = t
+        d.dst[0] = x + int(d.rect[0]) - 0x90           # 0x42F397..0x42F3A1（[ecx+4]=rect.l）
+        d.dst[1] = y + int(d.rect[0]) - 0x90           # 0x42F3AB..0x42F3B5（同样读 [eax+4]，原作如此）
 
     def portrait_data(self) -> bytes:
         """资源 0x4F（=79）→ `extracted/data/res_79.bin`（19200B = 320×60）。"""
