@@ -1604,6 +1604,17 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _tri = page4.Page4Mixin.p4_4590_tri
+    _pair = page4.Page4Mixin.p4_450580_pair
+    _bs2 = {i.address: (i.mnemonic, i.op_str)
+            for i in _mdk.disasm(img[0x450580 - ib:0x450592 - ib], 0x450580)}
+    check("0x450580 只是两字节存（[mgr+0x5C]=arg1、[mgr+0x5D]=arg2，ret 8），不是播 SE；"
+          "键16 的 0x18 字段是三态 0→1→3→0",
+          _tri(0) == 1 and _tri(1) == 3 and _tri(3) == 0 and _tri(2) == 0
+          and _pair(1, 0) == (0, 1) and _pair(0, 1) == (1, 0)
+          and _bs2.get(0x450588) == ("mov", "byte ptr [ecx + 0x5c], al")
+          and _bs2.get(0x45058B) == ("mov", "byte ptr [ecx + 0x5d], dl")
+          and _bs2.get(0x45058E) == ("ret", "8"), "")
     _setf = page4.Page4Mixin.p4_45b0e0_set
     _xorf = page4.Page4Mixin.p4_45af90_xor
     _bd = {i.address: (i.mnemonic, i.op_str)

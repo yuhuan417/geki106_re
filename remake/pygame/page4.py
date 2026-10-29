@@ -4997,6 +4997,43 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "e0", 0)) if self.inp.rec else False
 
     @staticmethod
+    def p4_4590_tri(v: int) -> int:
+        """`0x45900C`（键16）对 `[0x4AB5B0+4]` 的 `0x18` 字段做**三态轮转**。
+
+        ```
+        0x459013 op = 0x45AFC0(0x4AB5B0, 0x18)
+        0x459018 test eax,eax ; jne 0x459020 → op==0 时 push 1
+        0x45902C cmp eax,1 ; jne 0x459035     → op==1 时 push 3，否则 push 0
+        0x45903E 0x45B0E0(0x4AB5B0, 0x18, 新值)   写回
+        ```
+
+        ⇒ `0 → 1 → 3 → 0`（**跳过 2**，因为是 2 位字段只有三个合法态）。
+        """
+        if v == 0:
+            return 1
+        if v == 1:
+            return 3
+        return 0
+
+    @staticmethod
+    def p4_450580_pair(bit8: int, bit10: int):
+        """`0x450580(mgr, a, b)`：把两个字节写进 `[mgr+0x5C]`、`[mgr+0x5D]`（`ret 8`）。
+
+        ```
+        450580 al = [esp+4] ; dl = [esp+8]
+        450588 [ecx+0x5C] = al ; 45058B [ecx+0x5D] = dl ; 45058E ret 8
+        ```
+
+        **不是**「播 SE」，只是一次两字节存。调用处（`0x459043..0x459062` 与 `0x4582C2`）
+        传的是 `0x45AFF0(0x4AB5B0, 0x10)` 与 `0x45AFF0(0x4AB5B0, 8)` —— 即 KeyMgr 位字里
+        两个「是否置位」的布尔值。注意压栈顺序 `push(8) / push(0x10)` ⇒ **arg1 = 测0x10**、
+        **arg2 = 测8**，所以写进去的 `+0x5C = 测0x10`、`+0x5D = 测8`。
+
+        这两个字节在 `0x4AB4B0`（音频管理器）里的确切含义尚未定案，不臆测。
+        """
+        return (bit10 & 0xFF, bit8 & 0xFF)
+
+    @staticmethod
     def p4_45b0e0_set(word: int, mask: int, value: int) -> int:
         """`0x45B0E0(obj, mask, value)`：**位域写入**（`0x45AFC0` 的写入对应件）。
 
