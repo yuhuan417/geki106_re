@@ -1384,6 +1384,32 @@ def main():
     _bo = _Z({0x4AB5B0 + 4: 0x0F00})
     _bor1 = page4.Page4Mixin.p4_45af30(_bo, 0x1000)
     _bor2 = page4.Page4Mixin.p4_45af60(_bo, 0x0100)
+    _cv_p = page4.Ent(0x1C0, 0x100, 0x10008431, 0)
+    _cv_p.d32(0x10, 1)
+    _cv_p.d32(0x1C, 0x5000)
+    _cv_a = page4.Ent(0x120, 0x90, 0x10008431, 0)
+    _cv_a.d32(0x10, 1)
+    _cv_a.d32(0x18, 5)
+    _cv_z = _Z({0x4CD4A0 + 0xEC: 0x1000, 0x10C4: 0x30000, 0x4AB5B0 + 4: 0x200})
+    page4.Page4Mixin.p4_43c460(_cv_z, _cv_p, _cv_a)
+    _cv_hits = [c for c in _cv_z.calls if c[0] == "ui40c"]
+    _cv_p2 = page4.Ent(0x1C0, 0x100, 0x10008431, 0)
+    _cv_p2.d32(0x10, 1)
+    _cv_p2.d32(0x1C, 0x5001)
+    _cv_a2 = page4.Ent(0x120, 0x90, 0x10008431, 0)
+    _cv_a2.d32(0x10, 1)
+    _cv_a2.d32(0x18, 5)
+    _cv_z2 = _Z({0x4CD4A0 + 0xEC: 0x1000, 0x10C4: 0x30000})
+    page4.Page4Mixin.p4_43c460(_cv_z2, _cv_p2, _cv_a2)
+    _cv_hits2 = [c for c in _cv_z2.calls if c[0] == "ui40c"]
+    check("0x43C55D（类型 0x10008431）：命中生成 type6（坐标为靶的 x/y），"
+          "写 [[p+0x1C]+0x28]，靶被注销",
+          len(_cv_hits) == 1 and _cv_hits[0][1] == 6
+          and _cv_hits[0][2] == 0x120 and _cv_hits[0][3] == 0x90
+          and _cv_z.p4_stat[0x5000 + 0x28] == 2
+          and _cv_a.g32(0x10) == 0 and _cv_a.g32(0x18) == 0
+          and len(_cv_hits2) == 1 and _cv_z2.p4_stat[0x5001 + 0x28] == 2
+          and _cv_p2.g32(0x10) == 1, "")
     check("0x45AF30 = |= bits；0x45AF60 = &= ~bits（都返回新值）",
           _bor1 == 0x1F00 and _bo.p4_stat[0x4AB5B0 + 4] == 0x1E00 and _bor2 == 0x1E00
           and img[0x45AF37 - ib:0x45AF3C - ib] == bytes([0x0B, 0xD0, 0x89, 0x51, 0x04])

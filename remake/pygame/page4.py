@@ -3386,6 +3386,46 @@ class Page4Mixin:
             v >>= 1
         return v                                                # 0x45AFD9
 
+    def _p4_43c55d(self, p, a) -> None:
+        """`0x43C55D`（类型 `0x10008431`）：伤害数字 —— 命中则生成 type 6 实体，未命中走 `0x43C691`。
+
+        ```
+        0x43C55D 0x45FAD0(0x4CD4A0, [a+0x14]) ; == 0 → 0x43C691
+        0x43C594 0x430400(dst, &a[4], <fad0 第二次>, 6, [p+0x1C])
+        0x43C5B8 k = [esp+0x34] & 0xF；k==8 或 0x45AFF0(0x4AB5B0,0x200) → 3，否则 2
+        0x43C5D7/0x43C5E6 写 [[p+0x1C] + 0x28]
+        0x43C5F7 0x448FF0(0x4AD40C, &rec)
+        0x43C61D 0x45EFF0(0x4CD4A0, [a+0x14], [a+4], [a+8], 0x10008431)   ; **未落地**
+        0x43C612 [a+0x18] = 0 ; 0x43C619 byte[a+0x10] = 0
+        0x43C636 0x450350(0x4AB4B0, 0xD, ([p+4]-0x140) << 4)
+        0x43C63B if ([a+0x14] == 0x29000006 && 0x460800(0x56CC4C) == 0)
+                   → 0x45AF30(0x56CCB8, 0x1000) ; [p+0x18] = 0 ; byte[p+0x10] = 0
+        ```
+
+        ★ `rec[0]` 是**位置三元组的地址**（`&a[4]`）。type 6 的构造器 `0x445CE7` 会解引用它：
+        `0x445CF2 edx = [[ebp]]` → `node+4`，`[[ebp]+4]` → `node+8`，`[[ebp]+8]` → `node+0xC`。
+        所以这里传 `a` 的 x/y/r 三个量，而不是把地址当坐标。
+        ★ `k` 读的是未初始化栈（§16.227），只保留 `0x45AFF0(0x4AB5B0, 0x200)` 那一半。
+        """
+        ta = a.g32(0x14)
+        hit = self.p4_45fad0(ta)                               # 0x43C565 / 0x43C585
+        if hit == 0:                                           # 0x43C56B
+            self._p4_43c691(p)
+            return
+        r = 3 if self.p4_bit_any(0x200) else 2                  # 0x43C5C2..0x43C5E6
+        target = p.g32(0x1C)
+        if target:
+            self.p4_stat[target + 0x28] = r
+        self.spawn(self._p4_q("ui40c"), 6,
+                   a.s32(0x04), a.s32(0x08), hit, p.g32(0x1C))  # 0x43C5F7 / 0x43C594
+        a.d32(0x18, 0)                                          # 0x43C612
+        a.d32(0x10, 0)                                          # 0x43C619
+        self.p4_se_pan(0xD, (p.s32(0x04) - 0x140) << 4)         # 0x43C636
+        if ta == 0x29000006 and self.p4_460800(0x56CC4C) == 0:  # 0x43C63B
+            self.p4_45af30(0x1000)                              # 0x43C65D
+            p.d32(0x18, 0)                                      # 0x43C662
+            p.d32(0x10, 0)                                      # 0x43C669
+
     def _p4_43c691(self, p) -> None:
         """`0x43C691`：`0x43C55D` 的**未命中**路径 —— 再入列一份爆炸记录，然后注销 `p`。
 
@@ -3568,8 +3608,8 @@ class Page4Mixin:
             self._p4_43c868(p)
         elif u == 0x10008041:                                  # 0x43C54C → 0x43C6C4
             self._p4_43c6c4(p, a, u)
-        elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D（见 §16.216）
-            pass
+        elif u == 0x10008431:                                  # 0x43C557 → 0x43C55D
+            self._p4_43c55d(p, a)
         # 0x43C9C2 共用尾
         if ((t >> 16) & 0xFF) != 0:                            # 0x43C9C6
             n = p.s32(0x18)                                    # 0x43C9CE
