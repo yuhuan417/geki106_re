@@ -394,6 +394,49 @@ def _beh_23000001(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
 
 
+def _beh_23000007(self, e) -> bool:
+    """`0x402180` → `0x40E790`：分裂型。`[+0x1C]` 为分裂数，>0 时一次性生成 N 个 0x23000007
+    到主队列 `0x4AD43C`（x=rand%0x500、y=rand%0x1E0+0x298）然后自身死亡；否则左移 6/帧并向玩家 y 靠拢。
+    """
+    n = e.s32(0x1C)
+    if n:
+        for _ in range(n):                                   # 0x40E7AA..0x40E7FB
+            x = rng.randrange(0x500)                         # 0x401393 → 0x45AD00, 0x462D71 取商
+            y = rng.randrange(0x1E0) + 0x298                 # 余数 + 0x298
+            self.spawn(self.p4_q43c, 0x23000007, x, y)       # 0x401FA5(0x4AD43C, rec)
+        return False
+    x = e.s32(0x04)
+    dy = 0 if x > 0x298 else (self.p4_player_y() - e.s32(0x08))   # 0x56CC90 = 自机 y
+    x -= 6
+    e.d32(0x04, x)
+    if dy:
+        e.d32(0x08, (e.s32(0x08) + ((dy + 0x1F) >> 6)) & 0xFFFFFFFF)   # 0x40E82B
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return x >= -0x18 and e.g32(0x18) != 0
+
+
+def _beh_23000008(self, e) -> bool:
+    """`0x401528` → `0x40E8C0`：定时变速直线。t=0x10 减速为 0、t=0xC0 生成 0x23000009 于 (x-0x18,y)、
+    t=0x100 加速为 8、t=0x113 自毁；x += [+0x20]。
+    """
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t > 0x100:
+        if t == 0x113:                                       # 0x40E931
+            return False
+    elif t == 0x100:
+        e.d32(0x20, 8)                                       # 0x40E928
+    elif t == 0x10:
+        e.d32(0x20, 0)                                       # 0x40E91F
+    elif t == 0xC0:
+        self.spawn(self.p4_q43c, 0x23000009, e.s32(0x04) - 0x18, e.s32(0x08))   # 0x40E8E5
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)    # 0x40E93B
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0
+
+
 def _beh_10000001(self, e) -> bool:
     """`0x401E06` → `0x448C70`（自机，类型 0x10000001）。
 
@@ -538,6 +581,8 @@ P4_BEH: dict[int, object] = {
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
     0x448C70: _beh_10000001,
+    0x40E790: _beh_23000007,
+    0x40E8C0: _beh_23000008,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
@@ -961,6 +1006,11 @@ class Page4Mixin:
     def p4_key_raw_set(self, mask: int) -> None:
         """`0x45AF30(0x56CCC0, mask)`：置位。"""
         self.keys.bits |= mask
+
+    def p4_player_y(self) -> int:
+        """`[0x56CC90]`：自机缓存 y（`0x448D2D` 写）。"""
+        pos = getattr(self, "p4_player_pos", None)
+        return int(pos[1]) if pos else int(self.inp.y)
 
     def p4_btn_attack(self) -> bool:
         """`[0x4AB594]`：btn0（C/左键=攻击）当前状态。"""
