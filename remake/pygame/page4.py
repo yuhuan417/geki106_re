@@ -3128,6 +3128,20 @@ class Page4Mixin:
                 # 入队目标队列尚未确认，故暂不生成实体（§15）。
         self.p4_stat[m + 0x04] = (self.p4_stat.get(m + 0x04, 0) + eb) & 0xFFFFFFFF   # 0x45F252
         self.p4_stat[m + 0x14] = (self.p4_stat.get(m + 0x14, 0) + eb) & 0xFFFFFFFF   # 0x45F25E
+        # 0x45F25C：分数超过阈值 → 重建 HUD 缓冲并推进阈值档位
+        if (self.p4_stat[m + 0x04] & 0xFFFFFFFF) > self.p4_stat.get(m + 0xE4, 0):
+            self.p4_stat[m + 0xE8] = bytearray(self.p4_45fbf0())     # 0x45F294 0x47C7C0(size)
+            # 0x45F2A7 0x45FCB0(0xE8, buf) 填充缓冲 —— 该函数未读，内容暂缺（§15）
+            ax = self.p4_stat.get(m + 0xE2, 0) & 0xFFFF             # 0x45F2AC
+            if ax == 0:
+                self.p4_stat[m + 0xE4] = 0xFFFFFFFF                  # 0x45F2B8（无限）
+            else:
+                ax -= 1
+                self.p4_stat[m + 0xE2] = ax                          # 0x45F2C8
+                # 0x45F2D9 0x45C740(0x4AB5CC, ax, &out) 取下一档阈值：
+                # 记录 0x54 字节，索引 = byte[0x4AB5D0] + ax*2，基址 0x4AB5CC+8（或 +0x740）。
+                # 该表尚未从 exe 提取（§15），故沿用「不再重建」的哨兵值。
+                self.p4_stat[m + 0xE4] = 0xFFFFFFFF
         self.p4_45f2fb()                                        # 0x45F2FB
 
     def p4_45e710(self, rec, d: int) -> int:
@@ -3170,6 +3184,39 @@ class Page4Mixin:
             c = e
         self.p4_stat[m + 0x5C] = c                              # 0x45E76E
         return (e * b0) & 0xFFFFFFFF                            # 0x45E772
+
+    def p4_430860(self, q) -> int:
+        """`0x430860(queue)`：队列里的实体数（`0x45FBF0` 用它算缓冲大小）。"""
+        return len(q) if isinstance(q, list) else int(q) if isinstance(q, int) else 0
+
+    def p4_45fbf0(self) -> int:
+        """`0x45FBF0(obj)`：**算 HUD 缓冲总字节数**，返回 `(A + total*8 + 0xE)*4 + 0x18`。
+
+        ```
+        0x45FBF9 [obj+8] = 0xE
+        0x45FC00 A = 0x456370(0x4CD484)          ; 段数
+        0x45FC0A [obj+0xC] = A
+        0x45FC0D edi = 0x457CE0(0x4AD55C)        ; 背景槽占用
+        0x45FC19..0x45FC53 edi += 0x430860(0x4AD4FC / 0x4AD4CC / 0x4AD49C /
+                                           0x4AD43C / 0x4AD46C / 0x4AD40C)
+        0x45FC55 eax = 0x430860(0x4AD40C)
+        0x45FC5F [obj+0x10] = edi + eax          ; total
+        0x45FC63 edx = A + total*8
+        0x45FC66 edx += [obj+8]
+        0x45FC72 [obj+4] = edx*4 + 0x18          ; ← 返回值
+        ```
+        """
+        seg = int(self.p4_stat.get("45fbf0_seg", 0))                 # 0x456370(0x4CD484)
+        bg = int(self.p4_stat.get("45fbf0_bg", 0))                   # 0x457CE0(0x4AD55C)
+        total = bg
+        for name in ("ui4fc", "ui4cc", "ui49c", "ui43c", "ui46c", "ui40c"):
+            total += self.p4_430860(getattr(self, name, []))         # 0x430860 六次
+        total += self.p4_430860(getattr(self, "ui40c", []))          # 0x45FC55 再算一次 ui40c
+        self.p4_stat["45fbf0_seg"] = seg
+        self.p4_stat["45fbf0_total"] = total
+        size = (seg + total * 8 + 0xE) * 4 + 0x18                    # 0x45FC6B
+        self.p4_stat["45fbf0_size"] = size
+        return size
 
     def p4_45f2fb(self) -> None:
         """`0x45EFF0` 的尾段（`0x45F2FB..0x45F3F0`）：**里程门槛递进**。

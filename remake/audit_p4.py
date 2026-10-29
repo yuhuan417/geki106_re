@@ -1435,6 +1435,20 @@ def main():
     _ta3 = page4.Ent(0x120, 0x90, 0x11000000, 0)
     _tz3 = _Z()
     page4.Page4Mixin._p4_43c9c2(_tz3, _t3, _ta3, 0)
+    _fb = _Z()
+    _fb.ui40c = [1, 2, 3]
+    _fb.ui46c = [1]
+    _fbsize = page4.Page4Mixin.p4_45fbf0(_fb)
+    check("0x45FBF0 缓冲大小 = (A + total*8 + 0xE)*4 + 0x18；total 里 ui40c 计两次"
+          "（0x430860 调了七次，最后一次仍是 0x4AD40C）",
+          _fb.p4_stat["45fbf0_total"] == 7 and _fbsize == (0 + 7 * 8 + 0xE) * 4 + 0x18, "")
+    _rb = _Z({0x4CD4A0 + 0xEC: 0x1000, 0x4CD4A0 + 0xE4: 10, 0x4CD4A0 + 0xE2: 3})
+    page4.Page4Mixin.p4_45eff0(_rb, 0x21000131, 0, 0)
+    check("0x45EFF0 尾：分数超过 [mgr+0xE4] 时重建缓冲（大小 = 0x45FBF0）并推进 [mgr+0xE2]",
+          _rb.p4_stat[0x4CD4A0 + 0x04] > 10
+          and isinstance(_rb.p4_stat.get(0x4CD4A0 + 0xE8), (bytes, bytearray))
+          and len(_rb.p4_stat[0x4CD4A0 + 0xE8]) == _rb.p4_stat["45fbf0_size"]
+          and _rb.p4_stat[0x4CD4A0 + 0xE2] == 2, "")
     check("0x43C9C2 共用尾：靶硬时 [a+0x18] -= k 且只放 SE 5（pan=(x-0x140)<<4）；"
           "靶破时入列 0x61000004(半径 0x30) 并注销靶；k==0 直接返回",
           _t1.g32(0x18) == 2 and _ta1.g32(0x18) == 0x101 and _ta1.g32(0x10) == 1
