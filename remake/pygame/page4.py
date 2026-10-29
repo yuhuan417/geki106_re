@@ -4621,6 +4621,25 @@ class Page4Mixin:
             return
         slot.bands.append(BgBand(slot, idx))
 
+    @staticmethod
+    def p4_4512_status(ts: int, ta: int) -> str:
+        """`0x451259..0x4512C2`：页4 每帧状态行的**两个计时字段**（不是分数）。
+
+        ```
+        0x451259 cmp ebp, 0x5F5DD18 ; jb 0x451268 ; 0x451263 ebp = 0x5F5DD18   ; 上限钳位
+        0x451268 eax = 0x10624DD3 ; 0x451271 mul ebp ; 0x451273 shr edx,6
+            ⇒ edx = ebp / 1000   （0x10624DD3>>6 是除 1000 的魔数）
+        0x451277 push 0x4A488C (= "TS:%05d ") ; 0x46318E(buf, fmt, edx)
+        0x4512AB eax = [0x56CCD4] ; push eax
+        0x4512BC push 0x4A4880 (= "TA:%03d ") ; 0x46318E(buf + 尾, fmt, eax)
+        ```
+
+        `0x5F5DD18 = 99999000` ⇒ 钳位后 `/1000 = 99999`，正好塞满 `%05d`。
+        第二段是**追加**（`0x4512A5 dec edi` 先退一格，再从该处拷入）。
+        """
+        v = ts if ts < 0x5F5DD18 else 0x5F5DD18
+        return "TS:%05d " % (v // 1000) + "TA:%03d " % (ta & 0xFFFFFFFF)
+
     P4_HUD_SEGS = (
         (0x43DF71, 0x20, 0x1B0, 0x4A405C),      # 底行 x=0x20
         (0x43DF98, 0x93, 0x1B0, 0x4A4054),      # 底行 x=0x93（步距 0x73）

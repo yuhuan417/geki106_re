@@ -1601,6 +1601,17 @@ def main():
             0x4A4040: b"run", 0x4A4044: b"list", 0x4A404C: b"goto",
             0x4A4054: b"auto", 0x4A405C: b"color"}
     _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
+    _sts = page4.Page4Mixin.p4_4512_status
+    check("0x451259..0x4512C2 状态行 = 「TS:%05d 」(值/1000，钳 0x5F5DD18=99999000) + 「TA:%03d 」",
+          _sts(0, 0) == "TS:00000 TA:000 "
+          and _sts(12345, 7) == "TS:00012 TA:007 "
+          and _sts(99999999, 999) == "TS:99999 TA:999 "
+          and _sts(100000000, 12) == "TS:99999 TA:012 "
+          and img[0x451268 - ib:0x451268 - ib + 5] == bytes([0xB8, 0xD3, 0x4D, 0x62, 0x10])
+          and img[0x451259 - ib:0x451259 - ib + 5] == bytes([0x81, 0xFD, 0x18, 0xDD, 0xF5])
+          and img[0x451273 - ib:0x451273 - ib + 3] == bytes([0xC1, 0xEA, 0x06])
+          and bytes(img[0x4A488C - ib:0x4A488C - ib + 9]) == b"TS:%05d \x00"
+          and bytes(img[0x4A4880 - ib:0x4A4880 - ib + 9]) == b"TA:%03d \x00", "")
     check("0x43DFxx 八段是**调试覆盖层**：版本/版权/剩余内存 + run/list/goto/auto/color；"
           "真正状态栏在 0x451316（高 0xC、y 0x1D4、x 0、文本来自栈缓冲）",
           _okl
