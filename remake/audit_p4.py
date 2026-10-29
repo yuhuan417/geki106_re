@@ -1501,6 +1501,12 @@ def main():
     _sn_n = _Z().p4_45ff80([_sn_e1, _sn_e2], _sn_buf, 0)
     _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
     _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
+    _cq = [page4.Ent(1, 2, 3, 0) for _ in range(3)]
+    check("0x430860 = [queue+0x24] 计数；0x430880 = queue+4 头指针（**两个不同函数**）；"
+          "0x45FF80 写的字节数 = 0x20 × 0x430860 的计数",
+          _Z().p4_430860(_cq) == 3
+          and _Z().p4_430880(_cq) is _cq
+          and _Z().p4_45ff80(_Z().p4_430880(_cq), bytearray(0x100)) == 0x60, "")
     check("0x45FF80 快照记录 = 0x20 字节 / 8 dword："
           "[+0]=vtable [+4]=x [+8]=y [+0xC]=半径 [+0x10]=活跃 [+0x14]=类型 [+0x18]=HP [+0x1C]=字节",
           _sn_n == 0x40

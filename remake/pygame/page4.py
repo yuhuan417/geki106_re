@@ -3329,8 +3329,24 @@ class Page4Mixin:
         return int.from_bytes(t[off:off + 4], "little")           # out[0]
 
     def p4_430860(self, q) -> int:
-        """`0x430860(queue)`：队列里的实体数（`0x45FBF0` 用它算缓冲大小）。"""
-        return len(q) if isinstance(q, list) else int(q) if isinstance(q, int) else 0
+        """`0x430860(queue)` = `mov eax,[ecx+0x24]; ret` —— **`+0x24` 是队列计数**。
+
+        `0x45FBF0` 用它累加 `total`；复刻侧队列就是列表，故等价于 `len(q)`。
+        """
+        return len(q) if isinstance(q, (list, tuple)) else int(q) if isinstance(q, int) else 0
+
+    def p4_430880(self, q):
+        """`0x430880(queue)` = `lea eax,[ecx+4]; ret` —— 返回**链表头指针** `queue+4`，
+        与 `0x430860`（计数）是**两个不同的函数**，只差一个 nibble：
+
+        ```
+        0x430860 mov eax,[ecx+0x24] ; ret      ; 计数
+        0x430880 lea eax,[ecx+4]    ; ret      ; 头指针
+        ```
+
+        `0x45FCB0` 用 `0x430880(...)`→`0x45FF80(obj, head, dst)`；复刻侧队列即列表本身。
+        """
+        return q
 
     def p4_45fbf0(self) -> int:
         """`0x45FBF0(obj)`：**算 HUD 缓冲总字节数**，返回 `(A + total*8 + 0xE)*4 + 0x18`。
