@@ -1686,6 +1686,31 @@ def main():
           and _t5.get(0x445EC9) == ("jmp", "0x446237")
           and page4.P4_TYPE5_BEH == (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
                                      0x40189D, 0x401438, 0x401ECE, 0x401FC3), "")
+    _d8000 = bytes(img[0x447DA0 - ib:0x447DA0 - ib + 15])
+    _j8000 = [int.from_bytes(img[0x447D90 - ib + 4 * k:0x447D90 - ib + 4 * k + 4], "little")
+              for k in range(4)]
+    _p8000 = [int.from_bytes(img[0x447D90 - ib + 4 * k:0x447D90 - ib + 4 * k + 4], "little")
+              for k in range(8, 15)]
+    _f8000 = {i.address: (i.mnemonic, i.op_str)
+              for i in _mdk.disasm(img[0x447A12 - ib:0x447A2F - ib], 0x447A12)}
+    _f6e0 = {i.address: (i.mnemonic, i.op_str)
+             for i in _mdk.disasm(img[0x45F6E0 - ib:0x45F6F6 - ib], 0x45F6E0)}
+    check("0x447640 状态 0x8000 是**子状态分派**：`[+0x20]&0xF` 查 0x447DA0（15 项）再跳 0x447D90；"
+          "跳表只有 4 项有效(0x447A2F/0x447A86/0x447A91/0x447C2D)；紧跟的 4 项是别的数据，8..14 项才是 0xCCCCCCCC 填充",
+          _d8000 == bytes([0, 3, 3, 3, 3, 3, 3, 3, 1, 3, 1, 3, 2, 3, 2])
+          and _j8000 == [0x447A2F, 0x447A86, 0x447A91, 0x447C2D]
+          and all(v == 0xCCCCCCCC for v in _p8000)
+          and _f8000.get(0x447A14) == ("and", "eax, 0xf")
+          and _f8000.get(0x447A17) == ("cmp", "eax, 0xe")
+          and _f8000.get(0x447A22) == ("mov", "cl, byte ptr [eax + 0x447da0]")
+          and _f8000.get(0x447A28) == ("jmp", "dword ptr [ecx*4 + 0x447d90]")
+          and [page4.Page4Mixin.p4_447a12_sub(k) for k in range(15)] == list(page4.Page4Mixin.P4_447DA0)
+          and page4.Page4Mixin.p4_447a12_sub(0xF) is None
+          and page4.Page4Mixin.P4_447D90 == (0x447A2F, 0x447A86, 0x447A91, 0x447C2D), "")
+    check("0x45F6E0（0x402112 的目标体）= `word[+0x26]=0xA0` 后转 0x45F5F0，"
+          "即**每次结算先把 0xA0 复位再走一帧计分**",
+          _f6e0.get(0x45F6EA) == ("mov", "word ptr [ecx + 0x26], 0xa0")
+          and _f6e0.get(0x45F6F0) == ("call", "0x401ad7"), "")
     _ph = page4.Page4Mixin.p4_43c344_player_hit
     _phd = {i.address: (i.mnemonic, i.op_str)
             for i in _mdk.disasm(img[0x43C344 - ib:0x43C3A6 - ib], 0x43C344)}
