@@ -1037,7 +1037,10 @@ class Pages(Page4Mixin):
             self.page13_enter()
         elif self.page == 4:
             self.p4_enter()                       # 0x4593C4 0x4505B0
-            self.p4_454950_init()                 # 0x45952C → 0x401B4F → 0x454950
+            # 0x454950 不属于页4：页机映射（0x4593A7 dec → byte[0x459618+i] → 0x4595E4 跳表）
+            # 页4 → idx 3 → arm 3 = 0x4593C2；0x45952A(0x454950) 是 **页15**（idx 10）的进场。
+            # 之前在这里顺带调它，会让页15 的舞台总控 0x6B000001 在 f0 tick，
+            # 其行为 0x443606 调 0x43A320 把 0x4AD4CC 清空 ⇒ 开场 0x42 实体全被抹掉。
             self.p4_enter_ok = self.flags.is_empty()   # 0x4593C9 test al ⇒ 决定是否进帧循环
         else:
             self.log(f"page {self.page} 未实现 → quit")
