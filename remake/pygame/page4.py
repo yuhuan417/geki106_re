@@ -2325,8 +2325,9 @@ class Page4Mixin:
             if a.s32(0x18) <= 1:                          # 0x43C212 ja → 血量>1 才走扣血
                 self.p4_stat[0xC2] = self.p4_stat.get(0xC2, 0) + 1   # 0x43C21B.. 最后一击特判（待实现）
         elif t == 0x0B000001:                             # 0x43C190 自机被击中
-            # 0x43C38B/0x43C395 的两个子系统钩子（0x460C00(0x4CD590)、0x45F570(0x4CD4A0)）
-            # 本体尚未实现，见 §15；此处只做已定案的两条清零。
+            # 0x43C38B 的 0x460C00(0x4CD590)（死亡演出/计分链）**尚未实现**，见 §15；
+            # 0x43C395 的 0x45F570(0x4CD4A0)（量表重置）已实现。
+            self.p4_45f570()                              # 0x43C395
             b.d32(0x10, 0)                                # 0x43C39F byte[+0x10] = 0
             b.d32(0x18, 0)                                # 0x43C3A2 [+0x18] = 0
             return
@@ -2454,6 +2455,39 @@ class Page4Mixin:
     def p4_frame_no(self) -> int:
         """`[0x56CCA8]`：全局帧计数器（`0x451442` 每帧 ++）。"""
         return int(getattr(self, "p4_frames", 0))
+
+    def p4_45f660(self) -> None:
+        """`0x401FD2` → `0x45F660(0x4CD4A0)`：`[+0x30] = max(0, [+0x30] − 5)`（饱和减 5）。
+
+        ```
+        0x45F660 eax = [ecx+0x30] ; 0x45F663 cmp eax,5 ; 0x45F666 jbe → 置 0 ; 否则 eax -= 5
+        ```
+        """
+        v = self.p4_stat.get(0x4CD4A0 + 0x30, 0) & 0xFFFFFFFF
+        self.p4_stat[0x4CD4A0 + 0x30] = (v - 5) & 0xFFFFFFFF if v > 5 else 0
+
+    def p4_45f570(self) -> None:
+        """`0x45F570(0x4CD4A0)`：自机被击破后的量表重置（**唯一**把 `+0x26` 写成 `0xA0` 的地方）。
+
+        ```
+        0x45F573 0x401FD2→0x45F660               ; [+0x30] 饱和减 5
+        0x45F578 ax = word[+0x2C]
+        0x45F57C ecx = (movsx(ax) >= 2) ? 2 : movsx(ax)
+        0x45F58A eax = ax − ecx                  ; 最多减 2
+        0x45F58C word[+0x26] = 0xA0              ; ★ 正是 0x45FAB0 比较的字段
+        0x45F592 word[+0x2C] = ax
+        0x45F596 word[+0x28] = 0
+        0x45F59C byte[+0x2A] = 0
+        ```
+        """
+        self.p4_45f660()                                   # 0x45F573
+        ax = self.p4_stat.get(0x4CD4A0 + 0x2C, 0) & 0xFFFF
+        sax = ax - 0x10000 if ax & 0x8000 else ax          # 0x45F580 movsx
+        d = 2 if sax >= 2 else sax                         # 0x45F583 / 0x45F585
+        self.p4_stat[0x4CD4A0 + 0x26] = 0xA0               # 0x45F58C
+        self.p4_stat[0x4CD4A0 + 0x2C] = (ax - d) & 0xFFFF  # 0x45F592
+        self.p4_stat[0x4CD4A0 + 0x28] = 0                  # 0x45F596 word
+        self.p4_stat[0x4CD4A0 + 0x2A] = 0                  # 0x45F59C byte
 
     def p4_4cd4a0_ge_a0(self) -> bool:
         """`0x4016EF`→`0x45FAB0`：`word[0x4CD4A0+0x26] >= 0xA0`（真 = 达标）。"""

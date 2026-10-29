@@ -1094,6 +1094,27 @@ def main():
           "0x0B000001" in open("remake/pygame/page4.py", encoding="utf-8").read()
           and "t == 0x10000001" not in open("remake/pygame/page4.py", encoding="utf-8").read(), "")
 
+    # ---- §16.197 量表重置 0x45F570 / 0x45F660 ----
+    check("0x45F660 是 max(0, [+0x30] − 5)（jbe 置 0 / 否则 add eax,−5）",
+          img[0x45F660 - ib:0x45F677 - ib] == bytes([0x8B, 0x41, 0x30, 0x83, 0xF8, 0x05, 0x76, 0x07,
+                                                     0x83, 0xC0, 0xFB, 0x89, 0x41, 0x30, 0xC3,
+                                                     0xC7, 0x41, 0x30, 0x00, 0x00, 0x00, 0x00, 0xC3]),
+          img[0x45F660 - ib:0x45F677 - ib].hex())
+    check("0x45F570 把 word[+0x26] 写成 0xA0（66 C7 46 26 A0 00）",
+          img[0x45F58C - ib:0x45F592 - ib] == bytes([0x66, 0xC7, 0x46, 0x26, 0xA0, 0x00]),
+          img[0x45F58C - ib:0x45F592 - ib].hex())
+    check("0x45F570 的 [+0x2C] 最多减 2（cmp ax,2 / movsx / jl / mov ecx,2）",
+          img[0x45F57C - ib:0x45F58A - ib] == bytes([0x66, 0x3D, 0x02, 0x00, 0x0F, 0xBF, 0xC8,
+                                                     0x7C, 0x05, 0xB9, 0x02, 0x00, 0x00, 0x00]),
+          img[0x45F57C - ib:0x45F58A - ib].hex())
+    check("0x45FAB0 读的 +0x26 正是 0x45F570 写的 +0x26（同字段闭环）",
+          img[0x45FAB2 - ib:0x45FAB8 - ib] == bytes([0x66, 0x81, 0x79, 0x26, 0xA0, 0x00])
+          and b"\x66\xc7\x46\x26\xa0\x00" in img[0x45F570 - ib:0x45F5A1 - ib], "")
+    _src = open("remake/pygame/page4.py", encoding="utf-8").read()
+    check("复刻侧 p4_45f570 / p4_45f660 已定义并接进命中回调",
+          "def p4_45f570(" in _src and "def p4_45f660(" in _src
+          and "self.p4_45f570()" in _src, "")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
