@@ -1527,6 +1527,14 @@ def main():
     _pn2_e = page4.Ent(0, 0, 0x1, 0)
     _pn2_e.node = _Nd2()
     _pn2.p4_445ece(_pn2_e, (0, 0, 0, 1))
+    _fids = [(7 if not b2 else 0xF) + op * 2 + a1
+             for b2 in (0, 1) for op in range(4) for a1 in (0, 1)]
+    check("0x446470 的 fid = (7|0xF) + op*2 + arg1 ∈ 7..0x16；0x498A88 表 24 条（fid 24 起全 0），不越界",
+          min(_fids) == 7 and max(_fids) == 0x16
+          and img[0x498A88 - ib + 23 * 14] == 0x01                 # fid 23 仍是有效行
+          and img[0x498A88 - ib + 24 * 14:0x498A88 - ib + 25 * 14] == bytes(14)
+          and img[0x446475 - ib:0x446475 - ib + 5] == bytes([0x6A, 0x02, 0xB9, 0xB0, 0xB5])
+          and img[0x446492 - ib:0x446492 - ib + 2] == bytes([0x83, 0xC0]), "")
     check("0x435440 的条件过滤：byte[0x56CCB2] 非零时只放行 (类型 & 0x3F000000)==0x32000000",
           _Z().p4_435440("ui49c", 0x12061128) is True
           and _Z({0x56CCB2: 1}).p4_435440("ui49c", 0x12061128) is False
