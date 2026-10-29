@@ -51,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--video", default="", help="强制 SDL 视频驱动（x11 / wayland / dummy）")
     ap.add_argument("--fixed", action="store_true", help="不按真实时间，尽快跑帧")
     ap.add_argument("--debug-hud", action="store_true", help="叠加调试信息（非原作内容）")
+    ap.add_argument("--ptr", action="store_true",
+                    help="叠加虚拟指针十字（非原作内容；原作只有硬件光标，见 0x458CB0）")
+    ap.add_argument("--no-grab", action="store_true",
+                    help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
     ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
@@ -101,8 +105,19 @@ def main(argv: list[str] | None = None) -> int:
         elif _drv == "dummy":
             print("[video] 警告：当前是 dummy 驱动 ⇒ 不会弹窗！WSLg 请执行 "
                   "export DISPLAY=:0（或 unset SDL_VIDEODRIVER）后重跑。", file=sys.stderr, flush=True)
-    # 原作每帧 SetCursorPos(320,240) + 相对位移采样，系统光标不可见
+    # 原作每帧 SetCursorPos(320,240) + 相对位移采样（0x44EB60 → 0x44E9xx），系统光标不可见。
+    # 重制版对应：隐藏光标 + **相对模式 + 抓取**，否则窗口一旦失焦/指针移出 640×480，
+    # SDL 就不再给 rel 位移，表现就是"点了有反应，但移动像是没被捕获"。
     pygame.mouse.set_visible(False)
+    _grab = not args.headless and not args.no_grab
+    if _grab:
+        try:
+            pygame.event.set_grab(True)
+            pygame.mouse.set_relative_mode(True)
+            print("[input] 相对鼠标模式：已开启（指针被捕获，F1 释放/再次捕获）", flush=True)
+        except Exception as _e:                        # WSLg/Wayland 可能不支持
+            _grab = False
+            print(f"[input] 相对鼠标模式不可用（{_e}）⇒ 退化为窗口内相对位移", file=sys.stderr, flush=True)
     clock_font = pygame.font.Font(None, 16) if args.debug_hud else None
 
     data = geki.load_data()
@@ -164,6 +179,15 @@ def main(argv: list[str] | None = None) -> int:
                     pages.finish(); pages.page = 3; pages.enter()
                 elif ev.key == pygame.K_q:
                     running = False
+                elif ev.key == pygame.K_F1:
+                    _grab = not _grab
+                    try:
+                        pygame.event.set_grab(_grab)
+                        pygame.mouse.set_relative_mode(_grab)
+                    except Exception:
+                        pass
+                    pygame.mouse.set_visible(not _grab)
+                    print(f"[input] 相对鼠标模式：{'开' if _grab else '关'}", flush=True)
             elif ev.type == pygame.MOUSEMOTION:
                 # 位移要跨"非到期"循环累积，否则会随 build 一起丢掉
                 pend_dx += ev.rel[0]
@@ -212,6 +236,13 @@ def main(argv: list[str] | None = None) -> int:
                 rgb = rgb[::-1]
             rgb = np.ascontiguousarray(rgb.transpose(1, 0, 2))
             pygame.surfarray.blit_array(screen, rgb)
+            if args.ptr:
+                # 开发辅助（非原作内容）：把虚拟指针 [0x4AB59C]/[0x4AB5A0] 画出来
+                px = int(inp.x)
+                py = 479 - int(inp.y) if geki.FLIP_SCREEN else int(inp.y)
+                if 0 <= px < 640 and 0 <= py < 480:
+                    pygame.draw.line(screen, (255, 0, 255), (px - 6, py), (px + 6, py))
+                    pygame.draw.line(screen, (255, 0, 255), (px, py - 6), (px, py + 6))
             if args.debug_hud:
                 hud = (f"page {pages.page} frame {frame} flags 0x{flags.bits:X} "
                        f"ptr ({inp.x},{inp.y})")
