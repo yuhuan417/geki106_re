@@ -1501,6 +1501,21 @@ def main():
     _sn_n = _Z().p4_45ff80([_sn_e1, _sn_e2], _sn_buf, 0)
     _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
     _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
+    _pl = _Z()
+    _pl_e = page4.Ent(0, 0, 0x1, 0)
+    _pl.p4_445ece(_pl_e, (0, 0, 0, 1))
+    _pl2 = _Z()
+    _pl2.p4_stat[0x4AB5B0 + 4] = 2          # bit2 已置位 ⇒ edx = 4
+    _pl2_e = page4.Ent(0, 0, 0x1, 0)
+    _pl2.p4_445ece(_pl2_e, (0, 0, 0, 0))
+    check("0x445ECE 自机构造器：半径 0xA、alive=0、HP=1、索引 {0,5,6,7}、"
+          "[+0x20]=([rec+0xC]==1 ? -1 : 0)、精灵 y = op*0x30+0x2F",
+          _pl_e.g32(0x0C) == 0xA and _pl_e.m[0x10] == 0 and _pl_e.g32(0x18) == 1
+          and _pl_e.g32(0x40) == 0x4466F0 and _pl_e.g32(0x20) == 0xFFFFFFFF
+          and _pl.p4_stat["player_sprite_y"] == 0x2F
+          and _pl2_e.g32(0x40) == 0x446A10 and _pl2_e.g32(0x20) == 0
+          and page4.P4_PLAYER_BEH == (0x4466F0, 0x4467D0, 0x446890, 0x446950,
+                                      0x446A10, 0x446AD0, 0x446B50, 0x446BD0), "")
     _sb = _Z()
     _sb.ui4cc = []
     _sb.ui43c = []

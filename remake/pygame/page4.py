@@ -2197,6 +2197,9 @@ for _a, _spec in P4_SPAWN_SLOTS.items():
     globals()[f"_beh_p4slot_{_a:06X}"] = _p4_slot_behaviour(_spec)
 
 
+P4_PLAYER_BEH = (0x4466F0, 0x4467D0, 0x446890, 0x446950,
+                 0x446A10, 0x446AD0, 0x446B50, 0x446BD0)   # 0x445ED5..0x45F015
+
 P4_BEH: dict[int, object] = {
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
@@ -3743,6 +3746,55 @@ class Page4Mixin:
         if h <= e.g32(0x48):                                   # 0x43AE8C
             return 0
         return (h - e.g32(0x48)) & 0xFFFFFFFF                  # 0x43AE8E
+
+    def p4_45aff0(self, mask: int) -> int:
+        """`0x45AFF0(mgr, mask)`：`word[mgr+4] & mask` 非零则返回 1，否则 0。"""
+        return 1 if (self.p4_stat.get(0x4AB5B0 + 4, 0) & mask) else 0
+
+    def p4_445ece(self, e, rec=None) -> None:
+        """`0x445C00` 的 **type-1（自机）构造器**，逐条按 `0x445ECE..0x445F9B`。
+
+        ```
+        0x445ECE 0x45AFF0(0x4AB5B0, 2) → al          ; bit2 是否已置位
+        0x445ED5..0x45F015 行为表 8 项：
+            0x4466F0 0x4467D0 0x446890 0x446950 0x446A10 0x446AD0 0x446B50 0x446BD0
+        0x45F1C edx = (al != 0) ? 4 : 0              ; neg/sbb/and 4
+        0x45F31 eax = 0x45AFC0(0x4AB5B0, 0xC000)     ; 操作器 0..3
+        0x45F3C idx = edx + eax                      ; ∈ {0,5,6,7}
+        0x45F3E [e+0xC] = 0xA                        ; 半径 10
+        0x45F45 byte[e+0x10] = 0                     ; ★ alive 初值 0
+        0x45F49 [e+0x1C] = 0
+        0x45F4C [e+0x40] = 行为表[idx]
+        0x45F56 eax = ([rec+0xC] == 1) ? -1 : 0      ; 0x45F59 dec/neg/sbb
+        0x45F67 [e+0x20] = eax
+        0x45F5A..0x45F6A [e+0x24]/[0x28]/[0x2C]/[0x30] = 0
+        0x45F6D [e+0x18] = 1                         ; HP
+        0x45F74 [显示节点] = 0
+        0x45F80 op = 0x45AFC0(0x4AB5B0, 0xC000)
+        0x45F93 精灵 y = op*0x30 + 0x2F               ; push 给 0x45A7xx 切矩形
+        ```
+
+        `0x45F9B` 之后那条矩形设置调用尚未读（§15），此处只把算好的 y 记到
+        `p4_stat["player_sprite_y"]`，**不假装设置**。
+        """
+        had_bit2 = self.p4_45aff0(2)                          # 0x45F015
+        self.p4_45af30(2)                                     # 0x445ECE push 2
+        edx = 4 if had_bit2 else 0                            # 0x45F1C
+        op = self.p4_afc0(0xC000)                             # 0x45F31
+        idx = (edx + op) & 0xF                                # 0x45F3C
+        e.d32(0x0C, 0xA)                                      # 0x45F3E
+        e.m[0x10] = 0                                         # 0x45F45
+        e.d32(0x1C, 0)                                        # 0x45F49
+        e.d32(0x40, P4_PLAYER_BEH[idx % len(P4_PLAYER_BEH)])  # 0x45F4C
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x20, 0xFFFFFFFF if a3 == 1 else 0)             # 0x45F56/0x45F67
+        for off in (0x24, 0x28, 0x2C, 0x30):                  # 0x45F5A..0x45F6A
+            e.d32(off, 0)
+        e.d32(0x18, 1)                                        # 0x45F6D
+        e.d32(0x38, 0)                                        # 0x45F74
+        op2 = self.p4_afc0(0xC000)                            # 0x45F80
+        self.p4_stat["player_sprite_y"] = op2 * 0x30 + 0x2F   # 0x45F93
+        self.p4_stat["player_op"] = op2
 
     def p4_45af30(self, bits: int) -> int:
         """`0x45AF30(mgr, bits)`：`word[mgr+4] |= bits`，返回新值。"""
