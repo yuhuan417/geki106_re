@@ -3751,6 +3751,23 @@ class Page4Mixin:
         """`0x45AFF0(mgr, mask)`：`word[mgr+4] & mask` 非零则返回 1，否则 0。"""
         return 1 if (self.p4_stat.get(0x4AB5B0 + 4, 0) & mask) else 0
 
+    @staticmethod
+    def p4_45a750(out, a: int, b: int, c: int, d: int):
+        """`0x45A750(out, a, b, c, d)` = **纯粹的四 dword 打包**：`out = (a, b, c, d)`。
+
+        ```
+        0x45A750 eax = [esp+4] = out ; 0x45A754 ecx = [esp+0xC] = b
+        0x45A75A esi = [esp+0x10](原 +8) = a ; 0x45A760 edx = [esp+0x1C](原 +0x14) = d
+        0x45A765 edi = [esp+0x1C](原 +0x10) = c
+        0x45A769 [out]=a ; 0x45A76B [out+4]=b ; 0x45A76E [out+8]=c ; 0x45A773 [out+0xC]=d
+        ```
+        """
+        out[0] = a & 0xFFFFFFFF
+        out[1] = b & 0xFFFFFFFF
+        out[2] = c & 0xFFFFFFFF
+        out[3] = d & 0xFFFFFFFF
+        return out
+
     def p4_445ece(self, e, rec=None) -> None:
         """`0x445C00` 的 **type-1（自机）构造器**，逐条按 `0x445ECE..0x445F9B`。
 
@@ -3795,6 +3812,17 @@ class Page4Mixin:
         op2 = self.p4_afc0(0xC000)                            # 0x45F80
         self.p4_stat["player_sprite_y"] = op2 * 0x30 + 0x2F   # 0x45F93
         self.p4_stat["player_op"] = op2
+        # 0x445F93..0x445FAD：矩形 = (esi=0, op*0x30, 0x2F, op*0x30+0x2F)，47x47 一格
+        rect = self.p4_45a750([0, 0, 0, 0], 0, op2 * 0x30, 0x2F, op2 * 0x30 + 0x2F)
+        node = getattr(e, "node", None)
+        if node is not None:
+            node.src = tuple(rect)                            # 0x445FC6 [节点+4..+0x10]
+            nx, ny = p4_45A690(e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+            node.dst = (nx, ny)                               # 0x445FF1 [节点+0x14]/[+0x18]
+            node.frame = 0                                    # 0x445FFF byte[节点+0x1C] = 0
+        p4_446470(self, e, 0, 1)                              # 0x446003
+        if rec is not None and len(rec) >= 2:                  # 0x446008
+            self.p4_player_pos = (rec[0], rec[1])              # 0x56CC8C / 0x56CC90
 
     def p4_45af30(self, bits: int) -> int:
         """`0x45AF30(mgr, bits)`：`word[mgr+4] |= bits`，返回新值。"""

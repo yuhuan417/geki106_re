@@ -1364,10 +1364,15 @@ def main():
           img[0x43C525 - ib:0x43C52B - ib] == bytes([0x0F, 0x87, 0x1C, 0x04, 0x00, 0x00])
           and img[0x43C53B - ib:0x43C541 - ib] == bytes([0x0F, 0x87, 0x8C, 0x03, 0x00, 0x00])
           and img[0x43C557 - ib:0x43C55D - ib] == bytes([0x0F, 0x85, 0x65, 0x04, 0x00, 0x00]), "")
+    class _ZK:
+        def test(self, b):
+            return False
     class _Z(page4.Page4Mixin):
         def __init__(self, stat=None):
             self.calls = []
             self.p4_stat = dict(stat or {})
+            self.keys = _ZK()
+            self.p4_player_pos = None
         def _p4_q(self, n):
             return n
         def spawn(self, *a):
@@ -1501,6 +1506,34 @@ def main():
     _sn_n = _Z().p4_45ff80([_sn_e1, _sn_e2], _sn_buf, 0)
     _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
     _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
+    class _KN:
+        def test(self, b):
+            return False
+    class _PN(page4.Page4Mixin):
+        def __init__(self):
+            self.p4_stat = {}
+            self.keys = _KN()
+            self.p4_player_pos = None
+    class _Nd2:
+        src = None
+        dst = None
+        frame = None
+    _pn = _PN()
+    _pn_e = page4.Ent(0x40, 0x50, 0x1, 0)
+    _pn_e.node = _Nd2()
+    _pn.p4_445ece(_pn_e, (0x11, 0x22, 0, 0))
+    _pn2 = _PN()
+    _pn2.p4_stat[0x4AB5B0 + 4] = 0
+    _pn2_e = page4.Ent(0, 0, 0x1, 0)
+    _pn2_e.node = _Nd2()
+    _pn2.p4_445ece(_pn2_e, (0, 0, 0, 1))
+    check("0x445ECE 尾段：0x45A750 是四 dword 打包（out=(a,b,c,d)）；"
+          "矩形 = (0, op*0x30, 0x2F, op*0x30+0x2F)；dst=(x-0x18,y-0x18)；"
+          "frame=0；随后 0x446470(e,0,1)；[0x56CC8C]=rec[0]",
+          _pn_e.node.src == (0, 0, 47, 47)
+          and _pn_e.node.dst == (0x40 - 0x18, 0x50 - 0x18)
+          and _pn_e.node.frame == 0
+          and _pn.p4_player_pos == (0x11, 0x22), "")
     _pl = _Z()
     _pl_e = page4.Ent(0, 0, 0x1, 0)
     _pl.p4_445ece(_pl_e, (0, 0, 0, 1))
