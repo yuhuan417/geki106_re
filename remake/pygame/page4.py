@@ -2532,10 +2532,35 @@ class Page4Mixin:
     def p4_42C600(self, e) -> None:
         """`0x42C600`（`0x401776` 蹦床）：12 个槽发射后的**追加两发追踪弹**（§16.188）。
 
-        **未实现**：函数体已读出主要结构，但两发各自的发射原点要用到多层 `[esp+0x1x]`
-        栈偏移换算，尚未逐项对齐；此处留空而**不做近似**（不留任何虚构副作用）。
+        ```
+        0x42C604 ebx = [ecx+0x20]                     ; 发射者子对象
+        0x42C607 if ([ebx+0x2C] >= 0) → ret           ; jge 整段跳过
+        0x42C639 0x4021EE(0x4AD43C, &pt, &pt2)        ; 目标点 = 自机
+        第一发：0x42C6A0 原点 (x+0xC, y−0xC)，默认 0xF3460CBA = (−12.73, +12.73)
+                0x42C66A jns ⇒ 仅当 (ty−y+0xC) < 0 才改朝自机
+        第二发：0x42C75C 原点 (x+0xC, y+0xC)，默认 0x0CBA0CBA = (+12.73, +12.73)
+                0x42C72C jle ⇒ 仅当 (ty−y−0xC) > 0 才改朝自机
+        定向速度 = 0x40105A 把 (tx−x−0xC, ty−y±0xC) 定长到 0x1200（= 18.0 像素/帧）
+        ```
         """
-        return None
+        owner = e.p.get("owner")
+        if owner is None:
+            return
+        if owner.s32(0x2C) >= 0:                       # 0x42C60A test / jge 0x42C79B
+            return
+        ox, oy = owner.s32(0x04), owner.s32(0x08)
+        tx, ty = int(self.inp.x), int(self.inp.y)      # 0x4021EE 取到的目标点
+        for dx, dy, dflt, above in ((0xC, -0xC, 0xF3460CBA, True),
+                                    (0xC, 0xC, 0x0CBA0CBA, False)):
+            v = dflt
+            ddy = ty - oy - dy                         # 相对各自原点
+            if (ddy < 0) if above else (ddy > 0):      # 0x42C66A jns / 0x42C72C jle
+                vx, vy = [tx - ox - 0xC], [ddy]
+                if self._vset(vx, vy, 0x1200):         # 0x40105A 定长
+                    v = ((vy[0] << 16) | (vx[0] & 0xFFFF)) & 0xFFFFFFFF
+            self.spawn(self._p4_q("ui46c"), 0x12061124,
+                       ox + dx, oy + dy, v)            # 0x42C6A0 / 0x42C75C
+
 
     def p4_43B070(self, e, arg: int) -> None:
         """`0x43B070`：朝 `[0x56CC8C]/[0x56CC90]` 生成一枚实体进 **0x4AD49C** 队列

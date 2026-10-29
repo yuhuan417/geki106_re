@@ -929,6 +929,27 @@ def main():
           [hex(a) for a, (t, sh, m) in slots.items()
            if not callable(sh[0][1]) and _vel_px(sh[0][1])[1] < 0] == ["0x42d6a0"], "")
 
+    # ---- 0x42C600 追加两发（§16.188）----
+    def _imm32_after(addr):
+        return int.from_bytes(img[addr - ib:addr - ib + 5], "little") >> 8
+
+    check("0x42C600 两发默认速度 0xF3460CBA / 0x0CBA0CBA",
+          _imm32_after(0x42C634) == 0xF3460CBA and _imm32_after(0x42C6E5) == 0x0CBA0CBA,
+          f"{hex(_imm32_after(0x42C634))} / {hex(_imm32_after(0x42C6E5))}")
+    check("两发弹型都是 0x12061124 且定长 0x1200",
+          _imm32_after(0x42C6A4) == 0x12061124 and _imm32_after(0x42C766) == 0x12061124
+          and _imm32_after(0x42C670) == 0x1200, "")
+    check("两发原点：(x+0xC, y−0xC) 与 (x+0xC, y+0xC)",
+          img[0x42C6A1 - ib:0x42C6A4 - ib] == bytes([0x83, 0xE8, 0x0C])   # sub eax,0xC
+          and img[0x42C6A9 - ib:0x42C6AC - ib] == bytes([0x83, 0xC1, 0x0C])  # add ecx,0xC
+          and img[0x42C763 - ib:0x42C766 - ib] == bytes([0x83, 0xC2, 0x0C])
+          and img[0x42C76B - ib:0x42C76E - ib] == bytes([0x83, 0xC0, 0x0C]),
+          img[0x42C6A1 - ib:0x42C6AC - ib].hex())
+    check("门槛是 [ebx+0x2C] >= 0 时整段跳过（jge 到函数尾）",
+          img[0x42C607 - ib:0x42C612 - ib] == bytes([0x8B, 0x43, 0x2C, 0x85, 0xC0, 0x0F, 0x8D,
+                                                     0x89, 0x01, 0x00, 0x00]),
+          img[0x42C607 - ib:0x42C612 - ib].hex())
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
