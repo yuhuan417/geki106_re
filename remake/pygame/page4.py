@@ -437,6 +437,76 @@ def _beh_23000008(self, e) -> bool:
     return e.g32(0x18) != 0
 
 
+def _beh_23000005_06(self, e) -> bool:
+    """`0x401BD1` → `0x40E520`（类型 0x23000005/06）：连发 + 定时变轨 + 子实体死后随机镜像。
+
+    ```
+    ① 0x40E528 if ([+0x2C]) { 0x4023C4(&rec, x, y, 0x23000006, [+0x2C]);
+                             do { rec.速度 = [+0x2C]*-8; 0x401FA5(0x4AD43C,&rec) } while (--[+0x2C]); }
+    ② [0x20]==0    → [+0x24]=-3; [+0x28]=(y<=0xF0)?-3:3
+       [0x20]==0x4B → [+0x24]=-1; [+0x28]=-([+0x28]*4)/3
+       [0x20]==0x78 → 仅 0x23000006：0x40213F(ent,0)
+       [0x20]==0x96 → [+0x24]=4;  [+0x28]=-([+0x28]/4)
+    ③ [+0x1C]!=0 && [[+0x1C]+0x34]==0 → if ([+0x20]<0) return 0;
+                                        [+0x1C]=0; [+0x20]=0x14A; rand&1 随机镜像
+    0x40E6A3 [+0x20]++; x += [+0x24]; y += [+0x28]; dst=(x-0x18,y-0x18)
+    ```
+    """
+    n = e.s32(0x2C)
+    if n:
+        for i in range(n):                                    # ① 0x40E575 循环
+            v = (n - i)
+            self.spawn(self.p4_q43c, 0x23000006, e.s32(0x04), e.s32(0x08))
+            if self.p4_q43c:
+                self.p4_q43c[-1].d32(0x28, (-8 * v) & 0xFFFFFFFF)   # 0x40E57C neg/shl 3
+        e.d32(0x2C, 0)
+    if e.s32(0x1C) == 0 and e.s32(0x14) != 0x23000005 and e.s32(0x20) == 0x172:
+        e.d32(0x1C, 0)                                        # 0x40E599
+        self.p4_43B070(e, e.s32(0x58) + 0x80)
+    t = e.s32(0x20)
+    if t == 0:                                                # 0x40E5D9
+        e.d32(0x24, 0xFFFFFFFD)
+        e.d32(0x28, 0xFFFFFFFD if e.s32(0x08) <= 0xF0 else 3)  # 0x40E5DE
+    elif t == 0x4B:                                           # 0x40E5FA
+        e.d32(0x24, 0xFFFFFFFF)
+        v = e.s32(0x28) * 4
+        q = -v // 3 if v >= 0 else -((-v) // 3)               # 0x40E602 imul 0x55555556（向零取整）
+        e.d32(0x28, q & 0xFFFFFFFF)
+    elif t == 0x78 and e.s32(0x14) == 0x23000006:              # 0x40E621
+        self.p4_43B070(e, 0)
+    elif t == 0x96:                                           # 0x40E63A
+        e.d32(0x24, 4)
+        v = e.s32(0x28)
+        e.d32(0x28, (-(v // 4)) & 0xFFFFFFFF)                  # 0x40E64C 向零取整
+    child = e.g32(0x1C)
+    if child and not self.p4_child_alive(child):               # 0x40E659
+        if e.s32(0x20) < 0:
+            return False
+        vx, vy = e.s32(0x24), e.s32(0x28)
+        e.d32(0x1C, 0)
+        e.d32(0x20, 0x14A)
+        if rng.randrange(2):                                   # 0x40E68B rand&1
+            e.d32(0x24, vy & 0xFFFFFFFF)
+            e.d32(0x28, (-vx) & 0xFFFFFFFF)
+        else:
+            e.d32(0x28, (-vy) & 0xFFFFFFFF)
+            e.d32(0x24, vx & 0xFFFFFFFF)
+    e.d32(0x20, (t + 1) & 0xFFFFFFFF)                          # 0x40E6AF
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x24)) & 0xFFFFFFFF)      # 0x40E6B8
+    e.d32(0x08, (e.s32(0x08) + e.s32(0x28)) & 0xFFFFFFFF)      # 0x40E6B0
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return True
+
+    def p4_child_alive(self, ptr: int) -> bool:
+        """`[[+0x1C]+0x34]`：子实体存活标志。"""
+        for q in (self.p4_q43c, self._p4_q("ui49c")):
+            for x in q:
+                if x.g32(0x34):
+                    return True
+        return False
+
+
 def _beh_23000009(self, e) -> bool:
     """`0x401181` → `0x40EAF0`：正弦航迹 + 周期射击。
 
@@ -618,6 +688,7 @@ P4_BEH: dict[int, object] = {
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
     0x40EAF0: _beh_23000009,
+    0x40E520: _beh_23000005_06,
     0x40E230: _beh_23000003,
 }     # 行为地址 → 实现函数（每实现一个就登记，未登记即"未实现"）
 
