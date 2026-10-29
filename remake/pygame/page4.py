@@ -713,7 +713,6 @@ class Page4Mixin:
         self.p4_collide()                         # S17-S20 0x451461..0x4514A6
         self.p4_bg_update()                       # S21 第一条 0x458E75 → 0x457BD0
         self.p4_dispatch()                        # S21 0x4514AD 0x458E70
-        self.p4_bg_draw()                         # S22 第一条 0x458EF5 → 0x457CB0
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
         self.band_advance()                       # 0x456270（0x458EF0 内尾调）
         self._p4_dbg()
@@ -913,7 +912,7 @@ class Page4Mixin:
         if f & 0x0010:
             self._bg_shift(slot, 1)                      # 0x456F70（y）
         if f & 0x1000:
-            self._bg_shift(slot, 3)                      # 0x457000
+            self._bg_init_y(slot)                        # 0x457000
         if f & 0x10000:
             self._bg_grid(slot)                          # 0x457050
 
@@ -955,6 +954,26 @@ class Page4Mixin:
         for i in range(n):
             slot.grid[i][0] = (edx >> 6) & 0xFFFFFFFF
             eax = (eax + ((eax * slot.params[6]) >> 6)) & 0xFFFFFFFF
+            edx = (edx + eax) & 0xFFFFFFFF
+
+    def _bg_init_y(self, slot) -> None:
+        """`0x457000`（bit12）：与 `0x456FB0` 同构，写每格的 y（像素）。
+
+        ```
+        edx = P[1]（slot+0x34）; eax = P[4]（slot+0x40）; 增长率 = P[7]（slot+0x4C）
+        for i: grid[i].y = edx >> 6; eax += (eax * P[7]) >> 6; edx += eax
+        ```
+        """
+        n = slot.params[10]
+        if n <= 0 or n > 894:
+            return
+        while len(slot.grid) < n:
+            slot.grid.append([0, 0, 0])
+        edx = slot.params[1]
+        eax = slot.params[4]
+        for i in range(n):
+            slot.grid[i][1] = (edx >> 6) & 0xFFFFFFFF
+            eax = (eax + ((eax * slot.params[7]) >> 6)) & 0xFFFFFFFF
             edx = (edx + eax) & 0xFFFFFFFF
 
     def _bg_shift(self, slot, axis: int) -> None:
@@ -1057,6 +1076,7 @@ class Page4Mixin:
                     continue
                 l, t, r, b = band.src
                 c.blit(lay.buf, (l, t, r + 1, b + 1), band.dst, key=lay.ckey)
+                self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
 
     def p4_render_ents(self) -> None:
         """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），
@@ -1103,7 +1123,10 @@ class Page4Mixin:
               f"bg_band={[len(x.bands) for x in self.p4_bg[:6]]} "
               f"bg_layer={sorted({b.layer for x in self.p4_bg for b in x.bands})} "
               f"bg_flags={[hex(x.flags) for x in self.p4_bg[:8]]} "
-              f"bg_kind0={[x.grid[0][2] if x.grid else None for x in self.p4_bg[:8]]}", flush=True)
+              f"bg_kind0={[x.grid[0][2] if x.grid else None for x in self.p4_bg[:8]]} "
+              "blits=%d;layers=%s;bb0=%s;p=%s;acc=%d" % (self.p4_stat.get(0xB6,0), sorted(self.layers.tab),
+                  [[b.pos, b.visible, b.kind, b.layer, b.dst] for b in self.p4_bg[0].bands[:2]],
+                  self.p4_bg[0].params[10:15], self.p4_bg[0].acc if self.p4_bg[0].acc < 0x80000000 else self.p4_bg[0].acc - 0x100000000), flush=True)
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。

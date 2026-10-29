@@ -3521,6 +3521,8 @@ class Pages(Page4Mixin):
             lt = self.layers.tab.get(1)
             if lt is not None:
                 c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
+        if getattr(self, "p4_bg", None):
+            self.p4_bg_draw()                           # 0x458EF5 → 0x457CB0（12 槽，最先绘制）
         if getattr(self, "p4_q43c", None):
             self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
         if DRAW_DISPLAY_NODES:
