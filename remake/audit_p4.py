@@ -1234,8 +1234,13 @@ def main():
           and img[0x447C88 - ib:0x447C90 - ib] == bytes([0xC7, 0x44, 0x24, 0x6C, 0xDE, 0x00, 0x00, 0x00])
           and img[0x447C94 - ib:0x447C9C - ib] == bytes([0xC7, 0x44, 0x24, 0x74, 0x22, 0xFF, 0xFF, 0xFF]), "")
 
-    check("0x447640 未登记进 P4_BEH（越界语义无法 1:1 照抄，见 §16.202）",
-          0x447640 not in page4.P4_BEH, "")
+    check("0x447640 已登记进 P4_BEH（§16.205 落地）",
+          0x447640 in page4.P4_BEH and page4.P4_BEH[0x447640] is page4._beh_447640
+          and page4.P4_447640_TAB == (0, 3, 3, 3, 3, 3, 3, 3, 1, 3, 1, 3, 2, 3, 2)
+          and page4.P4_447640_TYPES[6] == 0x11C0A326, "")
+    check("0x447640 的 7 项表与字节表转写成常量且与 exe 一致",
+          [u32(0x4476BD + 8 * k) for k in range(5)]
+          == [0x1180A322, 0x1140A323, 0x11FFA324, 0x1140A325, 0x11C0A326], "")
 
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")

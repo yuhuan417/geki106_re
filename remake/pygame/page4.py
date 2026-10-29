@@ -1449,6 +1449,202 @@ def _beh_446E20(self, e) -> bool:
     return p4_laser(self, e, "e20")
 
 
+P4_447640_TYPES = (0x11FFA321, 0x11FFA321, 0x1180A322, 0x1140A323,
+                   0x11FFA324, 0x1140A325, 0x11C0A326)   # 0x4476A6..0x4476D9
+P4_447640_TAB = (0, 3, 3, 3, 3, 3, 3, 3, 1, 3, 1, 3, 2, 3, 2)  # 0x447DA0
+
+
+def _beh_447640(self, e) -> bool:
+    """`0x4020BD` → `0x447640`（type 6）：7 项扇形爆发 + 十余状态动画 + 每帧轨道三向（§16.202/16.203/16.204）。
+
+    结构（三相位，按 `[sub+0x28]` 与 `byte[sub+0x34]` 分派）：
+
+    ```
+    0x44764C if ([sub+0x28] == 0)  → 相位 0（爆发），末了 jmp 0x4477E9 → return
+    0x44772B if (byte[sub+0x34] != 0) → 0x447802（相位 1b）
+    相位 1a： 0x41000001 + 10 发抖动 0x41000004 → 0x4477E9 → return
+    相位 1b： 0x56CCB3 非 0 时向左飘；飘到 [ent+4] < -[ent+0xC] 则 [sub+0x28]=0 + 结算 + return
+    其后（0x44785A）：状态机 + 0x447C2D 轨道三向，每帧
+    ```
+    """
+    sub = e.p.get("sub")                                 # 0x447649
+    if sub is None:
+        return False                                     # 不可能：type 6 必带子对象
+    if sub.g32(0x28) == 0:                               # 0x44764C
+        self._p4_447640_burst(e)
+        return True
+    if sub.g32(0x34) == 0:                               # 0x44772B
+        self._p4_447640_spawn(e)
+        return True
+    if self.p4_stat.get(0x56CCB3, 0):                    # 0x44780B
+        d = (e.g32(0x2C) - 1) & 0xFFFFFFFF               # 0x447814 dec
+        e.d32(0x2C, d)                                   # 0x447817
+        e.d32(0x04, (e.g32(0x04) + d) & 0xFFFFFFFF)      # 0x44781A
+        node = e.p.get("node")
+        if node is not None:                             # 0x447822 节点 x 同步
+            node.d32(0x14, (node.g32(0x14) + d) & 0xFFFFFFFF)
+        if e.s32(0x04) < -e.s32(0x0C):                   # 0x44782D jge → 状态机
+            sub.d32(0x28, 0)                             # 0x447831
+            # 0x44784B 0x402112(0x4CD4A0, [0x56CC8C], [0x56CC90])：结算调用，目标体未读（§15）
+            return True
+    self._p4_447640_states(e, sub)                       # 0x44785A
+    self._p4_447640_orbit(e)                             # 0x447C2D
+    return True
+
+
+def _p4_447640_burst(self, e) -> None:
+    """相位 0（`0x447657..0x447721`）：音效 + 7 项类型扇形 30 发。"""
+    self.p4_se_pan(0x0E, (e.s32(0x04) - 0x140) << 4)       # 0x44765A 0x450350(0x4AB4B0,0x0E,…)
+    rec = [e.s32(0x04), e.s32(0x08), 0x11FFA321, 0]       # 0x447684
+    idx = (e.s32(0x28) >> 8) & 0xF                        # 0x4476B3/0x4476B6
+    t = P4_447640_TYPES[idx]                              # 0x4476E1（越界见 §16.202）
+    n = 0                                                 # 0x4476E5 计数器 → vel
+    while n < 0x3C:                                       # 0x447707
+        self.spawn(self._p4_q("ui46c"), t, rec[0], rec[1], n)
+        n += 2                                            # 0x447704
+    self.p4_stat[0x56CCB2] = 1                            # 0x44771A
+
+
+def _p4_447640_spawn(self, e) -> None:
+    """相位 1a（`0x447731..0x4477E7`）：0x41000001 一发 + 10 发抖动 0x41000004。"""
+    self.spawn(self._p4_q("ui4cc"), 0x41000001, e.s32(0x04), e.s32(0x08))
+    for _ in range(10):                                   # 0x4477A4 esi = 0xA
+        jx = _random.randrange(0x20) - 0xF
+        jy = _random.randrange(0x20) - 0xF
+        self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                   e.s32(0x04) + jx, e.s32(0x08) + jy, (jx, jy))
+    self._p4_447640_flag()                                # 0x4477E9
+
+
+def _p4_447640_flag(self) -> None:
+    """`0x402400` → `0x45AF60(0x56CCB8, 0x1000)`：置 bit12。"""
+    self._p4_sys = int(getattr(self, "_p4_sys", 0)) | 0x1000
+
+
+def _p4_447640_states(self, e, sub) -> None:
+    """`0x44785A..0x447C2D`：按 `[ent+0x28] & 0xF000` 分派的状态机（§16.203/16.204）。"""
+    n = (e.g32(0x20) + 1) & 0xFFFFFFFF                    # 0x44785D/0x447862
+    e.d32(0x20, n)
+    v = e.g32(0x28)
+    st = v & 0xF000                                       # 0x447863
+    node = e.p.get("node")
+    if node is None:
+        return
+    lo = node.g32(0x04)                                   # 节点 +4
+    hi = node.g32(0x08)                                   # 节点 +8
+
+    def add(dy: int, dh: int) -> None:                    # 0x447C25 0x45A790(node+4,0,dy,0,dh)
+        node.d32(0x04, (node.g32(0x04) + 0) & 0xFFFFFFFF)
+        node.d32(0x08, (node.g32(0x08) + dy) & 0xFFFFFFFF)
+        node.d32(0x0C, (node.g32(0x0C) + 0) & 0xFFFFFFFF)
+        node.d32(0x10, (node.g32(0x10) + dh) & 0xFFFFFFFF)
+
+    def bump(d: int) -> None:                             # 推进状态位
+        e.d32(0x28, (e.g32(0x28) + d) & 0xFFFFFFFF)
+
+    def ceil_div(a: int, b: int):
+        """`0x462D71`：x86 `idiv` 语义（商截断向零、余数随被除数符号）。
+
+        `0x462D8A` 那句 `if (a<0 && r>0) {q++; r-=b;}` 在 x86 下**永远不会触发**
+        （`idiv` 的余数符号跟随被除数，a<0 时 r≤0），是编译器留下的死分支。
+        """
+        q = abs(a) // abs(b)
+        if (a < 0) != (b < 0):
+            q = -q
+        return q, a - q * b
+
+    if st == 0x1000:                                      # 0x44788D/0x4478FF
+        if lo == 0x180:                                   # 0x447905
+            bump(0x1000)                                  # 0x44790D
+        if (n & 3) == 0:                                  # 0x447916
+            add(0x30, 0x30)                               # 0x44791F
+    elif st == 0x2000:                                    # 0x447894/0x4478D4
+        if lo == 0:
+            bump(-0x1000)                                 # 0x4478DF
+        if (n & 3) == 0:
+            add(-0x30, -0x30)
+    elif st == 0x3000:                                    # 0x44789B
+        if lo == 0x120:
+            bump(0x1000)                                  # 0x4478B4
+        if (n & 3) == 0:
+            add(0x30, 0x30)
+    elif st == 0x4000:                                    # 0x447887/0x44792D
+        if lo == 0:
+            bump(-0x1000)
+        if (n & 3) == 0:
+            add(-0x30, -0x30)
+    elif st == 0x5000:                                    # 0x44795F/0x44796F
+        if hi == 0:
+            bump(-0x1000)                                 # 0x447979 add 0xFFFFB000
+        if (n & 7) == 0:
+            add(-0x30, -0x30)
+    elif st in (0x6000, 0x9000):                          # 0x447964 → 0x447BD9
+        if st == 0x9000 and lo == 0xF0:                   # 0x4479EA
+            bump(0x1000)                                  # 0x4479F2
+            if (n & 3) == 0:
+                add(0x30, 0x30)
+        elif st == 0x6000 and (n & 7) == 0:               # 0x447BD9 test bl,7
+            _q, r = ceil_div(hi, 0xC0)                    # 0x447BEB
+            add(-0x90, -0x90) if r == 0x90 else add(0x30, 0x30)
+    elif st == 0x7000:                                    # 0x447876/0x44799C
+        if (n & 7) == 0:
+            if lo == 0x150:                               # 0x4479AD
+                add(-0x60, -0x60)                         # 0x4479B5
+            else:
+                add(0x30, 0x30)                           # 0x447A06
+    elif st == 0x8000:                                    # 0x4479D7/0x447A12
+        k = n & 0xF
+        if k <= 0xE:                                      # 0x447A1A
+            h = P4_447640_TAB[k]                          # 0x447A22
+            if h == 0:                                    # 0x447A2F 分块贴图循环
+                _q, r = ceil_div(hi, 0x90)                # 0x447A3B
+                if r < 0x60:                              # 0x447A46 jge 结束
+                    while True:
+                        add(0x30, 0x30)
+                        _q, r = ceil_div(node.g32(0x08), 0x90)
+                        if r >= 0x60:
+                            break
+            elif h == 1:                                  # 0x447A86
+                add(-0x30, -0x30)
+            elif h == 2:                                  # 0x447A91
+                add(0x30, 0x30)
+    elif st == 0xA000:                                    # 0x4479C6/0x447AA5
+        if lo == 0:
+            bump(-0x1000)
+        if (n & 3) == 0:
+            add(-0x30, -0x30)
+    elif st == 0xB000:                                    # 0x447AD5/0x447B10
+        if not self.p4_stat.get(0x56CCB3, 0):
+            dx = e.s32(0x04) - node.s32(0x04)
+            dy = e.s32(0x08) - node.s32(0x08)
+            self.spawn(self._p4_q("ui4cc"), 0x46000004,
+                       e.s32(0x04) + (((dx * 8 - dx) + 4) >> 3),
+                       e.s32(0x08) + (((dy * 8 - dy) + 4) >> 3))
+    elif st == 0xC000:                                    # 0x447ADC/0x447AE2
+        if node.g32(0x00) == 2 and (self.p4_stat.get(0x56CC4C, 0) >> 0) & 0xFFFF == 9:
+            node.d32(0x00, 3)                             # 0x447B05
+
+
+def _p4_447640_orbit(self, e) -> None:
+    """`0x447C2D..0x447D60`：每帧三向轨道发射（角度步长 113、按半径缩放、>>16）。"""
+    n = e.g32(0x20) & 0x1F
+    ang = n * 113                                         # 0x447C33 lea 链
+    r = e.s32(0x0C)
+    co = p4_sin_q(ang, "cos") * (r >> 1)                  # 0x447C4A..0x447C52
+    sn = p4_sin_q(ang, "sin") * ((r >> 2) + r)            # 0x447C5F..0x447C68
+    many = 7 < n < 0x18                                   # 0x447D10/0x447D17
+    for dx, dy in ((0x100, 0), (-0x80, 0xDE), (-0x80, -0xDE)):   # 0x447C74 表
+        x = e.s32(0x04) + ((co * dy + sn * dx) >> 16)     # 0x447CD3/0x447CDF
+        y = e.s32(0x08) + ((sn * dy + co * dx) >> 16)     # 0x447CD6
+        if many:
+            self.spawn(self._p4_q("ui46c"), 0x10000051, x, y)    # 0x447D20
+        else:
+            self.spawn(self._p4_q("ui4cc"), 0x4100000F, x, y)    # 0x447D3F
+    node = e.p.get("node")
+    if node is not None:                                  # 0x447D66..0x447D80
+        node.d32(0x14, e.s32(0x08) - r)
+
+
 def _beh_447F90(self, e) -> bool:
     """`0x40116D` → `0x447F90`（type 10 行为）：**三向旋转散射**（§16.200/§16.201）。
 
@@ -1800,6 +1996,7 @@ P4_BEH: dict[int, object] = {
     0x447410: _beh_447410,
     0x448C70: _beh_10000001,
     0x447F90: _beh_447F90,
+    0x447640: _beh_447640,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
     0x40EAF0: _beh_23000009,
