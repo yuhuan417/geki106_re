@@ -1,0 +1,15 @@
+; func 0x45b1a0  (12 insns)
+
+0x0045b1a0  push    esi
+0x0045b1a1  mov     esi, ecx
+0x0045b1a3  mov     eax, dword ptr [esi + 4]
+0x0045b1a6  mov     dword ptr [esi], 0x4993b8
+0x0045b1ac  test    eax, eax
+0x0045b1ae  je      0x45b1b9
+0x0045b1b0  push    eax
+0x0045b1b1  call    0x47c7e9   ; call 0x47c7e9
+0x0045b1b6  add     esp, 4
+loc_45b1b9:
+0x0045b1b9  mov     dword ptr [esi + 4], 0
+0x0045b1c0  pop     esi
+0x0045b1c1  ret     

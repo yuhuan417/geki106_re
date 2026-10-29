@@ -3652,15 +3652,13 @@ class Page4Mixin:
             off = 0x740 + (mode + 2 * row) * 0x54
             if not (self._p4_rec_score(off) > score):          # 0x45CA85 ja
                 self.p4_45c570(off, rec)
-                st = self.p4_stat
-                st["45d460_calls"] = st.get("45d460_calls", 0) + 1
+                self.p4_45d460(_p4_s8(t[4]) + 8, score, None)  # 0x45CA9F 0x45D460
             return
         # ① 影子槽（0x45C7E1..0x45C82D）
         shadow = 0x548 + (mode + 2 * rec_mode) * 0x54
         if score > self._p4_rec_score(shadow):
             self.p4_45c570(shadow, rec)
-            st = self.p4_stat
-            st["45d460_calls"] = st.get("45d460_calls", 0) + 1
+            self.p4_45d460(rec_mode + 8, score, None)      # 0x45C829 0x45D460
         # ② 主插入（0x45C82E..0x45C92D）
         col = 8 + mode * 0x54
         ins = 0
@@ -3674,8 +3672,7 @@ class Page4Mixin:
                 src_off = 8 + (mode + 2 * (ebp - 1)) * 0x54
                 dst_off = 8 + (mode + 2 * ebp) * 0x54
                 t[dst_off:dst_off + 0x54] = t[src_off:src_off + 0x54]
-                st = self.p4_stat
-                st["45d3a0_calls"] = st.get("45d3a0_calls", 0) + 1
+                self.p4_45d3a0(ebp, ebp - 1, 0)            # 0x45C8CB 0x45D3A0
                 ebp -= 1
             other = 8 + (mode + 2 * ins + 1) * 0x54            # 0x45C8DF..0x45C8FE
             t[other:other + 4] = b"\x00\x00\x00\x00"
@@ -3703,12 +3700,77 @@ class Page4Mixin:
                 ebp, edi = edi, ebp
         self.p4_45c570(8 + (mode + 2 * ebp) * 0x54,
                        bytearray(t[mode * 0x54 + 0x4A0:mode * 0x54 + 0x4F4]))   # 0x45C9EF
-        st = self.p4_stat
-        st["45d3a0_calls"] = st.get("45d3a0_calls", 0) + 1
+        self.p4_45d3a0(7, ebp, 0)                              # 0x45CA06 0x45D3A0
         if edi != 0:                                           # 0x45CA0B
             self.p4_45c570(8 + (mode + 2 * edi) * 0x54,
                            bytearray(t[mode * 0x54 + 0x3F8:mode * 0x54 + 0x44C]))  # 0x45CA3E
-            st["45d3a0_calls"] = st.get("45d3a0_calls", 0) + 1
+            self.p4_45d3a0(6, edi, 0)                          # 0x45CA50 0x45D3A0
+
+    # ---- 回放/排行文件名与落盘流（0x45CFB0/0x45D3A0/0x45D460）----
+    def p4_45cfb0(self, sel_gmtr: int, sel_mj: int, row: int, i: int) -> str:
+        """`0x45CFB0(this, 流对象, sel1=[mgr+0x20], sel2=[mgr+0x21], row, i)`：
+        **回放文件名构造器**（结果写进流对象；复刻返回字符串）。
+
+        ```
+        0x45CFB7 row == 0x63 → "rp_last.dat"                     （最后一局）
+        0x45CFEC sel1 == 0   → "rp_gm_" else "rp_tr_"            （gm/tr 两档）
+        0x45D01F sel2 == 0   → "m_"      else "j_"               （m/j 两机）
+        0x45D066 sprintf(流, "%s%02d_", 前缀, row+1)             （0x4A4B24）
+        0x45D071 i == 0 → "gek.dat"；i == 1 → "rin.dat"；否则 "kan.dat"
+        ```
+        ⇒ 如 `rp_gm_j01_gek.dat`：gm/tr 档 × m/j 机 × 01..NN 关 × 撃/凛/漢 三段。
+        五个片段串与 "rp_last.dat" 已逐字节核对（0x4A4B00..0x4A4B48）。"""
+        if row == 0x63:
+            return "rp_last.dat"
+        name = "rp_tr_" if sel_gmtr != 0 else "rp_gm_"
+        name += "j_" if sel_mj != 0 else "m_"
+        name += "%02d_" % (row + 1)
+        name += "gek.dat" if i == 0 else ("rin.dat" if i == 1 else "kan.dat")
+        return name
+
+    def p4_45d3a0(self, bl: int, row: int, pad: int) -> None:
+        """`0x45D3A0(0x4CD5D8, bl, row, pad)`：**排行文件行重写**——3 次迭代（i=0..2 =
+        撃/凛/漢）各向两个流（0x5E10FC、0x5E0FF8）写 0x45CFB0 生成的文件名；
+        bl≠0 时 0x463F57(0x5E10FC, 0x5E0FF8)（流间复制），否则 [0x5E6E94](…,1)（CRT 落盘）。
+        内容格式（0x45CFB0 之后的写者）未逐条解码——文件名生成已 1:1，写盘以计数登记。"""
+        st = self.p4_stat
+        for i in range(3):                                  # 0x45D3B0
+            n1 = self.p4_45cfb0(st.get(0x4CD5D8 + 0x20, 0),
+                                st.get(0x4CD5D8 + 0x21, 0), row, i)
+            n2 = self.p4_45cfb0(st.get(0x4CD5D8 + 0x20, 0),
+                                st.get(0x4CD5D8 + 0x21, 0), pad, i)
+            st.setdefault("45d_streams", []).append((hex(0x5E10FC), n1))
+            st.setdefault("45d_streams", []).append((hex(0x5E0FF8), n2))
+            if bl:                                          # 0x45D3ED
+                st["45d3a0_copy"] = st.get("45d3a0_copy", 0) + 1
+            else:
+                st["45d3a0_flush"] = st.get("45d3a0_flush", 0) + 1
+
+    def p4_45d460(self, slot: int, score: int, name_ptr) -> None:
+        """`0x45D460(0x4CD5D8, slot=rec_mode+8, score, &name)`：**新条目 + 回放落盘**。
+
+        ```
+        0x45D498 3× 0x45CFB0(0x5E1304, [+0x20], [+0x21], slot, bl=0..2)   三个分段文件名
+        0x45D4D3 eax = [0x4CD5D8+0x9E37C]（已录帧数）；0x402419(3n+1) 申请槽
+        0x45D4FF 三块 SoA 拷贝：dst = 槽 + i*n，src = 0x4CD5D8+0x30 + i*0x34BC0，
+                  每块 n 字节（dword+余数）——三数组 = 23bit/帧 输入记录（§12）
+        0x45D53C 0x45B340(槽, 3n+1)                                       写回放数据
+        0x45D555 [+0x10] = 槽号、[+0xC] = n、[+0x2C] = arg3、[+0x22] ← arg3 的 10B（名字）
+        0x45D594 3× 0x45CFB0(0x5E1304, …, [+0x1C] 选段) + 0x455090(0x5E1304,1,0)
+        0x45D5B8 0x455640(&[ebp+4], 0x2C, …)                              写 0x2C 字节排行记录
+        ```
+        回放数据文件格式（0x45B340 269 行 / GRPD 头，§15-13）未逐条解码——
+        文件名生成与结构已 1:1，写盘以计数登记。"""
+        st = self.p4_stat
+        n = st.get(0x4CD5D8 + 0x9E37C, 0)
+        for bl in range(3):                                 # 0x45D498
+            nm = self.p4_45cfb0(st.get(0x4CD5D8 + 0x20, 0),
+                                st.get(0x4CD5D8 + 0x21, 0), slot, bl)
+            st.setdefault("45d_streams", []).append((hex(0x5E1304), nm))
+        st["45d460_slot_req"] = 3 * n + 1                   # 0x402419(3n+1)
+        st["45d460_soa_bytes"] = 3 * n                      # 三 SoA 块（0x34BC0 步距）
+        st["45d460_rec32"] = (slot, score)                  # 0x455640 的 0x2C 字节记录头
+        st["45d460_calls"] = st.get("45d460_calls", 0) + 1
 
     def p4_45f850(self, v24: int, v28: int, w2c: int) -> None:
         """`0x45F850(0x4CD4A0, &{v24, v28, w2c})`：**排行榜登记**（0x424122 调用）。

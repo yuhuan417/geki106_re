@@ -2735,6 +2735,14 @@ def main():
     check("0x45C7D0 第二张表（byte[tbl+5]!=0，@+0x740）：slot = +0x740+(mode+2*row)*0x54，"
           "slot 分数 <= rec 才覆盖（99 ← 100）",
           int.from_bytes(_rkt3[0x740 + 3 * 0x54:0x744 + 3 * 0x54], "little") == 100, "")
+    _gfn = _G51()
+    check("0x45CFB0 回放文件名文法：row==0x63 → rp_last.dat；"
+          "(rp_gm_|rp_tr_ by [+0x20]) + (m_|j_ by [+0x21]) + %02d_(row+1) + "
+          "(gek|rin|kan).dat by i（0x4A4B00..0x4A4B48 片段串）",
+          _gfn.p4_45cfb0(0, 0, 0, 0) == "rp_gm_m_01_gek.dat"
+          and _gfn.p4_45cfb0(1, 1, 4, 1) == "rp_tr_j_05_rin.dat"
+          and _gfn.p4_45cfb0(0, 1, 11, 2) == "rp_gm_j_12_kan.dat"
+          and _gfn.p4_45cfb0(1, 0, 0x63, 0) == "rp_last.dat", "")
     _fmts = {0x4A4D20: b"BrokenEnemy              %4d",
              0x4A4CFC: b"BrokenEnemy(Laser)       %4d",
              0x4A4CD8: b"Capture                   %3d",
@@ -2752,8 +2760,17 @@ def main():
              0x4A4D98: b"MissCount                 %3d",
              0x4A4D74: b"Continue                  %3d",
              0x4A4D64: b"result.txt",
-             0x4A48C0: b"\r\n"}
-    check("0x45E7F0 引用的 18 个格式串/文件名/行尾常量与映像逐字节一致",
+             0x4A48C0: b"\r\n",
+             0x4A4B48: b"rp_last.dat",
+             0x4A4B40: b"rp_tr_",
+             0x4A4B38: b"rp_gm_",
+             0x4A4B34: b"j_",
+             0x4A4B30: b"m_",
+             0x4A4B24: b"%s%02d_",
+             0x4A4B18: b"gek.dat",
+             0x4A4B0C: b"rin.dat",
+             0x4A4B00: b"kan.dat"}
+    check("0x45E7F0/0x45CFB0 引用的 27 个格式串/文件名/行尾常量与映像逐字节一致",
           all(bytes(img[va - ib:va - ib + len(t)]) == t for va, t in _fmts.items()), "")
     _gp = _G51()
     _gp.p4_423690(0xE, 0x108, 0x90)
