@@ -5789,6 +5789,39 @@ op4×1（ctor `0x449150`）= `0x53000001`；op5×4（ctor `0x43D430`）= `0x6100
 ⇒ 页4 的背景、关卡进程、演出全部由这些类型的行为函数驱动；它们的具体字段/行为见
 `docs/p4_entities_0x43A7F0.md`（在产）。
 
+
+#### 16.123 页4 每帧 `0x451110` 的真实骨架（逐条地址，替换 §16.120 的旧序）
+
+```
+0x45112B  eax = [App+0x2C4]                     ; 速度倍数：1=常速 / 8=快进 / 0=4×泵
+0x451131  if (eax == 0) goto 0x451156
+0x451135  (商 eax, 余数 edx) = 0x462D71([0x56CCA8], [App+0x2C4])
+0x451148  if (edx != 0) { [esp+7] = 0 ; goto 0x451325 }    ; ← 跳过帧：只跳"泵+调试文字+present"
+0x451156  eax = ([App+0x2C4]==0) ? 4 : 1 ; [esp+0xB] = 1
+0x45116D  do { 0x458B80(App) ; [0x56CCAC]++ } while (--N)  ; 泵，仅在 N!=0 时
+0x451186  调试文字段（门 [0x56CCC9]&[0x56CCB5]，文字 0x44D330）
+0x4513B6  0x458CB0(App)                        ; **present 在 VM 之前**
+0x451325  ← 跳过路径汇合
+0x451327  0x450FE0(App)                        ; **VM**
+0x45132C  if ([0x56CCB5] == 0) { 0x44EB60(0x4AB454,&rec,0x56CC8C,0) ; 0x45D1D0(0x4CD5D8,&rec) }
+          else { 0x45D2B0(0x4CD5D8,&tmp) ; 0x44EB60(…,&rec,…) ;
+                 if ([0x4AB596]) [App+0x2C4]++ ;        ; 回放里"键2"= 加速
+                 if ([0x4AB597]) [App+0x2C4] = 0 ;      ; 回放里"键5"= 归零(4×泵)
+                 回填 6 字节到 0x4AB594..0x4AB599 }
+0x4513E3  SetCursorPos(0x140,0xF0)
+0x4513F3  if ([0x4AB59A] != 0) { 0x458FD0(App,key) ; if (key==2) do{0x451B10(App)}while(0x451B10(App)) }
+0x451423  if ([0x4AB59A] == 5) [App+0x2C4] = (([App+0x2C4]-1) ? 8 : 1)   ; 1↔8 切换（and 0xF9/add 8）
+0x451442  [0x56CCA8]++
+0x451448  if ([esp+7] != 0) goto 0x451461 ; else { 0x4CD484 序列引擎 tick ; …（跳过碰撞/行为/绘制） }
+0x451461  碰撞 0x43BF60 / 0x43BFD0 / 0x43C060 / 0x43C0F0 → 行为遍 0x458E70 → 绘制 0x458EF0
+```
+
+要点（此前记错的三处）：
+1. **present（`0x458CB0`）在 VM 之前**，而 `0x4514B2` 的 `0x402289(App,1)` 是 `0x451630` 进场帧里的另一次 present。
+2. **输入记录 / 回放推进在 VM 之后**（`0x44EB60` / `0x45D1D0` / `0x45D2B0`），先 SetCursorPos 再处理键码。
+3. **跳过帧并不跳过 VM**，它只跳过"泵 + 调试文字 + present"，随后照常 VM/输入/键处理/帧计数，
+   只是接着走 `0x4CD484` 序列引擎而不是碰撞/行为/绘制。
+
 **复刻接线**：`remake/pygame/page4.py`（`Page4Mixin`）= `p4_enter`/`p4_step`/`p4_intro_frame`/
 `p4_finish`/`p4_block`/`p4_flow_vm`/`p4_engine`，已接进 `geki.Pages`（`--page 4` 跑通）；
 VM/发射器/碰撞/HUD 的具体实现待下一步（接口已列，占位函数都标了地址）。
