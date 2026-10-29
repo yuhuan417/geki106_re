@@ -798,8 +798,19 @@ def main():
     print("== 11z. 复刻侧 P4_SPAWN_SLOTS 与 exe 对账（§16.176/§16.181）")
     import page4 as _p4
     slots = _p4.P4_SPAWN_SLOTS
-    check("复刻侧登记了 8 个槽（其余 4 槽速度来源未定案，不登记）",
-          len(slots) == 8, f"{len(slots)}")
+
+    def _p4_vel_d150_ok():
+        """穷举 0..8191 比对 exe 的位运算与复刻侧公式。"""
+        for r in range(0x2000):
+            e = ((r & 0x1FFF) << 16)
+            e = (e - 0x0FFE0001) & 0xFFFFFFFF
+            e &= 0xFFFF0400
+            e |= 0x400
+            if e != ((((r & 0x1FFF) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF:
+                return False
+        return True
+    check("复刻侧登记了 9 个槽（其余 3 槽速度来源未定案，不登记）",
+          len(slots) == 9, f"{len(slots)}")
     all12 = [0x42C810, 0x42CC50, 0x42D070, 0x42D370, 0x42C8F0, 0x42CD70,
              0x42D150, 0x42D4A0, 0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0]
     all12.sort()
@@ -852,6 +863,8 @@ def main():
         rec = records(addr)
         for extra in overwrites(addr):
             rec.append((extra, rec[0][1] if rec else 0))
+        if any(callable(vel) for _, vel, _ in shots):
+            continue                      # 随机速度由下面的字节序列断言覆盖
         want = [(vel, tw) for tw, vel, dx in shots]
         if rec != want:
             bad[hex(addr)] = f"{[(hex(v), hex(t)) for v, t in rec]} != {[(hex(v), hex(t)) for v, t in want]}"
@@ -864,6 +877,14 @@ def main():
     check("8 个槽的弹型/速度/阈值与 exe 逐项一致", not bad, f"{bad}")
     check("每槽登记的行为都已进 P4_BEH", all(a in _p4.P4_BEH for a in slots),
           f"{[hex(a) for a in slots if a not in _p4.P4_BEH]}")
+    check("0x42D150 的随机速度序列字节齐备",
+          img[0x42D17D - ib:0x42D182 - ib] == bytes([0x25, 0xFF, 0x1F, 0x00, 0x00])
+          and img[0x42D185 - ib:0x42D188 - ib] == bytes([0xC1, 0xE0, 0x10])
+          and img[0x42D188 - ib:0x42D18D - ib] == bytes([0x2D, 0x01, 0x00, 0xFE, 0x0F])
+          and img[0x42D190 - ib:0x42D195 - ib] == bytes([0x25, 0x00, 0x04, 0xFF, 0xFF]),
+          img[0x42D17D - ib:0x42D19C - ib].hex())
+    check("0x42D150 速度公式与 exe 全输入一致", _p4_vel_d150_ok(), "")
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")

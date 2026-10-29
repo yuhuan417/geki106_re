@@ -1436,8 +1436,24 @@ ENT23_SW03 = [0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 
 # 键 = 行为地址；值 = (间隔阈值, ((弹型, 速度, x 偏移), ...), 节奏模式)
 #   节奏模式 "single"   ：[+0x1C] > 阈值即发，发后清零（每 阈值+1 帧一发）
 #   节奏模式 "cadence3" ：帧 3 发、帧 6 发并清零（相邻间隔恒 3 帧，§16.182）
-# 只登记**速度已从 exe 读出**的 8 个槽；0x42D150/0x42D4A0/0x42D260/0x42D6A0
-# 的速度来源未定案（不压大常数），故不登记 —— 未登记即"未实现"。
+# 速度可以是整数，也可以是 `f(self) -> int`（随机/三角算出来的槽）。
+
+
+def _p4_slot_vel_rand_d150(self) -> int:
+    """`0x42D150` 的速度：随机水平 ±16、垂直 +4（§16.184）。
+
+    ```
+    0x42D178 0x45AD00()（rand）  0x42D17D and eax,0x1FFF   ; 0..8191
+    0x42D185 shl eax,0x10        0x42D188 sub eax,0x0FFE0001
+    0x42D190 and eax,0xFFFF0400  0x42D199 or ah,4          ; 低 16 = 0x0400
+    ```
+    等价于 `((r & 0x1FFF) - 0x0FFF) << 16 | 0x0400`（已对全部 8192 个输入穷举验证），
+    即水平 `[-15.996, +16.0]` 像素/帧、垂直 `+4.0` 像素/帧。
+    """
+    return (((rng.randrange(0x2000) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF
+
+
+# 0x42D4A0（sin/cos）、0x42D260、0x42D6A0 的速度来源仍未定案，不登记。
 P4_SPAWN_SLOTS = {
     0x42C810: (5, ((0x120B1121, 0x00000E00, 0x10),), "single"),
     0x42CC50: (5, ((0x12071126, 0xF4000A00, 0x10),
@@ -1450,6 +1466,7 @@ P4_SPAWN_SLOTS = {
                    (0x12061127, 0x0A000A00, 0x10),
                    (0x12061127, 0x0A0008E0, 0x10),
                    (0x12061127, 0xF60008E0, 0x10)), "single"),
+    0x42D150: (3, ((0x120D112B, _p4_slot_vel_rand_d150, 0x10),), "single"),
     0x42CA70: (5, ((0x12081123, 0x00001000, 0x10),), "cadence3"),
     0x42CEF0: (5, ((0x12061128, 0xFA000C00, 0x10),
                    (0x12061128, 0x06000C00, 0x10)), "cadence3"),
@@ -2472,14 +2489,15 @@ class Page4Mixin:
             c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
 
     # ---- 特殊类槽行为用到的三个助手（§16.180/§16.181）------------------
-    def p4_fire_slot(self, owner, type_word: int, vel: int, dx: int) -> None:
+    def p4_fire_slot(self, owner, type_word, vel, dx: int) -> None:
         """`0x430400` 造记录 + `0x430290` 入 `0x4AD46C`：从**发射者子对象**位置发弹。
 
         `0x42C83A` 记录 =(速度, 弹型, y=[owner+8], x=[owner+4]+dx)；
         记录 +0xC 是速度字段（§16.180 由"槽 0 该位为 0xE00、槽 1 改成镜像值"实证）。
         """
+        v = vel(self) if callable(vel) else vel
         self.spawn(self._p4_q("ui46c"), type_word,
-                   owner.s32(0x04) + dx, owner.s32(0x08), vel)
+                   owner.s32(0x04) + dx, owner.s32(0x08), v)
 
     def p4_slot_se(self) -> None:
         """`0x42C880`：声像量 = `([0x56CC8C] - 0x140) << 4`，音效号 0。"""
