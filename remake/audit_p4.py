@@ -676,6 +676,35 @@ def main():
           thunk(0x401776) == 0x42C600 and u32(0x42C893) == 0x4AB4B0
           and img[0x42C890 - ib:0x42C892 - ib] == bytes([0x6A, 0x00]), "")
 
+    print("== 11v. 特殊类十二行为 ↔ 十二弹型（§16.178）")
+    pairs = {0x42C810: 0x120B1121, 0x42CC50: 0x12071126, 0x42D070: 0x120F112A,
+             0x42D370: 0x120E112D, 0x42C8F0: 0x12091122, 0x42CD70: 0x12061127,
+             0x42D150: 0x120D112B, 0x42D4A0: 0x120C112E, 0x42CA70: 0x12081123,
+             0x42CEF0: 0x12061128, 0x42D260: 0x120C112C, 0x42D6A0: 0x120A112F}
+    bad = {}
+    for fn, want in pairs.items():
+        types = []
+        for i in md32.disasm(img[fn - ib:fn - ib + 0x120], fn):
+            if i.mnemonic == "push" and i.op_str.startswith("0x"):
+                v = int(i.op_str, 16)
+                if v > 0xFFFF:
+                    types.append(v)
+        if want not in types:
+            bad[hex(fn)] = [hex(x) for x in types]
+    check("12 个行为各自发出对应的弹型", not bad, f"{bad}")
+    check("十二弹型两两不同", len(set(pairs.values())) == 12, "")
+    check("12 个弹型的第 4 字节都是 0x12（bits24..31）",
+          all((v >> 24) == 0x12 for v in pairs.values()),
+          f"{[hex(v) for v in pairs.values() if v >> 24 != 0x12]}")
+    import struct as _st
+    lv, hv = _st.unpack("<hh", _st.pack("<I", 0xFA000A64))
+    check("速度对 0xFA000A64 的 16 位有符号分量 = (-6.0, +10.39)",
+          hv == -1536 and lv == 0x0A64
+          and abs(hv / 256 - (-6.0)) < 1e-9 and abs(lv / 256 - 10.39) < 0.01,
+          f"{hv}/{lv} → {hv/256:+.2f}/{lv/256:+.2f}")
+    check("0x42D4A0 用 sin/cos 两个三角助手",
+          thunk(0x40159B) == 0x45ABB0 and thunk(0x401A50) == 0x45AAF0, "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
