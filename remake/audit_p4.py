@@ -1311,6 +1311,16 @@ def main():
                 self.p4_stat = {0x4CD590 + 0x30: 7, 0x4CD4A0 + 0x08: 50,
                                 0x4CD4A0 + 0x0C: 25, 0x4CD4A0 + 0x10: 200}
         return _S()
+    class _E(page4.Page4Mixin):
+        def __init__(self):
+            self.p4_stat = {0x4CD4A0 + 0x2C: 3, 0x4CD4A0 + 0x5A: 0, 0x4CD4A0 + 0x5C: 0}
+    _e = _E()
+    _r1 = page4.Page4Mixin.p4_45e710(_e, bytes([7, 0, 0, 0, 0, 2]), 5)
+    _r2 = page4.Page4Mixin.p4_45e710(_e, bytes([7, 0, 0, 0, 0, 0]), 5)
+    _r3 = page4.Page4Mixin.p4_45e710(_e, bytes([7, 0, 0, 0, 0, 2]), 0x200)
+    check("0x45E710 倍率：(min(word[0x2C],10) + min(d,100)) * rec[5] * rec[0]",
+          _r1 == (3 + 5) * 2 * 7 and _r2 == 7 and _r3 == (3 + 0x64) * 2 * 7
+          and _e.p4_stat[0x4CD4A0 + 0x5A] == 0x200, "")
     def _rks(score, th, v):
         class _R(page4.Page4Mixin):
             def __init__(self):

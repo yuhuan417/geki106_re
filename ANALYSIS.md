@@ -7372,6 +7372,40 @@ B 族 `0x43A381` 同样在 `je 0x43A381` 分支调用 unlink），摘链后碰�
 它是数字渲染（`0x45E4A0` 用 `idiv 10` 反复取位、最多 4 位、把数值拆成数字实体）；
 以及 `p4_43c0f0` 的**调用点**（哪个队列对用这条链）尚未定位。
 
+#### 16.219 `0x45E710` 连击倍率落地 + `0x45E670` 结构
+
+`0x45E710(mgr, rec, d)`：连击倍率，`rec` 是 `0x45DFB0` 拆出来的 8 字节记录。
+
+```
+0x45E710 a = word[mgr+0x5A] ; 0x45E71B a = max(a, d)
+0x45E725 word[mgr+0x5A] = a                       ; 旁路记录（**不封顶**，记的是 d 本身）
+0x45E729 bl = rec[5]
+0x45E72E bl == 0 → e = 1
+0x45E730 dx = min(d, 0x64)                        ; 封顶 100
+0x45E73E ax = min(word[mgr+0x2C], 0xA)            ; 封顶 10
+0x45E750 e = ax + dx
+0x45E756 e *= (signed char)bl
+0x45E760 c = word[mgr+0x5C] ; 0x45E767 c = max(c, e)
+0x45E76E word[mgr+0x5C] = c
+0x45E772 e *= rec[0]
+```
+
+⇒ 返回值 = `(min(word[0x2C],10) + min(d,100)) * (int8)rec[5] * rec[0]`，
+两个 `max` 只写旁路字段、**不影响返回值**。
+
+`0x45E670(mgr, rec, f, g, h)`：按 `rec[4]` 的 bit0/bit1 把 `rec[0]`（word）累加进 `mgr` 的四对字段，
+三组开关 `f`/`g`/`h` 分别控制是否处理：
+
+| 开关 | bit0 未置 → 加到 | bit1 未置 → 加到 |
+|---|---|---|
+| `f`（`0x45E675`） | `[mgr+0x20]` | `[mgr+0x10]` |
+| `g`（`0x45E69F`） | `[mgr+0x18]` | `[mgr+8]` |
+| `h`（`0x45E6C5`） | `[mgr+0x1C]` | `[mgr+0xC]` |
+
+（`0x45E680 test byte[eax+4],1` / `0x45E68F test byte[eax+4],2`，`eax` = `rec`。）
+
+⇒ `p4_45e710` 已实现；`0x45E670` 只留结构（其 `ret` 与第 4/5 个开关的完整落点尚未逐条核对）。
+
 #### 16.218 `0x45EFF0` 结构全读（尾段已落地）
 
 `0x45EFF0(mgr, type, a, b, c)`，带 SEH（`fs:[0]` / `push 0x4957BB` / `sub esp,0xD4` / `ret 0x10`）。

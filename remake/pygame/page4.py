@@ -3034,6 +3034,44 @@ class Page4Mixin:
         o.d16(0x0A + n * 2, 0)                          # 0x460315
         self.p4_4600f0(o)                               # 0x46031C
 
+    def p4_45e710(self, rec, d: int) -> int:
+        """`0x45E710(mgr, rec, d)`：连击倍率 —— 把 `d` 与 `rec[5]`、`rec[0]` 乘起来。
+
+        ```
+        0x45E710 ax = word[mgr+0x5A] ; 0x45E71B if (ax > d) 保留 ax 否则 ax = d
+        0x45E725 word[mgr+0x5A] = ax                       ; 记录历史最大值
+        0x45E729 bl = rec[5]
+        0x45E72E if (bl == 0) → 0x45E75B: eax = 1
+        0x45E730 dx = min(d, 0x64)                         ; 封顶 100
+        0x45E73E ax = word[mgr+0x2C] ; 0x45E749 封顶 0xA
+        0x45E750 eax = (ax + dx)
+        0x45E756 eax *= (signed char)bl
+        0x45E760 dx = word[mgr+0x5C] ; 0x45E767 if (dx <= eax) dx = eax
+        0x45E76E word[mgr+0x5C] = dx                       ; 又一个最大值
+        0x45E772 eax *= rec[0]                             ; imul eax,[esi]
+        ```
+        ★ 返回值是**未封顶的** `(min(word[0x2C],10) + min(d,100)) * rec[5] * rec[0]`；
+        `word[mgr+0x5A]` / `word[mgr+0x5C]` 只是旁路记录最大值，不参与返回。
+        """
+        m = 0x4CD4A0
+        a = self.p4_stat.get(m + 0x5A, 0) & 0xFFFF              # 0x45E710
+        a = a if a > (d & 0xFFFF) else (d & 0xFFFF)             # 0x45E71B
+        self.p4_stat[m + 0x5A] = a                              # 0x45E725
+        bl = rec[5] if len(rec) > 5 else 0                      # 0x45E729
+        if bl == 0:
+            e = 1                                               # 0x45E75B
+        else:
+            dx = min(d & 0xFFFF, 0x64)                          # 0x45E730
+            ax = min(self.p4_stat.get(m + 0x2C, 0) & 0xFFFF, 0xA)   # 0x45E73E
+            e = (ax + dx) & 0xFFFFFFFF                          # 0x45E750
+            sb = bl - 0x100 if bl & 0x80 else bl                # movsx
+            e = (e * sb) & 0xFFFFFFFF                           # 0x45E756
+        c = self.p4_stat.get(m + 0x5C, 0) & 0xFFFF              # 0x45E760
+        if c <= e:
+            c = e
+        self.p4_stat[m + 0x5C] = c                              # 0x45E76E
+        return (e * (rec[0] if rec else 0)) & 0xFFFFFFFF        # 0x45E772
+
     def p4_45f2fb(self) -> None:
         """`0x45EFF0` 的尾段（`0x45F2FB..0x45F3F0`）：**里程门槛递进**。
 
