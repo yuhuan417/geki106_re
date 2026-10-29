@@ -1602,6 +1602,13 @@ def main():
             0x4A4054: b"auto", 0x4A405C: b"color"}
     _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
     import inspect as _insp
+    _af = page4.Page4Mixin.p4_afc0
+    check("0x45AFC0 的 ecx 是对象指针不是固定全局：0x445EAA/0x44613A 传 0x4AB5B0、"
+          "0x451663/0x45167A 传 0x4AB5B8；语义 = (word&mask) 右移到 mask 最低位，取 0 直接返回",
+          list(_insp.signature(_af).parameters) == ["self", "mask", "base"]
+          and img[0x45AFC0 - ib:0x45AFC0 - ib + 3] == bytes([0x8B, 0x41, 0x04])
+          and img[0x45AFC9 - ib:0x45AFC9 - ib + 2] == bytes([0x74, 0x0E])
+          and img[0x45AFD9 - ib:0x45AFD9 - ib + 2] == bytes([0xC2, 0x04]), "")
     _sig = _insp.signature(page4.Page4Mixin.p4_load_palette)
     import numpy as _np
     from geki import fade_palette as _fp

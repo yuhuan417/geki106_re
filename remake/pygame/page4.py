@@ -4037,8 +4037,11 @@ class Page4Mixin:
         self.p4_stat[0x4AB5B0 + 4] = w
         return w                                                     # 0x45AF6E
 
-    def p4_afc0(self, mask: int) -> int:
+    def p4_afc0(self, mask: int, base: int = 0x4AB5B0) -> int:
         """`0x45AFC0(mgr, mask)`：取 `word[mgr+4] & mask`，**右移到 mask 的最低位**。
+
+        `ecx` 是**对象指针**，不是固定全局：页4 里 `0x445EAA`/`0x44613A` 传 `0x4AB5B0`，
+        而 `0x451663`/`0x45167A` 传 **`0x4AB5B8`**（另一个对象）。故这里带 `base` 参数。
 
         ```
         0x45AFC0 eax = [ecx+4] & mask
@@ -4048,7 +4051,7 @@ class Page4Mixin:
         ```
         ⇒ `0x45AFC0(0x4AB5B0, 0xC000)` = **操作器选择（0..3）**。
         """
-        v = (self.p4_stat.get(0x4AB5B0 + 4, 0) & mask) & 0xFFFFFFFF   # 0x45AFC0/0x45AFC7
+        v = (self.p4_stat.get(base + 4, 0) & mask) & 0xFFFFFFFF      # 0x45AFC0/0x45AFC7
         if v == 0:                                              # 0x45AFC9
             return 0
         while not (mask & 1):                                   # 0x45AFCB / 0x45AFD4
@@ -4997,12 +5000,13 @@ class Page4Mixin:
         """`0x4AB5B8+4`：配置字（对比/亮度两个 7 位字段的来源）。
 
         `0x451657/0x451675` 两次 `0x45AFC0` 都是 `ecx = 0x4AB5B8`，即读
-        **该对象 `+4` 的那个位域字**（与 `0x4AB5B0` KeyMgr 的 `+4` 同构）。
+        **该对象 `+4` 的那个位域字**（与 `0x4AB5B0` KeyMgr 的 `+4` 同构）——
+        所以 `p4_afc0` 必须能指定 base，不能写死 `0x4AB5B0`。
         复刻侧尚未定位该字的写入方，故默认 0。**注意**：0 解出来是 (−200, −200)，
         那是很重的压暗、**并不等价于「不调整」** —— 所以 `p4_intro_frame` 在 cfg 为 0 时
         不传调整值（保持不施加），只有取到真实配置字才按原样施加。这一处是显式待补的缺口。
         """
-        return getattr(self, "p4_cfg", 0)
+        return self.p4_stat.get(0x4AB5B8 + 4, 0)
 
     @staticmethod
     def p4_451630_adjust(w: int):
