@@ -483,6 +483,28 @@ def main():
           img[0x4474F6 - ib:0x4474FD - ib] == bytes([0xC7, 0x43, 0x28, 0x01, 0x00, 0x00, 0x00]),
           "")
 
+    print("== 11o. 类型 9/10 行为（§16.171）")
+    check("类型 9 用 and eax,0xF 取 16 步",
+          img[0x447FA2 - ib:0x447FA5 - ib] == bytes([0x83, 0xE0, 0x0F]), "")
+    check("16 步 × 225 == 3600（整圆 0.1°）", 16 * 225 == 3600, "")
+    check("×225 由 ×25 与 ×9 两次 lea 合成",
+          img[0x447FA5 - ib:0x447FAB - ib] == bytes([0x8D, 0x04, 0x80]) * 2
+          and img[0x447FAB - ib:0x447FAE - ib] == bytes([0x8D, 0x34, 0xC0]),
+          img[0x447FA5 - ib:0x447FAE - ib].hex())
+    check("类型 9 的两个三角函数助手是 0x45ABB0 / 0x45AAF0",
+          thunk(0x40159B) == 0x45ABB0 and thunk(0x401A50) == 0x45AAF0, "")
+    check("类型 10 四路跳表 0x448A30（cmp esi,3 后 ja）",
+          [u32(0x448A30 + k * 4) for k in range(4)]
+          == [0x44827E, 0x4482DA, 0x448356, 0x4483AC]
+          and img[0x44826E - ib:0x448271 - ib] == bytes([0x83, 0xFE, 0x03]), "")
+    check("类型 10 用 0x45AFC0(0xC000) 与 [+0x20] 比较",
+          u32(0x44823B) == 0xC000 and img[0x44824C - ib:0x44824E - ib] == bytes([0x3B, 0xF0]),
+          img[0x44823A - ib:0x448250 - ib].hex())
+    check("类型 10 计时上限 0x5A、发射间隔 6、弹型 0x120B1121",
+          img[0x44825F - ib:0x448262 - ib] == bytes([0x83, 0xF9, 0x5A])
+          and img[0x448280 - ib:0x448282 - ib] == bytes([0xB9, 0x06])
+          and u32(0x448296) == 0x120B1121, "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
