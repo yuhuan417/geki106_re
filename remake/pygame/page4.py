@@ -774,13 +774,14 @@ def p4_sin_q(arg: int, which: str = "sin") -> int:
 
     ```
     idx = (|arg| / 900) & 3 ; rem = |arg| % 900
-    idx0: al = byte[基址 + rem]          ; 正向
-    idx1: al = byte[中心 - rem] ; neg eax ; 负镜像
-    idx2: al = byte[基址 + rem] ; neg eax ; 负正向
-    idx3: al = byte[中心 - rem]           ; 镜像
+    idx0 (0x45AB2D): al = +byte[基址 + rem]      ; 正向
+    idx1 (0x45AB37): al = +byte[中心 - rem]      ; 镜像
+    idx2 (0x45AB44): al = -byte[基址 + rem]      ; 负正向
+    idx3 (0x45AB50): al = -byte[中心 - rem]      ; 负镜像
     ```
 
-    其中 `中心 = 基址 + 899`（`0x5D41BF = 0x5D3E3C+899`、`0x5B3E37 = 0x5B3AB4+899`），
+    其中 `中心 = 基址 + 899`（`0x5D41BF = 0x5D3E3C+899`、`0x5B3E37 = 0x5B3AB4+899`）。
+    公共尾部 `0x45AB63`：`test edi,edi` → 原参数为负时 `neg eax`（额外一次符号翻转）。
     表里中心项对应角度 0、负半区以补码字节存放。
 
     **注意**：本函数只复现"取哪个字节、是否取负"这两件事，返回值就是
@@ -789,9 +790,10 @@ def p4_sin_q(arg: int, which: str = "sin") -> int:
     `0x45ABB0(angle)` 的结果当**余弦分量**写回 x、把 `0x45AAF0(angle)` 当**正弦分量**写回 y，
     并做四舍五入定点乘 `(v*scale + 0x80) >> 8`。
 
-    **数值映射尚未对上**：按本函数落地的四分支算 `arg=450` 得 77，而 `255·sin45° = 180`，
-    说明「基址/取负/象限偏移」里还有一处不符，需逐块独立起点重做反汇编。
-    在此之前返回值就按 `mov al, byte[...]` / `neg eax` 的原始结果使用。
+    **返回的是补码字节（0..255）**：表按 `mov byte[..], al` 只存低字节，`-180` 存成 `0x4C=76`，
+    故 `arg=450` 返回 76 而不是 180 —— 这**不是**映射错误，是原件的行为（调用方需自行带符号解释）。
+    另：表的原点比调用者晚 90°（`rem=0` 对应 -89.9°、`rem=899` 对应 0°），
+    与角度的对齐取决于 `0x401091` 的返回值口径（是否含 +900），该项待查。
     """
     t = p4_tables()
     if t is None:
@@ -801,12 +803,16 @@ def p4_sin_q(arg: int, which: str = "sin") -> int:
     rem = a % 900
     tab = t["cos"] if which == "cos" else t["sin"]
     if idx == 0:
-        return int(tab[rem])                   # 0x45ABEA / 0x45AB2D
-    if idx == 1:
-        return -int(tab[899 - rem])            # 0x45ABF4 / 0x45AB37
-    if idx == 2:
-        return -int(tab[rem])                  # 0x45AC03 / 0x45AB44
-    return int(tab[899 - rem])                 # 0x45AC0F / 0x45AB50
+        v = int(tab[rem])                      # 0x45ABEA / 0x45AB2D  +表首+rem
+    elif idx == 1:
+        v = int(tab[899 - rem])                # 0x45ABF4 / 0x45AB37  +镜像
+    elif idx == 2:
+        v = -int(tab[rem])                     # 0x45AC03 / 0x45AB44  -表首+rem
+    else:
+        v = -int(tab[899 - rem])               # 0x45AC0F / 0x45AB50  -镜像
+    if arg < 0:                                # 0x45AB63 test edi,edi / 0x45AB69 neg eax
+        v = -v
+    return v
 
 
 class P4Replay:
