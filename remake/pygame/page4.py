@@ -766,6 +766,53 @@ def p4_atan2(a: int, b: int) -> int:
     return int(t["atan"][a & 0xFF, b & 0xFF])
 
 
+def p4_queue_sweep(self, head, unlink=None):
+    """`0x430220` / `0x4353A0` 等 6 个队列扫描函数的**统一骨架**。
+
+    反汇编里 6 处扫描（0x430220、0x4353A0、0x448F80、0x43BC70、0x44B0D0、0x445A30）
+    结构完全相同，只有「行为分发 thunk」与「摘链助手」不同：
+
+    ```
+    0x430228 esi = [this+0x28]                     ; 头节点
+    0x430231 cmp byte[esi+0x34], 0 ; je 摘链        ; 未存活 → 直接摘
+    0x430236 call <dispatch>                        ; 全部是 `jmp [ecx+0x40]`,
+                                                    ;   落点 0x42E440/0x432120/0x446450/
+                                                    ;        0x43AD40/0x449EF0/0x43DC90
+    0x43023D test al,al ; jne 保留                  ; 行为返回非 0 ⇒ 存活
+    0x430241 eax = [esi+0x38]                       ; 所属实体
+    0x430244 byte[esi+0x34] = 0                     ; 清存活
+    0x430247 byte[esi+0x10] = 0                     ; 清激活
+    0x43024A byte[eax+0x1C] = 0                     ; 清实体占用位
+    0x43024F esi = [esi+0x44]                       ; next
+    0x430254 call <unlink>(prev, node)              ; 0x430370/0x401627/0x4490C0/
+                                                    ;   0x43BED0/0x44B210/0x445B70/0x435550
+    ```
+
+    参数 `head` 用鸭子协议：`alive`(+0x34)、`active`(+0x10)、`owner`(+0x38)、
+    `behaviour`(+0x40)、`next`(+0x44)。复刻侧的实体列表模型与此等价，
+    本函数用于逐条对齐验证与将来切换成节点池。
+    """
+    prev = None
+    node = head
+    while node is not None:
+        nxt = getattr(node, "next", None)
+        if not getattr(node, "alive", 0):          # 0x430231
+            if unlink is not None:
+                nxt = unlink(prev, node)           # 0x430254
+            else:
+                nxt = getattr(node, "next", None)
+            node = nxt
+            continue
+        if getattr(node, "behaviour", None) and not node.behaviour():   # 0x430236/0x43023D
+            owner = getattr(node, "owner", None)                        # 0x430241
+            node.alive = 0                                             # 0x430244
+            node.active = 0                                            # 0x430247
+            if owner is not None:
+                owner.busy = 0                                         # 0x43024A
+        prev = node                                                    # 0x43024D
+        node = getattr(node, "next", None)                             # 0x43024F
+
+
 def p4_angle(a: int, b: int) -> int:
     """`0x401091 → 0x45A9A0`：**atan2，单位 0.1°，整圈 = 3600**。
 
