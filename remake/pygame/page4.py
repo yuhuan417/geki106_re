@@ -899,7 +899,7 @@ def p4_bg_place_axis(slot, axis: int, count: int) -> None:
         slot.grid[k][axis] = int(slot.grid[k][axis]) + delta
 
 
-def p4_queue_sweep(self, head, unlink=None):
+def p4_queue_sweep(self, head, unlink=None, clear_active=True):
     """`0x430220` / `0x4353A0` 等 6 个队列扫描函数的**统一骨架**。
 
     反汇编里 6 处扫描（0x430220、0x4353A0、0x448F80、0x43BC70、0x44B0D0、0x445A30）
@@ -939,7 +939,10 @@ def p4_queue_sweep(self, head, unlink=None):
         if getattr(node, "behaviour", None) and not node.behaviour():   # 0x430236/0x43023D
             owner = getattr(node, "owner", None)                        # 0x430241
             node.alive = 0                                             # 0x430244
-            node.active = 0                                            # 0x430247
+            if clear_active:
+                # 只有 0x430220/0x4353A0/0x448F80/0x43BC70 会清 +0x10；
+                # 0x44B0D0/0x445A30/0x43A350 不清（见 §16.152 的两族差异）。
+                node.active = 0                                        # 0x430247
             if owner is not None:
                 owner.busy = 0                                         # 0x43024A
         prev = node                                                    # 0x43024D
