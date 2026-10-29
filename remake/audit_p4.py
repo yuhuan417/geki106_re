@@ -189,6 +189,15 @@ def main():
         got = deep(site)
         check(name, got == want, f"实得 {got:#x}")
 
+    print("== 10b. 碰撞三组的实参（§16.156）")
+    pairs = [("组1 0x451480 参数 (0x4AD40C,0x4AD43C)", 0x45146A, 0x4AD43C, 0x45146F, 0x4AD40C),
+             ("组2 0x451493 参数 (0x4AD46C,0x4AD43C)", 0x451485, 0x4AD43C, 0x45148A, 0x4AD46C),
+             ("组3 0x4514A6 参数 (0x4AD40C,0x4AD49C)", 0x451498, 0x4AD49C, 0x45149D, 0x4AD40C)]
+    for name, a1, v1, a2, v2 in pairs:
+        ok = (img[a1 - ib] == 0x68 and u32(a1 + 1) == v1
+              and img[a2 - ib] == 0x68 and u32(a2 + 1) == v2)
+        check(name, ok, f"{img[a1-ib]:#x}{u32(a1+1):#x} / {img[a2-ib]:#x}{u32(a2+1):#x}")
+
     print("== 11. 菱形命中判定式 0x4306C0")
     body = img[0x4306C0 - ib:0x4306C0 - ib + 0x50]
     # 0x4306C0 mov al,[ecx+0x10] / 0x4306C3 test al,al / 0x4306C5 je
