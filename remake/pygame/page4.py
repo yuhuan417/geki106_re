@@ -1069,8 +1069,24 @@ class Page4Mixin:
         return (self.p4_frames % f) != 0
 
     def p4_seq_tick(self) -> None:
-        """`0x4CD484` 序列引擎的 tick（跳过帧与正常帧都会走它；规格待落地）。"""
-        self.p4_stat[0x4CD484] = self.p4_stat.get(0x4CD484, 0) + 1
+        """`0x451457 0x402036 → 0x4562A0(0x4CD484)`：**色带引擎**（不是"序列引擎"）。
+
+        反汇编逐字（`0x4562AB..0x456329`）：
+
+        ```
+        0x4562AB ecx=[obj+8]（起始索引）; edx=[obj+0xC]（滚动量）
+        0x4562BB w = (i16)table[idx*4+2] - scroll          ; 只有起始条减滚动量
+        0x4562C5 if (w + y > 0x1E0) w = 0x1E0 - y          ; 裁到屏高
+        0x4562E5 rect = 0x40238D(0, y, 0x280, y+w)         ; 满屏宽竖条
+        0x456316 0x401794(0x4AA7B0, 0, &rect, table[idx*4]) ; 用该条颜色填充
+        0x456322 y += w; idx++ ; 直到 y >= 0x1E0
+        ```
+        ⇒ 与页1-3 的色带是**同一个函数**，页4 只是换了对象 `0x4CD484`。复刻侧复用 `band_draw()`。
+        """
+        if getattr(self, "band_table", None):
+            self.band_draw()
+        else:
+            self.p4_stat[0x4CD484] = self.p4_stat.get(0x4CD484, 0) + 1
 
     def p4_debug_text(self) -> None:
         """0x451186..0x45131C：调试进度文字（门 `[0x56CCC9]` & `[0x56CCB5]`）。
