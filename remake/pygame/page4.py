@@ -5505,7 +5505,8 @@ class Page4Mixin:
         c = self.canvas
         for e in self.p4_q43c:
             nd = e.node
-            if nd is None or not nd.active or e.g32(0x14) & 0x2F000000 != 0x23000000:
+            # 0x45A170 的可见性只看节点自身（byte[node+0x1C]），不看实体类型
+            if nd is None or not nd.active:
                 continue
             lay = self.layers.tab.get(nd.layer)
             if lay is None:
