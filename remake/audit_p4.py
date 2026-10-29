@@ -1000,6 +1000,33 @@ def main():
           all(img[x - ib] != 0xCC for x in (0x446890, 0x446C50, 0x446D30, 0x446E20)),
           f"{[hex(img[x - ib]) for x in (0x446890, 0x446C50, 0x446D30, 0x446E20)]}")
 
+    # ---- §16.193 0x446890 是 0x446950 的副本 ----
+    def _txt(a, n=24):
+        out = []
+        for i in md32.disasm(img[a - ib:a - ib + 0x100], a):
+            if i.mnemonic == "call" or i.mnemonic.startswith("j"):
+                out.append(i.mnemonic)          # 目标地址随函数位置变，归一化掉
+            else:
+                out.append(f"{i.mnemonic} {i.op_str}")
+            if len(out) >= n:
+                break
+        return out
+
+    check("0x446890 与 0x446950 前 24 条指令一致（call/jmp 目标归一化）",
+          _txt(0x446890) == _txt(0x446950), f"{len(_txt(0x446890))}")
+    check("0x446890 已在 P4_BEH 登记、复用 _beh_446950",
+          page4.P4_BEH.get(0x446890) is page4.P4_BEH.get(0x446950), "")
+    _c50 = img[0x446C50 - ib:0x446D30 - ib]
+    check("0x446C50 无 [0x56CC98] 屏蔽，但仍写 byte[0x56CC94]",
+          b"\x98\xcc\x56\x00" not in _c50
+          and b"\x94\xcc\x56\x00" in _c50, "")
+    check("0x446C50 释放段有 0x1E 钳制（cmp ecx,0x1E / jge / mov [ebp+0x30],eax）",
+          img[0x446CDD - ib:0x446CE8 - ib] == bytes([0x8B, 0x4D, 0x30, 0xB8, 0x1E, 0x00, 0x00, 0x00,
+                                                    0x3B, 0xC8, 0x7D])
+          if img[0x446CDD - ib:0x446CE8 - ib][:3] == bytes([0x8B, 0x4D, 0x30]) else
+          b"\x1e\x00\x00\x00" in img[0x446C50 - ib:0x446CF6 - ib],
+          img[0x446CDD - ib:0x446CE8 - ib].hex())
+
     check("cadence3 只用于组 C 槽 0/1",
           sorted(hex(a) for a, v in slots.items() if v[2] == "cadence3")
           == ["0x42ca70", "0x42cef0"], "")
