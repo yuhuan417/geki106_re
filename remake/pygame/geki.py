@@ -2546,7 +2546,10 @@ class Pages:
                 if step >= 0:                              # 0x439C04 js
                     n = step + 1                           # 0x439C06 lea edx,[eax+1]
                     while n:                               # 0x439C09..0x439C18
-                        cur = cur + 1 if cur >= target else cur - 1
+                        # 0x439C0C `cmp eax,ecx / jge 0x439C13`：cur **>=** target 才 `dec`
+                        # （旧版把两支写反了 ⇒ cur 一路跑飞成负数，擦切位每帧乱扫，
+                        #   表现为"人像背景不停自己移位"）
+                        cur = cur - 1 if cur >= target else cur + 1
                         w["cur"] = cur
                         n -= 1
             cur = int(w["cur"])
