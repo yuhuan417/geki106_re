@@ -4562,6 +4562,11 @@ class Page4Mixin:
         pos = getattr(self, "p4_player_pos", None)
         return int(pos[1]) if pos else int(self.inp.y)
 
+    def p4_player_x(self) -> int:
+        """`[0x56CC8C]`：自机缓存 x（与 `0x56CC90` 成对，`0x446819` 由 `0x45A690` 写入）。"""
+        pos = getattr(self, "p4_player_pos", None)
+        return int(pos[0]) if pos else int(self.inp.x)
+
     def p4_btn_attack(self) -> bool:
         """`[0x4AB594]`：btn0（C/左键=攻击）当前状态。"""
         return bool(self.p4_in_bits() & 1)
@@ -5017,11 +5022,85 @@ class Page4Mixin:
                        ox + dx, oy + dy, v)            # 0x42C6A0 / 0x42C75C
 
 
+    def p4_43B020(self, e) -> int:
+        """`0x43B020`：按 `[e+0x14] & 0xFF000000` 决定要生成哪种 `0x31` 族实体。
+
+        ```
+        0x43B023 hi = [ecx+0x14] & 0xFF000000
+        0x43B028 hi == 0x25000000 → 0x31000006
+        0x43B02F hi == 0x26000000 → 0x31000019
+        0x43B036 eax = hi - 0x27000000 ; neg ; sbb eax,eax ; and al,0xF7 ; add eax,0x3100000A
+        ```
+
+        `neg/sbb` 那串读的是 **CF**：`hi == 0x27000000` 时 CF=1 → `eax = 0xF7` →
+        `0xFFFFFFF7 + 0x3100000A = 0x31000001`；否则 `eax = 0` → `0x3100000A`。
+        """
+        hi = e.s32(0x14) & 0xFF000000
+        if hi == 0x25000000:
+            return 0x31000006
+        if hi == 0x26000000:
+            return 0x31000019
+        return 0x31000001 if hi == 0x27000000 else 0x3100000A
+
+    def p4_43af90(self, e, arg: int) -> int:
+        """`0x43AF90`（thunk `0x401FB4`）：**带难度与生命值门控的速度值**。
+
+        ```
+        0x43AF91 if (arg == 0) arg = [e+0x58]
+        0x43AF9D op = 0x45AFC0(0x4AB5B0, 0xC000)      ; 难度 bits14-15
+        0x43AFAC if (op == 3) arg += arg             ; 最高难度翻倍
+        0x43AFB3 life = (signed) word[0x56CCB0]
+        0x43AFBE if (arg < 0) return life - arg      ; 负数=不消耗
+        0x43AFC7 r = 0x401393() % 0x500              ; rand() % 1280
+        0x43AFDB if (r < life + arg - 0x100) return life + arg
+        0x43AFEE return 0
+        ```
+
+        ⇒ 生命值低到 `life + arg <= 0x100` 时直接返回 0（**不发弹**）。
+        """
+        if arg == 0:
+            arg = e.s32(0x58)
+        if self.keys.field(0xC000) == 3:                 # 0x43AFAC
+            arg *= 2
+        life = self.p4_stat.get(0x56CCB0, 0) & 0xFFFF
+        if life & 0x8000:
+            life -= 0x10000
+        if arg < 0:                                      # 0x43AFBE
+            return life - arg
+        if rng.randrange(0x500) < life + arg - 0x100:    # 0x43AFDB
+            return life + arg
+        return 0
+
     def p4_43B070(self, e, arg: int) -> None:
-        """`0x43B070`：朝 `[0x56CC8C]/[0x56CC90]` 生成一枚实体进 **0x4AD49C** 队列
-        （类型由 `0x43B020` 按族算出，0x23 族 → `0x31000001`）。四个几何子函数未定案，先只登记。"""
-        self.p4_other.setdefault(0x4AD49C, []).append(
-            (0x31000001, e.s32(0x04), e.s32(0x08), arg))
+        """`0x43B070`：朝玩家生成一枚 `0x31` 族实体进 **0x4AD49C**。
+
+        ```
+        0x43B078 esi = [0x56CC8C] - [e+4]        ; dx = 玩家x - 自身x
+        0x43B082 edi = [0x56CC90] - [e+8]        ; dy = 玩家y - 自身y
+        0x43B093 ebx = 0x401FB4(e, arg) >> 4     ; 速度/16
+        0x43B0A0 ecx = 0x40231F(dx, dy)          ; = 0x45AA80 倒数距离 4096/|d|
+        0x43B0B3 [esp+0x10] = (inv*dx*ebx) >> 8  ; vy？见下
+        0x43B0BD [esp+0x14] = (inv*dy*ebx) >> 8
+        0x43B0C0 if (两者都为 0) 直接返回
+        0x43B0D0 把 &{vx,vy} 压栈 → 成为 0x430400 的栈残留（即 a3）
+        0x43B0E6 0x430400(&rec, [e+4], [e+8], 0x43B020(e))
+        0x43B105 0x435440(0x4AD49C, &rec)
+        ```
+
+        ⇒ 速度 = `(4096/|d|) * 分量 * (speed/16) >> 8`，即**朝玩家的定长向量**
+        （`4096/|d| * dx` 归一化后乘速度）。两个分量为 0 时不发（避免零速弹）。
+        """
+        px, py = self.p4_player_x(), self.p4_player_y()   # 0x56CC8C / 0x56CC90
+        dx = px - e.s32(0x04)
+        dy = py - e.s32(0x08)
+        spd = self.p4_43af90(e, arg) >> 4                 # 0x43B09D sar 4
+        inv = self.p4_45aa80(dx, dy)                      # 0x40231F → 0x45AA80
+        vx = ((inv * dx) * spd) >> 8                      # 0x43B0B3
+        vy = ((inv * dy) * spd) >> 8                      # 0x43B0BD
+        if vx == 0 and vy == 0:                           # 0x43B0C0
+            return
+        self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
+                   e.s32(0x04), e.s32(0x08), (vx, vy))     # 0x43B105 → 0x435440
 
     def _p4_dbg(self) -> None:
         import os
