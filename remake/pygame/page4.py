@@ -5473,6 +5473,22 @@ class Page4Mixin:
         e = Ent(x, y, typ, a3)
         if beh is not None:
             e.beh = beh
+        if beh == 0x448C70:                               # 自机：ctor 在 0x445C00 的 0x44604E 支
+            # 0x44605E [+0x40]=0x401E06 ; 0x446065 [+0xC]=0x10 ; 0x44606C byte[+0x10]=1
+            # 0x446073 [+0x1C]=a3 ; 0x44608C [+0x18]=1
+            e.d32(0x0C, 0x10)
+            e.m[0x10] = 1
+            e.d32(0x1C, a3 & 0xFFFFFFFF)
+            e.d32(0x18, 1)
+            # 0x44607B..0x446096 0x45A750(&rect, 0x80, 0x50, 0x9F, 0x6F) + 拷进节点 +4
+            # 0x4460B9..0x4460C4 dst = 0x401753(x+0x40, y)
+            # ⚠ 层号未定：节点本身**没有层字段**（0x28 字节：+0 flag / +4..+10 源矩形 /
+            # +0x14,+0x18 目标 / +0x1C 可见），层应该由渲染侧按队列决定。
+            # 实测：层0 在 (0x80,0x50) 处是**汉字图集**（画出"撃"），层1 该处无内容。
+            e.node = DNode(0, 0x80, 0x50)
+            e.node.rect = (0x80, 0x50, 0x9F, 0x6F)        # 0x45A750 填的 4 个 word
+            e.node.dst = (x + 0x40, y)
+            e.node.active = True
         queue.append(e)
         return e
 
