@@ -36,6 +36,8 @@ REMAKE = HERE.parent
 GAME_DIR = Path(os.environ.get("GEKI_DIR", REMAKE.parent.parent / "geki106"))
 DATA_PATH = REMAKE / "pages_data.json"
 
+from page4 import Page4Mixin
+
 W, H = 640, 480
 
 _PORTRAIT: bytes | None = None      # res_79.bin（页13 全屏人像数据，懒加载）
@@ -912,7 +914,7 @@ def fcos(v: int) -> int:
     return _trig(_COS_TAB, v)
 
 
-class Pages:
+class Pages(Page4Mixin):
     """0x459360 页机 + 页1/2/3（页4 由原 main.py 的 game 逻辑接手）。"""
 
     def __init__(self, data: dict, palette: np.ndarray, text: TextRenderer,
@@ -946,6 +948,7 @@ class Pages:
         self.timer = timer
         self.flags = flags
         self.sysf = Flags()          # 0x56CC84：系统旗标（0x10 = 离开本页）
+        self.p4_ensure()             # 页4 运行期状态（0x4AB5CC/0x56CCB8/统计区…）
         # 0x56CC8C/0x56CC90：自机位置镜像（页面重置清零）。页13 无自机 ⇒ 恒 0，
         # 但 `0x42BB9E` 会读 `[0x56CC90]`，故仍需存在。
         self.mirror = {"x": 0, "y": 0}     # 0x56CC8C/0x56CC90
@@ -1003,8 +1006,8 @@ class Pages:
         elif self.page == 13:
             self.page13_enter()
         elif self.page == 4:
-            self.log("page 4 = 游戏本体（由 main.py 的 game 循环接手）")
-            self.quit = True
+            self.p4_enter()                       # 0x4593C4 0x4505B0
+            self.p4_enter_ok = self.flags.is_empty()   # 0x4593C9 test al ⇒ 决定是否进帧循环
         else:
             self.log(f"page {self.page} 未实现 → quit")
             self.page = 0
@@ -1018,6 +1021,9 @@ class Pages:
             return self.page3_step()
         if self.page == 13:
             return self.page13_step()
+        if self.page == 4:
+            # 0x4593C2：`if (0x4505B0) { if (0x451110) while (0x451110); }`
+            return self.p4_enter_ok and self.p4_step()
         return False
 
     def finish(self) -> None:
@@ -1030,6 +1036,8 @@ class Pages:
             self.page3_finish()
         elif self.page == 13:
             self.page13_finish()
+        elif self.page == 4:
+            self.p4_finish()                      # 0x4593E5（进场失败也执行）
 
     def advance(self) -> None:
         """一帧：step 返回 0 → finish（页号切换）→ 页机重新分发。"""
