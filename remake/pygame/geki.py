@@ -3582,8 +3582,8 @@ class Pages(Page4Mixin):
         if getattr(self, "p4_q4cc", None) is None:
             self.p4_q4cc = self._p4_q("ui4cc")
         self._render_queue(c, self.p4_q4cc)             # 0x4AD4CC 页4 4CC 队列
-        if getattr(self, "p4_q43c", None):
-            self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
+        # 0x458EF0 无条件依次调用 6 条链表的渲染（空表也调），不能因列表为空而跳过
+        self.p4_render_ents()                           # 0x4AD43C 页4 实体显示表
         self._render_queue(c, self._p4_q("ui49c"))      # 0x4AD49C
         self._render_queue(c, self._p4_q("ui4fc"))      # 0x4AD4FC
         if DRAW_DISPLAY_NODES:

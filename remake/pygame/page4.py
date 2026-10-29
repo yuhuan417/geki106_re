@@ -5503,13 +5503,9 @@ class Page4Mixin:
         """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），
         源矩形先按 (0,0,640,480) 裁剪窗裁（`0x459F70` 给的整屏）。"""
         c = self.canvas
-        # 0x458EF0 的绘制顺序：12 槽之后依次是 6 条显示链表
-        # 0x4AD4CC / 0x4AD43C / 0x4AD49C / 0x4AD40C / 0x4AD46C / 0x4AD4FC
-        ents = []
-        for q in (self._p4_q("ui4cc"), self.p4_q43c, self._p4_q("ui49c"),
-                  self._p4_q("ui40c"), self._p4_q("ui46c"), self._p4_q("ui4fc")):
-            ents.extend(list(q))
-        for e in ents:
+        # 0x458EF0 的第 2 轮 = 0x402531 → 0x430840(0x4AD43C)；
+        # 其余队列由 geki.draw() 里的 _render_queue 逐条调用（顺序同 0x458EF0）
+        for e in list(self.p4_q43c):
             nd = e.node
             # 0x45A170 的可见性只看节点自身（byte[node+0x1C]），不看实体类型
             if nd is None or not nd.active:
