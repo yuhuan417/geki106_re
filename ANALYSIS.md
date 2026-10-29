@@ -6188,6 +6188,36 @@ thunk 解析：`0x4020BD→0x447640`、`0x4015FF→0x447410`、`0x401E06→0x448
 又是 `0x44E4A0/0x44E620` 的**头像 sprite 播放器** —— 同一个全局对象，`+0x4C` 起存当前帧矩形、
 `+0x14/+0x18` 存光标坐标。早期把它只记成 "DirectInput 管理器" 是不完整的，特此更正。
 
+#### 16.147 带节点摘链 `0x457210` + 槽复位 `0x457260`（字段布局实证）
+
+```
+0x457210(this, node, prev)                 ; ret 8
+0x45721D  esi = [node+0x30]                ; next
+0x45721B  if (prev != 0) [prev+0x30] = next ; 否 → [this+4] = next（头）
+0x45722E  if (next == 0) [this+8] = prev    ; 尾指针
+0x457235  if (node != 0) { eax=[node]; push 1; call [eax] }   ; node->vtable[0](1) ⇒ 析构+释放
+0x45723B  return next
+```
+
+⇒ 带链表是**双向**的：头 `[this+4]`、尾 `[this+8]`、next `+0x30`。
+
+```
+0x457260(this)                             ; 槽复位
+0x457264 0x401EC4(this)
+0x457270 rep stosd 20 个 dword @ this+0x30 ; params（20）
+0x45727A rep stosd 20 个 dword @ this+0x80 ; rates （20）
+0x457282 rep stosd 0xA6E 个 dword @ this+0xD0 ; grid 区
+0x457292 [this+0x2A8C] = 0 ; [this+0x2A88] = 0
+```
+
+**布局算术对上了**：`0xD0 + 0xA6E*4 = 0xD0 + 0x29B8 = 0x2A88`
+⇒ grid 区正好结束在 `+0x2A88`，紧接着是 §16.141 的 `+0x2A88` 倒计时、
+`+0x2A8C` 模式位、`+0x2A90` 启用位、`+0x2A94` 累加器，元素总长 `0x2A98`。
+
+⇒ 槽元素 = `params[20]` + `rates[20]` + `grid[0xA6E 个 dword]` + 4 个尾部字段。
+`params`/`rates` 各 **20** 项这一点由此处 `rep stosd 20` 独立确认
+（注意 §16.142 的**逐帧推进**只动前 19 项，两者不矛盾）。
+
 #### 16.146 层级阶梯 `0x457050`（bit16，写每条的第 3 个 dword）
 
 ```
