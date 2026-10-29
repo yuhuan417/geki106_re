@@ -601,7 +601,7 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
     """
     self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
     self.p4_avatar_fid = fid
-    rec = self.p4_avatar_rect(fid)                     # 0x4C 帧记录（图集现算）
+    rec = p4_avatar_rect(self, fid)                    # 0x4C 帧记录（图集现算）
     if rec is not None:
         self.p4_avatar_rec = rec
 
