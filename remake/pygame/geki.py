@@ -315,10 +315,12 @@ class Layers:
         # 0x44C640 → 0x44BE10：层表面**按资源尺寸**建立，不是固定 640×480。
         # bm_cm48 是 240×528（页13 层0），旧版把它裁到 480 行 ⇒ y≥0x1E0 的精灵
         # （如 0x120D112B 的 (0x78,0x1F8,0x8F,0x20F)）永远贴不出来。
-        if lay.w != w or lay.h != h:
-            old_key = lay.ckey
-            lay = Layer(int(w), int(h))
-            lay.ckey = old_key        # 0x44CE60 设的色键是**层**的属性，0x44BE10 只写像素，不清键
+        # 0x44BE10 是"往**已存在的**层表面左上角写像素"，不改表面尺寸（0x44C560 建的那块）。
+        # 只有层不存在、或现有表面装不下这张图时才按图尺寸重建。
+        if lay is None or lay.w < w or lay.h < h:
+            old_key = lay.ckey if lay is not None else -1
+            lay = Layer(max(w, lay.w if lay else 0), max(h, lay.h if lay else 0))
+            lay.ckey = old_key        # 0x44CE60 设的色键是**层**的属性，写像素不清键
             self.tab[n] = lay
         lay.buf[0:h, 0:w] = px
         lay.bind_id = ggd_id          # 记录“这一层当前装的是哪个 GGD”
