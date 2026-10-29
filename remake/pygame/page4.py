@@ -4622,6 +4622,37 @@ class Page4Mixin:
         slot.bands.append(BgBand(slot, idx))
 
     @staticmethod
+    def p4_4511_ta(prev_b: int, b: int, prev_a: int, a: int, old_ta: int):
+        """`0x451186..0x451206`：`[0x56CCD4]`（状态行的 `TA`）其实是**两个计时器的比率**。
+
+        ```
+        0x451186/0x451193 门：[0x56CCC9] 与 [0x56CCB5] 都为 1 才算
+        0x4511A2 ecx = 0x4AB570 ; call 0x401A28 → eax ; esi = eax   ; 计时器 A
+        0x4511AC ecx = 0x4CD5D8 ; call 0x4012C6 → eax ; ebp = eax   ; 计时器 B（回放管理器）
+        0x4511BA eax = [0x56CCD0]（上次 B）; 0x4511BF cmp eax,ebp ; je 0x45120C  ; B 未变 → 整段跳过
+        0x4511C3 ecx = [0x56CCCC]（上次 A）; 0x4511C9 cmp esi,ecx ; je 0x451200  ; A 未变 → 不除
+        0x4511CD..0x4511E4  (ebp - 上次B) * 100      ; ×5 ×5 shl2 = ×100
+        0x4511E8 div edi (edi = esi - ecx)           ; / (A - 上次A)
+        0x4511EA cmp eax,0x3E8 ; 0x4511EF [0x56CCD4]=eax ; 0x4511F4 jb
+        0x4511F6 [0x56CCD4] = 0x3E7                  ; >= 1000 钳到 999
+        0x451200 [0x56CCD0]=ebp ; 0x451206 [0x56CCCC]=esi
+        ```
+
+        ⇒ `TA = (B - 上次B) * 100 / (A - 上次A)`，**钳 999**。
+        这是个**比率/速率百分比**，配合 `%03d` 的宽度（最大 999）恰好自洽。
+
+        返回 `(new_ta, new_prev_b, new_prev_a)`；前两个「未变」分支原样保留旧值。
+        """
+        if b == prev_b:
+            return old_ta, prev_b, prev_a          # 0x4511BF je 0x45120C：整段跳过
+        if a == prev_a:
+            return old_ta, b, a                     # 0x4511C9 je 0x451200：只更新上次值
+        ta = ((b - prev_b) * 100) // (a - prev_a)
+        if ta >= 0x3E8:
+            ta = 0x3E7                              # 0x4511F6
+        return ta, b, a
+
+    @staticmethod
     def p4_4512_status(ts: int, ta: int) -> str:
         """`0x451259..0x4512C2`：页4 每帧状态行的**两个计时字段**（不是分数）。
 

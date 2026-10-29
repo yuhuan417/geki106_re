@@ -1601,6 +1601,16 @@ def main():
             0x4A4040: b"run", 0x4A4044: b"list", 0x4A404C: b"goto",
             0x4A4054: b"auto", 0x4A405C: b"color"}
     _okl = all(bytes(img[_a - ib:_a - ib + len(_t)]) == _t for _a, _t in _lbl.items())
+    _tar = page4.Page4Mixin.p4_4511_ta
+    check("0x451186..0x451206：[0x56CCD4]（TA）= (B-上次B)*100/(A-上次A)，钳 999；"
+          "B 未变整段跳过、A 未变只更新上次值",
+          _tar(0, 10, 0, 5, 0) == (200, 10, 5)
+          and _tar(0, 0, 0, 5, 42) == (42, 0, 0)
+          and _tar(0, 10, 0, 0, 42) == (42, 10, 0)
+          and _tar(0, 100, 0, 1, 0) == (999, 100, 1)
+          and img[0x4511EA - ib:0x4511EA - ib + 5] == bytes([0x3D, 0xE8, 0x03, 0x00, 0x00])
+          and img[0x4511F6 - ib:0x4511F6 - ib + 10]
+              == bytes([0xC7, 0x05, 0xD4, 0xCC, 0x56, 0x00, 0xE7, 0x03, 0x00, 0x00]), "")
     _sts = page4.Page4Mixin.p4_4512_status
     check("0x451259..0x4512C2 状态行 = 「TS:%05d 」(值/1000，钳 0x5F5DD18=99999000) + 「TA:%03d 」",
           _sts(0, 0) == "TS:00000 TA:000 "
