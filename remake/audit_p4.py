@@ -209,6 +209,15 @@ def main():
           and img[0x4306DA - ib] == 0x2B,
           f"cdq={img[0x4306D1-ib]:#x} xor={img[0x4306D8-ib]:#x} sub={img[0x4306DA-ib]:#x}")
 
+    print("== 11b. 记录构造器 0x4023C4 是 thunk（§16.138 二次更正）")
+    check("0x4023C4 字节为 E9 且指向 0x430400",
+          img[0x4023C4 - ib] == 0xE9 and thunk(0x4023C4) == 0x430400,
+          f"{img[0x4023C4-ib-ib] if False else img[0x4023C4-ib]:#x} → {thunk(0x4023C4):#x}")
+    check("0x430400 用 rep movsd 拷 5 dword",
+          img[0x430425 - ib] == 0xB9 and u32(0x430426) == 5
+          and img[0x430434 - ib] == 0xF3,
+          "")
+
     print("== 12. 回放三数组布局（§12）")
     check("回放数组长度常量 0x34BC0", 0x34BC0 == 216000 + 0, hex(0x34BC0))
     check("三数组间距 0x34BF0", 0x34BF0 == 0x34BC0 + 0x30, hex(0x34BF0))
