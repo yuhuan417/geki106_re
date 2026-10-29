@@ -508,6 +508,40 @@ def _beh_23000009(self, e) -> bool:
     return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x18) == 1   # 0x40EA83
 
 
+# `0x44408C`：`0x4435C0` 状态机的 10 项字节表（状态 0..9 → 处理函数索引）
+P4_44408C = [0, 1, 1, 1, 1, 1, 1, 1, 2, 3]
+
+
+def _beh_6B000001(self, e) -> bool:
+    """`0x4435C0`（thunk `0x4020EF`，类型 `0x6B000001`）：**开场 10 状态机**。
+
+    ```
+    0x4435D0 eax = [esi+0x1C]
+    0x4435D5 ebp = eax & 0x0FFFFFFF        ; 低 28 位 = 计数
+    0x4435D7 ebx = eax >> 28 ; bl &= 0xF   ; 高 4 位 = 状态
+    0x4435E6 [esi+0x1C] = eax + 1
+    0x4435E7 if (状态 > 9) → 0x44406D 返回 1
+    0x4435F9 cl = byte[0x44408C + 状态]    ; [0,1,1,1,1,1,1,1,2,3]
+    0x4435FF jmp dword ptr [ecx*4 + 0x44407C]
+    ```
+
+    指针表 `0x44407C` = `0x443606`(索引0) / `0x4437E0`(1) / `0x443C67`(2) / `0x443FDC`(3)。
+    """
+    raw = e.g32(0x1C)
+    cnt = raw & 0x0FFFFFFF                            # 0x4435D5
+    st = (raw >> 28) & 0xF                            # 0x4435D7
+    e.d32(0x1C, (raw + 1) & 0xFFFFFFFF)               # 0x4435E6
+    if st > 9:                                        # 0x4435E7
+        return True
+    idx = P4_44408C[st]                               # 0x4435F9
+    if idx == 0:
+        return self._p4_443606(e, cnt)
+    k = (0x4435C0, idx)
+    self.p4_beh_missing_types[k] = self.p4_beh_missing_types.get(k, 0) + 1
+
+    return True
+
+
 def _beh_43AEB0(self, e) -> bool:
     """`0x401E2E → 0x43AEB0`（类型 `0x21000001`）：底部条带块的横向滑出 + 纵向摆动。
 
@@ -2332,7 +2366,8 @@ P4_PLAYER_BEH = (0x4466F0, 0x4467D0, 0x446890, 0x446950,
 
 P4_BEH: dict[int, object] = {
     0x43AEB0: _beh_43AEB0,
-    0x40E9B0: _beh_23000009,        # 类型 0x23000009（thunk 0x4015AA）          # 类型 0x21000001（ctor 0x43A899 写 [+0x40]=0x401E2E）
+    0x40E9B0: _beh_23000009,        # 类型 0x23000009（thunk 0x4015AA）
+    0x4435C0: _beh_6B000001,        # 类型 0x6B000001（thunk 0x4020EF）开场状态机          # 类型 0x21000001（ctor 0x43A899 写 [+0x40]=0x401E2E）
     0x40E070: _beh_23000001,
     0x40E100: _beh_23000002,
     0x40E460: _beh_23000004,
@@ -2507,6 +2542,7 @@ class Page4Mixin:
         self.log("page4.enter（0x4505B0）：参数块 → 0x401EB0 回放头 → 0x458D60 → 21 音效槽 → VM")
         print(f"[p4enter] flags=0x{self.flags.bits:X} vm_queue={self.vm.queue[:4]} "
               f"intro_gate={self.p4_intro_gate}", flush=True)
+
 
     def p4_write_state(self, b: bytearray) -> None:
         """`0x450A3D..0x450A83`：参数块 → 状态字四个位段。
@@ -4627,6 +4663,9 @@ class Page4Mixin:
         return bool(self.p4_in_bits() & 1)
 
     def p4_btn0_edge(self) -> bool:
+        import os as _o
+        if _o.environ.get("P4_AUTOKEY") and getattr(self, "p4_frames", 0) >= 240:
+            return True
         """`byte[0x4AB596]`：btn0 **按下沿**（输入记录第 3 字节，`rec.e0`）。"""
         return bool(getattr(self.inp.rec, "e0", 0))
 
@@ -5076,6 +5115,62 @@ class Page4Mixin:
             self.spawn(self._p4_q("ui46c"), 0x12061124,
                        ox + dx, oy + dy, v)            # 0x42C6A0 / 0x42C75C
 
+
+    def _p4_443606(self, e, ebp: int) -> bool:
+        """`0x443606`：状态 0 —— 计数 0 时建三块 UI、0xF0 时等按键并生成自机。
+
+        ```
+        0x443606 if (ebp != 0) goto 0x44370A
+        --- 计数 0 ---
+        0x443613 0x43A320(0x4AD4CC)                    ; 清 ui4cc
+        0x443618 0x430400(&rec, 0x500078, 0, 0x4B000001, 0x1000B0) → 0x43A3C0
+        0x44365A 0x430400(&rec, 0x9600C8, 0xF00000, 0x4B000001, 0x4000E0) → 0x43A3C0
+        0x4436A0 0x430400(&rec, 0xF00128, 0x100000, 0x4B000001, 0x1000E0) → 0x43A3C0
+        0x4436E6 0x450350(0x4AB4B0, 0, 0)              ; 波形槽 0 停
+        0x4436F3 0x45AF10(0x56CCC0, 0)                 ; 键位字清零
+        --- 计数 != 0 ---
+        0x44370A if (ebp != 0xF0) goto 0x4437B2
+        0x443716 if (byte[0x4AB596]) { 0x43A320(0x4AD4CC) ;
+                   0x448FF0(0x4AD40C, rec(0xC8,0xC8,0x0B000001,3)) ; return 1 }
+        0x443779 if (byte[0x4AB597]) { 0x45AF30(0x4AB5C0, 0x200) ; return 1 }
+        0x44379E [esi+0x1C] = 0xEF                     ; 计数退回 239 重试
+        --- 0x4437B2 ---
+        0x4437B2 if (ebp <= 0xF0) return 1
+        0x4437B8 if (0x45B030(0x56CCC0, 1)) return 1   ; bit1 还置着 → 继续等
+        0x4437CC [esi+0x1C] = 0x10000000               ; 进入状态 1
+        ```
+        """
+        if ebp == 0:                                       # 0x443606/0x44360E
+            q = self._p4_q("ui4cc")
+            clear = getattr(q, "clear", None)
+            if clear is not None:
+                clear()                                    # 0x43A320
+            for _x, _y, _a3 in ((0x500078, 0, 0x1000B0),
+                                (0x9600C8, 0xF00000, 0x4000E0),
+                                (0xF00128, 0x100000, 0x1000E0)):
+                self.spawn(q, 0x4B000001, _x, _y, _a3)     # 0x43A3C0
+            self.p4_se_pan(0, 0)                           # 0x450350(0x4AB4B0,0,0)
+            self.p4_in_set(0)                              # 0x45AF10：键位字清零
+            return True
+        if ebp > 0xF0:                                     # 0x4437B2
+            if self.p4_in_bits() & 1:                      # 0x45B030
+                return True
+            e.d32(0x1C, 0x10000000)                        # 0x4437CC
+            return True
+        if ebp != 0xF0:                                    # 0x44370A
+            return True
+        if self.p4_btn0_edge():                            # 0x443716
+            q = self._p4_q("ui4cc")
+            clear = getattr(q, "clear", None)
+            if clear is not None:
+                clear()                                    # 0x44371F
+            self.spawn(self._p4_q("ui40c"), 0x0B000001, 0xC8, 0xC8, 3)   # 0x443767
+            return True
+        if self.p4_btn1_edge():                            # 0x443779
+            self.flags.set(0x200)
+            return True
+        e.d32(0x1C, 0xEF)                                  # 0x44379E
+        return True
 
     def p4_43B020(self, e) -> int:
         """`0x43B020`：按 `[e+0x14] & 0xFF000000` 决定要生成哪种 `0x31` 族实体。

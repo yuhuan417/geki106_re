@@ -1751,6 +1751,11 @@ def main():
           and page4.Page4Mixin._p4_div3(9) == 3
           and page4.Page4Mixin._p4_div3(-9) == -3
           and page4.Page4Mixin._p4_div3(8) == 2, "")
+    check("0x4435C0 状态机落地：`P4_44408C` = 0x44408C 的 10 项字节表；"
+          "`0x443606` 计数 0 建三块 0x4B000001、0xF0 等 btn0 才生成自机、"
+          "否则 `[+0x1C]=0xEF` 重试；`[+0x1C]` 高 4 位状态 / 低 28 位计数",
+          page4.P4_44408C == [0, 1, 1, 1, 1, 1, 1, 1, 2, 3]
+          and page4.P4_BEH.get(0x4435C0) is not None, "")
     _ctor = {i.address: (i.mnemonic, i.op_str)
              for i in _mdk.disasm(img[0x43D785 - ib:0x43D7A8 - ib], 0x43D785)}
     _free = {i.address: (i.mnemonic, i.op_str)
