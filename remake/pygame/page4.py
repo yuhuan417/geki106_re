@@ -1125,12 +1125,8 @@ class Page4Mixin:
               f"bg_layer={sorted({b.layer for x in self.p4_bg for b in x.bands})} "
               f"bg_flags={[hex(x.flags) for x in self.p4_bg[:8]]} "
               f"bg_kind0={[x.grid[0][2] if x.grid else None for x in self.p4_bg[:8]]} "
-              "palB4=%s bg=%s acc=%d idxU=%d palU=%d" % (
-                  self.pal_now[0xB4].tolist(), 
-                  [[b.pos, b.visible, b.kind, b.layer, b.dst] for b in self.p4_bg[0].bands[:2]],
-                  self.p4_bg[0].acc if self.p4_bg[0].acc < 0x80000000 else self.p4_bg[0].acc - 0x100000000,
-                  len(set(self.canvas.buf.ravel().tolist())),
-                  len({tuple(int(v) for v in x) for x in self.pal_now}),), flush=True)
+              "S0=%s" % ([self.p4_bg[0].params[10], self.p4_bg[0].params[13],
+                          self.p4_bg[0].params[14], len(self.p4_bg[0].bands)],), flush=True)
 
     def p4_hud(self) -> None:
         """0x4517E1：`0x44D010(0x4AA7B0,&{0xE0,0x88},0xD,&{0,0x40,0xBF,0x6F})` + 两个准星。
