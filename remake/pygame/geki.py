@@ -1934,9 +1934,14 @@ class Pages:
         e = UiEntity(type_word=ty, a3=int(a3))
         e.beh = "fx12"
         e.p["kind"] = kind
-        e.p["vx"] = (a3 >> 16) & 0xFFFF
+        # 0x42B227 movsx ecx,word[eax+0xC] → **[+0x1C] = rec[0xC] 的低 16 位 = vx**；
+        # 0x42B231 movsx edx,word[eax+0xE] → **[+0x20] = 高 16 位 = vy**；
+        # 积分 0x42B980：`[+0x24] += [+0x1C]`（x）、`[+0x28] += [+0x20]`（y）。
+        # 旧版把高低位对调（vx=高、vy=低）⇒ 弹体沿错误的轴飞（页13 全体朝下）。
+        _a3 = a3 & 0xFFFFFFFF
+        e.p["vx"] = _a3 & 0xFFFF
         e.p["vx"] = e.p["vx"] - 0x10000 if e.p["vx"] & 0x8000 else e.p["vx"]
-        e.p["vy"] = a3 & 0xFFFF
+        e.p["vy"] = (_a3 >> 16) & 0xFFFF
         e.p["vy"] = e.p["vy"] - 0x10000 if e.p["vy"] & 0x8000 else e.p["vy"]
         e.p["px"] = int(x) << 8                       # [+0x24]
         e.p["py"] = int(y) << 8                       # [+0x28]
