@@ -589,15 +589,13 @@ def p4_446470(self, e, a: int, b: int) -> None:
 
 
 def p4_446470_play(self, fid: int, e, d: int) -> None:
-    """`0x4019B0 → 0x44E620` / `0x40115E → 0x44E4A0`：头像帧播放。
+    """`0x4019B0 → 0x44E620` / `0x40115E → 0x44E4A0`：**切换输入配置**（非头像帧）。
 
     ```
-    0x44E4AB eax = fid*7 ; 0x44E4B7 帧表 = 0x498A88 + fid*14
-    0x44E4BE 复制 4+3 个 word 到 [mgr+0x4C]
-    0x44E620 再写 [mgr+0x14] = x、[mgr+0x18] = y
+    0x44E4AB eax = fid*7 ; 0x44E4B7 表 = 0x498A88 + fid*14
+    0x44E4BE 复制 14 字节到 [mgr+0x4C]      ; 覆盖 +0x4C 摇杆启用 / +0x4E 标志 / +0x50 灵敏度
+    0x44E620 另写 [mgr+0x14] = x、[mgr+0x18] = y   ; 指针坐标
     ```
-    `0x498A88` 是**运行期填充**的图集表（静态镜像是代码样字节），故这里只登记 fid、
-    矩形由 `p4_avatar_rect(fid)` 从资源层现算。
     """
     self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
     self.p4_avatar_fid = fid
@@ -607,10 +605,20 @@ def p4_446470_play(self, fid: int, e, d: int) -> None:
 
 
 def p4_avatar_rect(self, fid: int):
-    """`0x498A88 + fid*14`：14 字节/项、7 个 u16 的静态帧表（`.rdata`，`build_p4_avatar.py` 导出）。
+    """`0x498A88 + fid*14`：**输入配置表**（不是 sprite 帧表）。
 
-    `0x44E4A0` 把整项 14 字节复制到 `[mgr+0x4C]`；7 个 u16 的字段语义尚未定案，
-    这里返回原始元组，避免凭空解释。
+    `0x44E4A0` 把整项 14 字节复制到输入管理器 `0x4AB454` 的 `+0x4C` 起，而 Poll（`0x44E660`）
+    随后这么用它：
+
+    ```
+    0x44E8B5 al = byte [mgr+0x4C] ; 0x44E8BA if (al == 0) 跳过整个摇杆处理
+    0x44E917 bl = byte [mgr+0x4E]
+    0x44E91C ecx = movsx word [mgr+0x50]        ; 速度/灵敏度
+    0x44E932 sar ebx,1 ; add ecx,ebx            ; 按该值放大轴量
+    ```
+
+    ⇒ `+0x4C` = 摇杆启用字节、`+0x4E` = 附加标志、`+0x50` = 灵敏度 word；
+    14 字节 = 7 个 u16 的**输入配置预设**。名字沿用历史命名，语义以此为准。
     """
     tab = getattr(self, "p4_avatar_table", None)
     if tab is None:
