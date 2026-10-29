@@ -909,7 +909,7 @@ class Page4Mixin:
         if f & 0x0001:
             self._bg_shift(slot, 0)                      # 0x456F30（x）
         if f & 0x0100:
-            self._bg_shift(slot, 2)                      # 0x456FB0
+            self._bg_init_x(slot)                        # 0x456FB0
         if f & 0x0010:
             self._bg_shift(slot, 1)                      # 0x456F70（y）
         if f & 0x1000:
@@ -937,6 +937,26 @@ class Page4Mixin:
             grid[i][2] = kind
             cur += (growth * cur) >> 6
 
+    def _bg_init_x(self, slot) -> None:
+        """`0x456FB0`（bit8）：用 P[0]/P[3]/P[6] 线性铺开每格的 x（像素）。
+
+        ```
+        edx = P[0]; eax = P[3]; count = P[10]
+        for i: grid[i].x = edx >> 6; eax += (eax * P[6]) >> 6; edx += eax
+        ```
+        """
+        n = slot.params[10]
+        if n <= 0 or n > 894:
+            return
+        while len(slot.grid) < n:
+            slot.grid.append([0, 0, 0])
+        edx = slot.params[0]
+        eax = slot.params[3]
+        for i in range(n):
+            slot.grid[i][0] = (edx >> 6) & 0xFFFFFFFF
+            eax = (eax + ((eax * slot.params[6]) >> 6)) & 0xFFFFFFFF
+            edx = (edx + eax) & 0xFFFFFFFF
+
     def _bg_shift(self, slot, axis: int) -> None:
         """`0x456F30`（axis=0，x/+0xD0）与 `0x456F70`（axis=1，y/+0xD4）：
         整表平移 `delta = (params[axis]>>6) - grid[0][axis]`；`0x456FB0`/`0x457000` 同构。"""
@@ -959,8 +979,10 @@ class Page4Mixin:
         返回 0 表示出界该摘链（`0x457210`）。"""
         slot = band.slot
         prm = slot.params
-        # `0x45775D mov ecx,[eax+0x38]`，eax = [band+8] = &slot[0x30] ⇒ 偏移 0x38 = 块内第 2 个 dword
-        band.pos = (band.pos + prm[2]) & 0xFFFFFFFF
+        # `0x45775D mov ecx,[eax+0x38]`，eax = [band+8] = &slot[0x30]
+        # ⇒ 偏移 0x38 = (0x68-0x30)/4 = **块内第 14 个 dword**（关1 ch0 = 48）。
+        # pos 是**整数格索引**（0x4578AB 的 *3 寻址全程无移位）；48 格/帧 = 36px/帧，格→像素在格子表里。
+        band.pos = (band.pos + prm[14]) & 0xFFFFFFFF
         pos = band.pos if band.pos < 0x80000000 else band.pos - 0x100000000
         # 可见窗 [param[0x2C], param[0x30]] 且 param[0x4C] != 0
         lo, hi, vis = prm[11], prm[12], prm[19] & 0xFF
