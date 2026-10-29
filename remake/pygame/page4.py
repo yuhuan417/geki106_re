@@ -5553,7 +5553,9 @@ class Page4Mixin:
         for a in range(0x14, 0x24, 4):
             self.p4_stat[0x4CD4A0 + a] = 0
         self.p4_level = level
-        self.p4_stat[0x4CD4A0 + 0x24] = level
+        # ★ 只写**低 16 位**：`+0x24` 是 word，`+0x26` 是紧邻的另一个 word（0x45EB40 置 0xA0）。
+        # 若按 dword 写，会把 +0x26 一起清零。
+        self.p4_stat_w16(0x24, level)
 
     def sequence_started(self) -> bool:
         """`0x460EE0(0x4CD590)`：`eax = [+0x40]`（getter，原样返回）。
@@ -5591,9 +5593,74 @@ class Page4Mixin:
         if p2c:
             self.p4_stat[p2c + 0x1C] = 1
 
+    P4_STAT_BASE = 0x4CD4A0
+
+    def p4_stat_w8(self, off: int, val: int) -> None:
+        base = self.P4_STAT_BASE
+        d = base + (off & ~3)
+        cur = self.p4_stat.get(d, 0)
+        sh = (off & 3) * 8
+        self.p4_stat[d] = (cur & ~(0xFF << sh)) | ((val & 0xFF) << sh)
+
+    def p4_stat_w16(self, off: int, val: int) -> None:
+        base = self.P4_STAT_BASE
+        d = base + (off & ~3)
+        cur = self.p4_stat.get(d, 0)
+        sh = (off & 2) * 8
+        self.p4_stat[d] = (cur & ~(0xFFFF << sh)) | ((val & 0xFFFF) << sh)
+
+    def p4_45eb40(self, arg1: int, arg2: int) -> None:
+        """`0x45EB40(this,arg1,arg2)`：**阶段全局对象 `0x4CD4A0` 的重置**。
+
+        ```
+        0x45EB49 0x45DF40(this)
+        0x45EB4E.. zero [+4..+0x13]        （4 dword）
+        0x45EB63.. zero [+0x14..+0x23]     （4 dword）
+        0x45EB66 cx = (sbyte)[esp+0x78]    ; arg1 按**有符号字节**取
+        0x45EB7B word[+0x2C] = cx
+        0x45EB84 word[+0x24] = 0           ; 关卡号
+        0x45EB88 word[+0x26] = 0xA0        ; 160
+        0x45EB8E word[+0x28] = 0
+        0x45EB92 byte[+0x2A] = 0
+        0x45EB95 [+0x30] = arg2
+        0x45EB98 [+0x34] = 0xF4240         ; 分数基数 1,000,000
+        0x45EB9F byte[+0x38] = 0
+        0x45EBA2.. zero [+0x3C..+0x4F]     （5 dword）
+        0x45EBB2.. zero [+0x50..+0x63]     （5 dword）
+        0x45EBC5 0x45A070(this+0x64)       ; 内嵌子对象构造（未展开，见 §16.283）
+        ```
+        """
+        for off in (4, 8, 0xC, 0x10, 0x14, 0x18, 0x1C, 0x20,
+                    0x3C, 0x40, 0x44, 0x48, 0x4C,
+                    0x50, 0x54, 0x58, 0x5C, 0x60):
+            self.p4_stat[self.P4_STAT_BASE + off] = 0
+        self.p4_stat_w16(0x2C, arg1 & 0xFFFF)
+        self.p4_stat_w16(0x24, 0)
+        self.p4_stat_w16(0x26, 0xA0)
+        self.p4_stat_w16(0x28, 0)
+        self.p4_stat_w8(0x2A, 0)
+        self.p4_stat[self.P4_STAT_BASE + 0x30] = arg2 & 0xFFFFFFFF
+        self.p4_stat[self.P4_STAT_BASE + 0x34] = 0xF4240
+        self.p4_stat_w8(0x38, 0)
+
     def stage_globals_begin(self) -> None:
-        """0x45F5C0(0x4CD4A0)。"""
-        return
+        """`0x45F5C0(0x4CD4A0)`：**阶段开始**。
+
+        ```
+        0x45F5C4 push 0 ; push 0
+        0x45F5C8 di = word[esi+0x24]      ; 取关卡号（此时还未被清零）
+        0x45F5CC 0x45EB40(this, 0, 0)     ; 重置全部字段
+        0x45F5D1 push edi ; 0x45F5D4 0x45EF10(this, di)   ; p4_set_level(关卡号)
+        0x45F5D9 byte[+0x38] = 1
+        ```
+
+        ★ 顺序：**先取 `[+0x24]`（关卡号）再重置**，因为 `0x45EB40` 会把 `+0x24` 清零。
+        照抄这个顺序，否则关卡号会丢。
+        """
+        level = (self.p4_stat.get(self.P4_STAT_BASE + 0x24, 0)) & 0xFFFF
+        self.p4_45eb40(0, 0)
+        self.p4_set_level(level)
+        self.p4_stat_w8(0x38, 1)
 
     def stage_globals_end(self) -> None:
         """0x45F760(0x4CD4A0)：结算/收尾。"""

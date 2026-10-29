@@ -1604,6 +1604,28 @@ def main():
     import inspect as _insp
     import capstone as _csk
     _mdk = _csk.Cs(_csk.CS_ARCH_X86, _csk.CS_MODE_32)
+    _sg = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45F5C0 - ib:0x45F5E0 - ib], 0x45F5C0)}
+    _er = {i.address: (i.mnemonic, i.op_str)
+           for i in _mdk.disasm(img[0x45EB40 - ib:0x45EBC6 - ib], 0x45EB40)}
+    _b = _Z()
+    _b.p4_stat[0x4CD4A0 + 0x24] = 7
+    _b.p4_stat[0x4CD4A0 + 0x34] = 0xDEAD
+    _b.stage_globals_begin()
+    check("0x45F5C0 阶段开始：**先取 [+0x24] 关卡号**再调 0x45EB40 重置（后者会清 +0x24），"
+          "然后 p4_set_level(关卡号)、byte[+0x38]=1；0x45EB40 把 +0x26 置 0xA0、+0x34 置 0xF4240",
+          _sg.get(0x45F5C8) == ("mov", "di, word ptr [esi + 0x24]")
+          and _sg.get(0x45F5CC) == ("call", "0x40163b")
+          and _sg.get(0x45F5D4) == ("call", "0x401f73")
+          and _sg.get(0x45F5D9) == ("mov", "byte ptr [esi + 0x38], 1")
+          and _er.get(0x45EB88) == ("mov", "word ptr [ebp + 0x26], 0xa0")
+          and _er.get(0x45EB98) == ("mov", "dword ptr [ebp + 0x34], 0xf4240")
+          and _er.get(0x45EB84) == ("mov", "word ptr [ebp + 0x24], ax")
+          and _b.p4_stat[0x4CD4A0 + 0x34] == 0xF4240
+          and (_b.p4_stat[0x4CD4A0 + 0x24] & 0xFFFF) == 7        # p4_set_level 把关卡号写回
+          and ((_b.p4_stat[0x4CD4A0 + 0x24] >> 16) & 0xFFFF) == 0xA0   # +0x26 与 +0x24 同 dword
+          and (_b.p4_stat[0x4CD4A0 + 0x38] & 0xFF) == 1
+          and _b.p4_level == 7, "")
     _sq = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x460E40 - ib:0x460E64 - ib], 0x460E40)}
     _o = _Z()
