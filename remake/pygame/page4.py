@@ -6472,22 +6472,24 @@ class Page4Mixin:
         0x4573FB acc += step → [esi+0x2a94]
         0x457403 cdq / xor / sub        ; eax = |acc|（对 INT_MIN 也成立的三指令取绝对值）
         0x457408 cmp eax, [esi+0x64](thresh) ; jl → 返回
-        0x45740C test step,step ; jl 0x457426   ; ★ 正负两种回绕，不对称
+        0x45740C test step,step ; jl 0x457426   ; ★ 正负两种回绕，不对称（**有符号** test）
         正：0x457414 acc -= thresh → 0x457120(this, acc - thresh)
         负：0x457429 eax = thresh + acc → 0x45742C 存 → 0x457434 eax = [esi+0x58] + acc - 1
             → 0x457120(this, [esi+0x58] + acc - 1)
         ```
 
-        返回 `None` = 未触发；否则返回要传给 `0x457120` 的相位值。
+        返回 `(phase, acc)`；phase=None = 未触发。acc/step/thresh 全程**有符号**
+        （exe 的 `test ebx,ebx / jl` 是符号位判断；旧复刻用 `& 0xFFFFFFFF` 后的
+        无符号值做 `step >= 0` 判断，负步进全走了正分支 ⇒ acc 单调下漂、相位恒负
+        被丢弃，战斗段 8 槽一条带都生不出来——2026-10-31 修）。
         """
-        acc = (acc + step) & 0xFFFFFFFF
-        a = acc if acc < 0x80000000 else acc - 0x100000000
-        if (a if a >= 0 else -a) < thresh:
+        acc = acc + step
+        if (acc if acc >= 0 else -acc) < thresh:
             return None, acc
         if step >= 0:
-            return (a - thresh), (a - thresh) & 0xFFFFFFFF
-        na = (a + thresh) & 0xFFFFFFFF
-        return (p58 + na - 1) & 0xFFFFFFFF, na          # 0x457434：32 位回绕加法
+            return acc - thresh, acc - thresh
+        na = acc + thresh
+        return p58 + na - 1, na                          # 0x457434
 
     def _bg_update(self, slot) -> None:
         """`0x457380`：速率生效 → 参数+=速率 → 分发 → 遍历带 → 滚动累加补带。"""
@@ -6506,8 +6508,15 @@ class Page4Mixin:
             if self._bg_band(band):
                 alive.append(band)
         slot.bands = alive                                   # 0x457210 摘链
+        # [slot+0x68]/[slot+0x64]：op7 速率应用会把 params 变成无符号存放
+        # （`& 0xFFFFFFFF`），而 exe 的 `test/jl` 按符号判断 ⇒ 读取时归一回有符号。
+        # （只归一 [0x80000000,0xFFFFFFFF] 的无符号态；params 里可能本就是负 int。）
         step = slot.params[14]                               # [slot+0x68]
+        if 0x80000000 <= step <= 0xFFFFFFFF:
+            step -= 0x100000000
         thresh = slot.params[13]                             # [slot+0x64]
+        if 0x80000000 <= thresh <= 0xFFFFFFFF:
+            thresh -= 0x100000000
         phase, slot.acc = self.p4_457380_acc(slot.acc, step, thresh, slot.params[10])
         if phase is None:
             return

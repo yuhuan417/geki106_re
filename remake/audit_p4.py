@@ -2395,12 +2395,15 @@ def main():
           and img[0x457175 - ib:0x457175 - ib + 4] == bytes([0x89, 0x46, 0x04, 0xEB])
           and img[0x4571BB - ib:0x4571BB - ib + 3] == bytes([0x89, 0x41, 0x30])
           and img[0x457282 - ib:0x457282 - ib + 5] == bytes([0xB9, 0x6E, 0x0A, 0x00, 0x00]), "")
-    check("0x457380 累加器：acc += step；|acc| < 阈值 不触发；"
-          "step>=0 → 相位 acc-阈值、acc-=阈值；step<0 → acc += 阈值 且相位 = [+0x58]+acc-1（32 位回绕）",
+    check("0x457380 累加器（2026-10-31 修正：全程有符号——exe 的 test/jl 按符号位，"
+          "旧复刻的 &0xFFFFFFFF 无符号回绕会把负 acc 翻正导致单调下漂）："
+          "acc += step；|acc| < 阈值 不触发；step>=0 → 相位 acc-阈值、acc-=阈值；"
+          "step<0 → acc += 阈值 且相位 = [+0x58]+acc-1",
           _ac(0, 3, 10, 0) == (None, 3)
           and _ac(7, 5, 10, 0) == (2, 2)
           and _ac(0, 10, 10, 0) == (0, 0)
-          and _ac(7, -20, 10, 5) == (1, 0xFFFFFFFD)
+          and _ac(7, -20, 10, 5) == (1, -3)
+          and _ac(-30, -6, 24, 110) == (97, -12)
           and img[0x457403 - ib:0x457408 - ib] == bytes([0x99, 0x33, 0xC2, 0x2B, 0xC2])
           and img[0x45740E - ib] == 0x7C, "")
     check("0x457380 带链遍历每帧调 tick：0x4573CE E8→0x40187A→0x457750（返回 0 走 0x457210 摘链+虚析构）；"
