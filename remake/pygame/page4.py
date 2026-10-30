@@ -234,7 +234,7 @@ class ScriptVM:
                 print(f"[band] t={self.owner.p4_frames if self.owner else '?'} "
                       f"count={n} start={int.from_bytes(body[0:4], 'little')} "
                       f"scroll={int.from_bytes(body[4:8], 'little')} "
-                      f"vals[0:6]={[(v & 0xFF, _p4_s16(v >> 16)) for v in vals[:6]]}")
+                      f"vals_full={[(v & 0xFF, _p4_s16(v >> 16)) for v in vals]}")
         elif op == 0xA:                                          # 0x460538
             # 0x460538 本体：0x456240(0x4CD484, [esi+4], [esi+8])——设置滚动速度/帧数。
             if self.owner is not None:

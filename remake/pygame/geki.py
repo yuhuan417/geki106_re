@@ -1161,9 +1161,13 @@ class Pages(Page4Mixin):
         """
         y = 0
         i = self.band_start
+        import os as _os
+        if _os.environ.get("P4_BANDDRAW") and getattr(self, "p4_frames", 0) in (712, 715, 720, 750, 760):
+            print(f"[banddraw] f={self.p4_frames} start={self.band_start} scroll={self.band_scroll} count={self.band_count}", flush=True)
         scroll = self.band_scroll
-        while y < H and i < self.band_count:
-            color, h = self.band_table[i]
+        cnt = max(self.band_count, 1)
+        while y < H:                         # 0x4562A0 只看 y，不查表项数（越界环绕）
+            color, h = self.band_table[i % cnt]
             hh = h - scroll
             scroll = 0                      # 只对起始条生效
             if y + hh > H:
@@ -1177,10 +1181,17 @@ class Pages(Page4Mixin):
         """0x456270(seq) + 0x4560C0(seq, delta)：按 speed 推进滚动量，超过当前带高则吃掉该带。"""
         if self.band_frames > 0:
             self.band_frames -= 1
-            self.band_scroll += self.band_speed
-            while self.band_start < self.band_count and \
-                    self.band_scroll >= self.band_table[self.band_start][1]:
-                self.band_scroll -= self.band_table[self.band_start][1]
+            self.band_scroll = (self.band_scroll + self.band_speed) & 0xFFFFFFFF
+            if self.band_scroll >= 0x80000000:
+                self.band_scroll -= 0x100000000
+            cnt = max(self.band_count, 1)
+            guard = 0
+            while guard < 4096:
+                guard += 1
+                _, h = self.band_table[self.band_start % cnt]
+                if self.band_scroll < h:
+                    break
+                self.band_scroll -= h
                 self.band_start += 1
 
     def band_scroll_for(self, speed: int, frames: int) -> None:
