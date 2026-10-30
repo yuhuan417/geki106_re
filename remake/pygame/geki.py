@@ -3597,6 +3597,9 @@ class Pages(Page4Mixin):
         self.p2_blits = []
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
+        # 0x458F3C if (arg) { 0x45EED0(0x4CD4A0); 0x460A90(0x4CD590) }：HUD 渲染（页4）
+        if getattr(self, "p4_bg", None) is not None:
+            self.p4_hud_draw()
         # 0x451316：页4 回放进度文字（`0x44D330`）画在 present 之前 ⇒ 叠在最上层。
         # 只在 `p4_debug_text()` 真的产出内容时才有值（门 `[0x56CCC9]`&`[0x56CCB5]`）。
         _dbg = getattr(self, "_p4_dbg_text", None)

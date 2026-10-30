@@ -353,6 +353,14 @@ def _p4_s8(v: int) -> int:
     return v - 0x100 if v & 0x80 else v
 
 
+def st_nodes(st, key):
+    """HUD 显示表的节点列表（单节点键也归一为列表）。"""
+    v = st.get(key)
+    if v is None:
+        return ()
+    return v if isinstance(v, list) else (v,)
+
+
 def _p4_result_stamp() -> bytes:
     """0x46411A（time → localtime）+ 0x463FBA（格式化）的日期时间串
     （记录 +0x1C 起 0x24 字节；复刻用本地时间，格式同 0x465B1C 的 %Y/%m/%d %H:%M:%S 族）。"""
@@ -4414,21 +4422,136 @@ class Page4Mixin:
         h.d32(0xEC, self.P4_HUD_KIND[kind & 0xFF] if (kind & 0xFF) < len(self.P4_HUD_KIND) else 0)
         return h
 
-    def p4_hud_draw(self, h) -> None:
-        """`0x45EED0`：HUD 每帧入口。
+    def p4_45e020(self) -> None:
+        """`0x45E020(h)`：分数数字三段式排版（逐行转写，docs/p4_stage_*.md §5 追记）。
 
         ```
-        0x45EED3 if ([h+0xE1]) { 0x401203→0x45E020(h); [h+0xE1] = 0 }
-        0x45EEEB 0x401695→0x45E340(h)
-        0x45EEF3 0x4011FE→0x45A170(h+0x64)      ; 渲染显示表
+        ebx = 1（已用节点数）；score = [+0x04]
+        score == 0 → 节点[1].src = (0,0x150,0x17,0x167)（"0" 字形）、ebx = 2
+        score > 0 → 逐位循环（0x462D71 除 10，低位在前）：
+            数字 == 0 的位跳过不占节点（0x45E0BB → 0x45E239）
+            位数 edi > 3 → 组标节点（0x45E0C1）：k = edi>>2、edi &= 3、游标 += k、
+                src = ((3·游标+9)·8, 0x180, 3·游标·8+0x5F, 0x197)
+            edi != 0 → 余数位节点（0x45E13A）：src = (edi*24, 0x180, +0x17, 0x197)
+            数字 != 1 → 单位节点（0x45E19F/1E8）：src = (digit*24, 0x150, +0x17, 0x167)
+        0x45E25D：前 ebx 个节点置显示，其余 20−ebx 个隐藏
+        ```"""
+        st = self.p4_stat
+        nodes = st.get("hud_nodes")
+        if not nodes:
+            return
+        score = st.get(0x4CD4A0 + 0x04, 0) & 0xFFFFFFFF
+        used = 1                                        # 0x45E02B ebx = 1
+        if score == 0:                                  # 0x45E038
+            nodes[1].src = (0, 0x150, 0x17, 0x167)      # 0x45E05C "0" 字形
+            used = 2                                    # 0x45E071
+        else:
+            v = score
+            cnt = 1                                     # edi（已处理位数）
+            ptr = 1                                     # esi 节点游标（第 2 槽起）
+            cursor = 0                                  # 帧−0x90（0x45E03C 清 0）
+            while True:
+                if used >= 0x14:                        # 0x45E09F
+                    break
+                q, digit = divmod(v, 10)                # 0x45E0AB
+                if digit == 0:                          # 0x45E0BB → 0x45E239
+                    v, cnt = q, cnt + 1
+                    if v == 0:                          # 0x45E24F jne
+                        break
+                    continue
+                if cnt > 3:                             # 0x45E0C1 组标
+                    k = cnt >> 2                        # 0x45E0CD
+                    cnt -= 4 * k                        # 0x45E0D4
+                    cursor += k                         # 0x45E0DB/DD
+                    c3 = cursor * 3
+                    nodes[ptr].src = ((c3 + 9) * 8, 0x180, c3 * 8 + 0x5F, 0x197)
+                    ptr += 1
+                    used += 1                           # 0x45E123..0x45E137
+                if cnt:                                 # 0x45E13A 余数位
+                    nodes[ptr].src = (cnt * 0x18, 0x180, cnt * 0x18 + 0x17, 0x197)
+                    ptr += 1
+                    used += 1                           # 0x45E166..0x45E196
+                    if digit != 1:                      # 0x45E183 je → 单位跳过
+                        nodes[ptr].src = (digit * 0x18, 0x150,
+                                          digit * 0x18 + 0x17, 0x167)    # 0x45E19F
+                        ptr += 1
+                        used += 1                       # 0x45E232
+                else:                                   # 0x45E1E8 edi == 0：只有单位
+                    if digit != 1:
+                        nodes[ptr].src = (digit * 0x18, 0x150,
+                                          digit * 0x18 + 0x17, 0x167)
+                        ptr += 1
+                        used += 1
+                v, cnt = q, cnt + 1                     # 0x45E239..0x45E24F
+                if v == 0:                              # 0x45E253 jne
+                    break
+        for i, nd in enumerate(nodes):                  # 0x45E25D..0x45E292
+            nd.active = 1 if i < used else 0
+
+    def p4_45e340(self) -> None:
+        """`0x45E340`：气槽排版（写图标乙 [+0xDC] 节点的源矩形）。
+
         ```
-        `0x45E020`（一次性重建）与 `0x45E340`（数字排版）尚未逐条展开，先按序调用占位统计。
-        """
-        if h.g32(0xE1):
-            self.p4_hud_rebuild(h)                   # 0x45E020
-            h.d32(0xE1, 0)
-        self.p4_hud_layout(h)                        # 0x45E340
-        self.p4_stat[0x45A170] = self.p4_stat.get(0x45A170, 0) + 1   # 0x45EEF3 渲染 h+0x64
+        0x45E347 v = s16[+0x26]
+        0x45E34B v < 0xA0 → 节点.src = ((v>>4)*0x18, 0x1E0, +0x17, 0x1F7)
+        0x45E3A6 满（≥0xA0）且 src.top != 0x1C8 → src = (0x48,0x1C8,0x5F,0x1DF)、[+0xE0]=0
+        0x45E3FD/0x45E41A：[+0xE0] 交错标志，0x45A790(node, ±0x18, 0, ±0x18, 0)
+        ```"""
+        st = self.p4_stat
+        ib = st.get("hud_icon_b")
+        if ib is None:
+            return
+        v = st.get(0x4CD4A0 + 0x26, 0)
+        v = v - 0x10000 if v & 0x8000 else v
+        if v < 0xA0:                                    # 0x45E34B
+            i = (v >> 4) & 0xF
+            x = i * 0x18
+            ib.src = (x, 0x1E0, x + 0x17, 0x1F7)
+            return
+        if ib.src[1] != 0x1C8:                          # 0x45E3A6 首次满格
+            ib.src = (0x48, 0x1C8, 0x5F, 0x1DF)
+            st[0x4CD4A0 + 0xE0] = 0
+        st[0x4CD4A0 + 0xE0] = 1 if ib.src[0] == 0 else 0    # 0x45E3FD..0x45E40E
+        d = 0x18 if st.get(0x4CD4A0 + 0xE0) else -0x18      # 0x45E41A / 0x45E435
+        l, t, r, b = ib.src
+        ib.src = (l + d, t, r + d, b)                   # 0x45A790(node, ±0x18, 0, ±0x18, 0)
+
+    def p4_45a170_hud(self) -> None:
+        """`0x45A170(h+0x64)` / `0x45A170(0x4CD590+0x04)`：HUD 显示表渲染
+        （可见节点按 层/源矩形/目标点 色键贴屏，节点序 = 表序）。"""
+        c = self.canvas
+        for key in ("hud_nodes", "hud_icon_a", "hud_icon_b", "st_icon_a", "st_icon_b"):
+            for nd in st_nodes(self.p4_stat, key):
+                if not nd.active:
+                    continue
+                lay = self.layers.tab.get(nd.layer)
+                if lay is None:
+                    continue
+                l, t, r, b = nd.src
+                dx, dy = nd.dst
+                c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+
+    def p4_hud_draw(self) -> None:
+        """`0x45EED0(0x4CD4A0)` + `0x460A90(0x4CD590)`：HUD 每帧入口（0x458EF0 尾）。
+
+        ```
+        0x45EED3 if (byte[+0xE1]) { 0x45E020(h); byte[+0xE1] = 0 }
+        0x45EEEB 0x45E340(h)                     ; 气槽排版
+        0x45EEF3 0x45A170(h+0x64)                ; 渲染 22 节点显示表
+        0x460A90：(倍率−1)%10 × 24 取字形写 [+0x2C] 节点 → 0x45A170(0x4CD590+0x04)
+        ```"""
+        st = self.p4_stat
+        if st.get(0x4CD4A0 + 0xE1):
+            self.p4_45e020()                          # 0x45EED3 → 0x45E020
+            st[0x4CD4A0 + 0xE1] = 0
+        self.p4_45e340()                              # 0x45EEEB
+        self.p4_45a170_hud()                          # 0x45EEF3 + 0x458F4D 两张表
+        ib = st.get("st_icon_b")                      # 0x460AC5 用 [+0x2C] 节点
+        t = st.get(0x4CD590 + 0x30, 0)
+        t = t - 0x100000000 if t & 0x80000000 else t
+        if ib is not None and t != -1 and t > 0:
+            ib.src = self.p4_hud_rect(t)              # 0x460AA2..0x460AC3
+            ib.active = 1
 
     def p4_hud_rebuild(self, h) -> None:
         """`0x45E020`：HUD 一次性重建（待展开）。"""
@@ -7726,13 +7849,109 @@ class Page4Mixin:
 
     # -- 0x458D60 / 进场里尚未定案的四段（显式占位，不猜行为）
     def stage_globals(self, a1: int, a2: int) -> None:
-        """0x458DBA → `0x45EB40(a1,a2)`（0x4CD4A0 的初值装配）。待规格 `docs/p4_stage_*.md`。"""
-        self.p4_stat[0x4CD4A0] = 0
-        return
+        """`0x458DBA → 0x45EB40(0x4CD4A0, a1, a2)`：本局记录构造 + **HUD 显示表（22 节点）**。
+
+        规格全文见 docs/p4_stage_0x45EB40_0x460930.md §1。要点：
+        ```
+        0x45DF40 旧 22 节点摘除 + 释放 [+0xE8]
+        [+0x04..+0x10] / [+0x14..+0x20] 各 4 dword 清 0
+        word[+0x2C] = (s8)a1（连击种子）；word[+0x24] = 0；word[+0x26] = 0xA0；
+        word[+0x28] = 0；byte[+0x2A] = 0；dword[+0x30] = a2（倍率种子）；
+        dword[+0x34] = 0xF4240；byte[+0x38] = 0；[+0x3C..+0x60] 10 dword 清 0
+        0x45A070(this+0x64)：显示表容器
+        20 数字节点（i=0..19）：[+0x88+4i]，layer 0、隐藏、dst = (604−24i, 12)；
+            首节点 src = (0, 0x180, 0x17, 0x197)
+        图标甲（+0xD8）：layer 0、显示、src (0x90,0x180,0xBF,0x197)、dst (12,48)
+        图标乙（+0xDC）：layer 0、显示、src (0,0x1B0,0x17,0x1C7)、dst (72,48)
+        byte[+0xE0] = 0；byte[+0xE1] = 1（脏）
+        0x45AFF0(0x4AB5B0,1) 非 0 → word[+0xE2]=0、dword[+0xE4]=0x61A80；
+            否则 word[+0xE2]=7、0x45C740(0x4AB5CC,7,&buf) → dword[+0xE4] = 该行分数
+        [+0xE8] = 资源 0x4E 整块副本（0x45DDE0 取长、0x45DDA0 取源）；dword[+0xEC] = 0
+        ```"""
+        st = self.p4_stat
+        base = 0x4CD4A0
+        for off in (0x04, 0x08, 0x0C, 0x10, 0x14, 0x18, 0x1C, 0x20,
+                    0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C, 0x60):
+            st[base + off] = 0
+        st[base + 0x2C] = _p4_s8(a1) & 0xFFFF           # 0x45EB7B word
+        st[base + 0x24] = 0                             # 0x45EB84 word 关卡号
+        st[base + 0x26] = 0xA0                          # 0x45EB88 word 气槽
+        st[base + 0x28] = 0                             # 0x45EB8E
+        st[base + 0x2A] = 0                             # 0x45EB92 byte
+        st[base + 0x30] = a2 & 0xFFFFFFFF               # 0x45EB95 倍率种子
+        st[base + 0x34] = 0xF4240                       # 0x45EB98 奖命分数线
+        st[base + 0x38] = 0                             # 0x45EB9F byte
+        nodes = []
+        x = 0x25C
+        for i in range(20):                             # 0x45EBCA..0x45EC06
+            nd = DNode(0, 0, 0)
+            nd.src = (0, 0x180, 0x17, 0x197)            # 0x45EC08（首节点；其余同形）
+            nd.dst = (x, 0x0C)
+            nd.active = 0                               # byte[node+0x1C] = 0
+            nodes.append(nd)
+            x -= 0x18
+        ia = DNode(0, 0x90, 0x180)                      # 0x45EC46 图标甲
+        ia.src = (0x90, 0x180, 0xBF, 0x197)
+        ia.dst = (0x0C, 0x30)
+        ia.active = 1
+        ib = DNode(0, 0, 0x1B0)                         # 0x45ECB8 图标乙
+        ib.src = (0, 0x1B0, 0x17, 0x1C7)
+        ib.dst = (0x48, 0x30)
+        ib.active = 1
+        st["hud_nodes"] = nodes
+        st["hud_icon_a"] = ia
+        st["hud_icon_b"] = ib
+        st[base + 0xE0] = 0                             # 0x45ED2A
+        st[base + 0xE1] = 1                             # 0x45ED37 脏标志
+        if self.keys.test(1):                           # 0x45ED3D 0x45AFF0(…,1)
+            st[base + 0xE2] = 0                         # 0x45ED46
+            st[base + 0xE4] = 0x61A80                   # 0x45ED4F
+        else:
+            st[base + 0xE2] = 7                         # 0x45ED67
+            st[base + 0xE4] = self.p4_45c740_score(7)   # 0x45ED70 → buf[0]
+        bank = getattr(self, "p4_bank", None)
+        st["res4e"] = bank.get(0x4E) if bank is not None else b""
+        st[base + 0xE8] = len(st["res4e"])              # 0x45EDA8（副本长度）
+        st[base + 0xEC] = 0                             # 0x45EDD6
+
+    def p4_45c740_score(self, row: int) -> int:
+        """`0x45C740(0x4AB5CC, row, &buf)[0]`：排行榜 row 行的分数 dword。
+        idx = 2*row + byte[tbl+4]，src = tbl + (byte[tbl+5] ? 0x740 : 8) + 0x54*idx。"""
+        t = self._p4_tbl4ab5cc()
+        idx = 2 * row + _p4_s8(t[4])
+        off = (0x740 if t[5] else 8) + 0x54 * idx
+        return int.from_bytes(t[off:off + 4], "little")
 
     def stage_layers(self, a3: int, a4: int) -> None:
-        """0x458DCE → `0x460930(a3,a4)`（0x4CD590 的层/调色板装配）。待同上规格。"""
-        return
+        """`0x458DCE → 0x460930(0x4CD590, a3, a4)`：结算对象构造（docs §2）。
+
+        ```
+        0x4608F0：清 [+0x28]/[+0x2C] 两槽
+        0x45A070(this+0x04)：显示表容器
+        [+0x30] = a3（结算倍率，−1 = 禁用）；[+0x34] = [+0x38] = 0；
+        [+0x3C] = a4；[+0x40] = [+0x44] = 0
+        2 节点：layer 0、byte[+0x1C] = (a3 != -1)；dst (12,12) / (72,12)
+        v = 0x45AFC0(0x4AB5B0, 0xC000)；节点 1 src = (48v, 0x1B0, 48v+0x2F, 0x1C7)
+        ```"""
+        st = self.p4_stat
+        base = 0x4CD590
+        st[base + 0x30] = a3 & 0xFFFFFFFF               # 0x460958
+        st[base + 0x34] = 0                             # 0x46095B
+        st[base + 0x38] = 0                             # 0x46095E
+        st[base + 0x3C] = a4 & 0xFFFFFFFF               # 0x460961
+        st[base + 0x40] = 0                             # 0x460964
+        st[base + 0x44] = 0                             # 0x460967
+        vis = 1 if (a3 & 0xFFFFFFFF) != 0xFFFFFFFF else 0   # 0x46096C (a1 != -1)
+        n1 = DNode(0, 0, 0)
+        n1.dst = (0x0C, 0x0C)                           # 0x46099F
+        n1.active = vis
+        n2 = DNode(0, 0, 0)
+        n2.dst = (0x48, 0x0C)                           # 0x4609B4
+        n2.active = vis
+        v = self.keys.field(0xC000)                     # 0x4609C3 ×2
+        n1.src = (v * 0x30, 0x1B0, v * 0x30 + 0x2F, 0x1C7)   # 0x4609D5
+        st["st_icon_a"] = n1
+        st["st_icon_b"] = n2
 
     def p4_layer_params(self) -> None:
         """0x450B3D..0x450B68：`0x45AFC0(0x4AB5B8,0x1FC0000)` / `(…,0xFE000000)` → `0x4010C3`。"""
