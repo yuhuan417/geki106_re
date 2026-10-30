@@ -2578,10 +2578,9 @@ def _beh_23000003(self, e) -> bool:
         # case 3 (0x40E292) = 无动作
     e.d32(0x04, (x + e.s32(0x20)) & 0xFFFFFFFF)          # 0x40E292
     e.d32(0x08, (e.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF)
-    node = e.g32(0x38)
-    if node:
-        self.p4_stat[node + 0x14] = (e.s32(0x04) - 0x18) & 0xFFFFFFFF   # 0x45A690 恒等
-        self.p4_stat[node + 0x18] = (e.s32(0x08) - 0x18) & 0xFFFFFFFF
+    if e.node is not None:                                # 0x40E2B4 0x45A690 恒等 → 节点 dst
+        e.node.dst = ((e.s32(0x04) - 0x18) & 0xFFFFFFFF,
+                      (e.s32(0x08) - 0x18) & 0xFFFFFFFF)
     return bool(e.g32(0x18)) and e.s32(0x04) > -0x18      # 0x40E2C5/0x40E2CC
 
 
@@ -8049,9 +8048,8 @@ class Page4Mixin:
                 continue
             if not self.p4_call_behaviour(e):
                 e.m[0x34] = 0
-                node = e.g32(0x38)
-                if node:
-                    self.p4_stat[node + 0x1C] = 0
+                if e.node is not None:
+                    e.node.active = 0            # [[ent+0x38]+0x1C]=0 隐藏节点
             i += 1
 
     def _p4_ent43c(self, typ: int, x: int = 0, y: int = 0,
