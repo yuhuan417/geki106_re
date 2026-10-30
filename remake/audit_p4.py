@@ -2515,6 +2515,12 @@ def main():
             self.p4_player_pos = None
         def _p4_q(self, n):
             return self.qs.setdefault(n, [])
+        def spawn(self, queue, type_word, x=0, y=0, a3=0, a4=0):
+            import types as _t
+            e = _t.SimpleNamespace(type_word=type_word, aux=x, a3=a3, a4=a4, t=0,
+                                   alive=True)
+            queue.append(e)
+            return e
         def p4_btn0_edge(self):
             return self.btn0
         def p4_cfg_word(self):
@@ -3365,6 +3371,43 @@ def main():
     ScriptVM.exec_op(_vm, 0xE, bytes(0x14))
     check("op 0xE 无副作用（0x4603E9 直落共用尾）",
           all(not v for v in _vm.out.values()), f"{_vm.out}")
+
+    # ---- 0x437940（0x42 type-1）的轴序：0x45A6B0(ptr,a,b) = [ptr]+=a、[ptr+4]+=b ----
+    # 0x437A57 调用 0x45A6B0(node+0x14, [e+0x24], [e+0x2C]+[e+0x20])
+    # ⇒ dst.x += [e+0x24]（横）、dst.y += [e+0x2C]+[e+0x20]（[e+0x20]=随地面上升速度）
+    print("\n[0x437940 type-1 轴序 + 0x61 族]")
+    _p1 = page4.Ent42(370, 750, 0x42000001, 0)          # mode 0（ctor：[+0x1C]=p → 首帧 t=p+1）
+    for _ in range(0x45):                                # 0x45 帧 → t=0x45
+        _p1.tick()
+    # x：t&0x40 为 0 的帧 -1（t=1..0x3F，63 帧）、为 0x40 的帧 +1（t=0x40..0x45，6 帧）→ -0x39
+    # y：rise（[e+0x20]）t=0x41..0x45 共 5 帧 × -4 = -20
+    _c41 = (_p1.node.dst[0] - (370 - 0x0C), _p1.node.dst[1] - (750 - 0x0C))
+    check("type-1 轴序（0x45A6B0 arg2→x / arg3→y）：mode0 t=0x45 时 x 摆 -0x39、y 升 20",
+          _c41 == (-0x39, -20), f"dx={_c41[0]} dy={_c41[1]}")
+    _p4 = page4.Ent42(170, 968, 0x42000001, 4)          # mode 4：t=0x2D 起 [e+0x24]=+1（x）、[e+0x2C]=-1（y）
+    for _ in range(0x2E):                                # 0x2E 帧 → t=0x32
+        _p4.tick()
+    _c42 = (_p4.node.dst[0] - (170 - 0x0C), _p4.node.dst[1] - (968 - 0x0C))
+    # t=0x2D..0x32 共 6 帧：x +6；y = [e+0x2C](-1) + rise(0) → -6
+    check("type-1 mode4：t=0x2D 起 [e+0x24]=+1 是横向（右走 6 帧）、[e+0x2C]=-1 是竖向",
+          _c42 == (6, -6), f"dx={_c42[0]} dy={_c42[1]}")
+
+    # ---- 0x61 族分派（p4_vm_entity op5）--------------------------------
+    _vq61 = type("_VQ61", (), {})()
+    _vq61.ui52c = []
+    _vq61.p4_other = {}
+    _vq61.spawn = lambda q, t, x=0, y=0, a3=0, a4=0: q.append(
+        type("_E61", (), {"type_word": t, "aux": x, "a3": y, "a4": a3})()) or q[-1]
+    _vq61._p4_q = lambda name: getattr(_vq61, name)
+    _vq61.spawn_flash = lambda a, b, c: _vq61.ui52c.append(
+        type("_E61", (), {"type_word": 0x61000005, "aux": a, "a3": b, "a4": c})())
+    page4.Page4Mixin.p4_vm_entity(_vq61, 5, (0x7F, 0x00, 0x61000007, 0xFFFFFFF8))
+    page4.Page4Mixin.p4_vm_entity(_vq61, 5, (0x00, 0x00, 0x61000008, 0x00))
+    _e61 = [e for e in _vq61.ui52c if getattr(e, "type_word", None) == 0x61000007]
+    check("op5 0x61 族路由：0x61000007 进 ui52c，无符号 rec3(0xFFFFFFF8) 转成 -8 "
+          "（rec0/rec1/rec3 → aux/a3/a4 = BGM 音量渐变参数）",
+          len(_e61) == 1 and _e61[0].aux == 0x7F and _e61[0].a3 == 0 and _e61[0].a4 == -8,
+          f"{[(e.type_word, e.aux, e.a3, e.a4) for e in _vq61.ui52c]}")
 
     print()
     if fails:

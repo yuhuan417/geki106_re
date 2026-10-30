@@ -625,34 +625,40 @@ class Ent42(Ent):
         self.frame = 0
 
     # ---- 0x437940（type 1）----------------------------------------------
+    # 关键：0x437A57 `0x45A6B0(node+0x14, [e+0x24], [e+0x2C]+[e+0x20])`，而
+    # 0x45A6B0 本体是 `[ptr]+=arg2; [ptr+4]+=arg3` ⇒ **arg2→dst.x、arg3→dst.y**：
+    #   dst.x += [e+0x24]（横向），dst.y += [e+0x2C]+[e+0x20]（[e+0x20]=随地面上升速度，
+    #   阈值表 {0x41,0x71,0xA1,0xD1,0x101} → 0,-4,-3,-2,-1,0，与流 45 op0xA 的
+    #   背景滚动 4/3/2/1（t=64/111/159/207）逐帧同步——"人随地面一起升上来"。
     def _beh_437940(self) -> int:
         t = (self.g32(0x1C) + 1) & 0xFFFFFFFF
         self.d32(0x1C, t)
         node = self.node
-        if t >= 0x102:                                       # 0x437A2D
-            self.d32(0x24, 0xFFFFFFFE if (t & 1) == 0 else 2)
+        if t >= 0x102:                                       # 0x437955 jge 0x437A2D
+            # 0x437A2D `test byte[+0x28],1`：按 **mode** 奇偶（不是 t！）
+            self.d32(0x24, 2 if (self.g32(0x28) & 1) else 0xFFFFFFFE)
         else:
             if t >= 0x41:                                    # 0x437989 阈值表
                 k = sum(1 for th in T42_THRESH4[1:] if t >= th)
                 self.d32(0x20, (min(k, 5) - 4) & 0xFFFFFFFF)
             mode = self.g32(0x28)
-            if mode == 0:                                    # 0x437A1A
-                self.d32(0x24, 0xFFFFFFFF if (t & 0x40) else 1)
-            elif mode == 1:                                  # 0x437A07
-                self.d32(0x24, 1 if (t & 0x20) else 0xFFFFFFFF)
+            if mode == 0:                                    # 0x437A1A sbb 序列：(t&0x40)?+1:-1
+                self.d32(0x24, 1 if (t & 0x40) else 0xFFFFFFFF)
+            elif mode == 1:                                  # 0x437A07：(t&0x20)?-1:+1
+                self.d32(0x24, 0xFFFFFFFF if (t & 0x20) else 1)
             elif mode == 4:                                  # 0x4379B4
                 if t == 0x2D:
-                    self.d32(0x2C, 0xFFFFFFFF)
-                    self.d32(0x24, 1)
-                elif t >= 0xFB:                              # 0x4379C1 源矩形右移一格
-                    l, tt, r, b = node.rect
+                    self.d32(0x2C, 0xFFFFFFFF)               # 竖向额外 -1
+                    self.d32(0x24, 1)                        # 横向 +1（向右走）
+                elif t >= 0xFB:                              # 0x4379C9 0x45A790 四边平移
+                    l, tt, r, b = node.rect                  # (l,t,r,b)+=(0x18,0,0x18,0)=右移一格
                     node.rect = (l + 0x18, tt, r + 0x18, b)
                     self.d32(0x2C, 0)
                     self.d32(0x24, 0)
-                if t == 0xFF:                                # 0x4379F6
+                if t == 0xFF:                                # 0x4379F6（仅 mode 4 在此死）
                     return 0
-        dx = self.s32(0x2C) + self.s32(0x20)
-        dy = self.s32(0x24)
+        dx = self.s32(0x24)                                  # 0x45A6B0 arg2 → x
+        dy = self.s32(0x2C) + self.s32(0x20)                 # arg3 → y
         node.dst = (node.dst[0] + dx, node.dst[1] + dy)
         if t >= 0x128:                                       # 0x437A62 再右移一格
             l, tt, r, b = node.rect
@@ -3518,9 +3524,13 @@ class Page4Mixin:
         return e
 
     def p4_spawn52c_flash(self, x: int, y: int, typ: int, prm: int) -> None:
-        """`0x430400(&rec,…)` + `0x445AA0(0x4AD52C,&rec)`：52C 队列原语（0x61 亮度族等）。"""
+        """`0x430400(&rec,…)` + `0x445AA0(0x4AD52C,&rec)`：52C 队列原语（0x61 亮度族等）。
+        rec 布局：rec0=x、rec1=y、rec2=typ、rec3=prm。"""
         if typ == 0x61000005:
             self.spawn_flash(x, y, prm)            # init 0x42730B：[+0x1C]=x [+0x20]=y [+0x24]=prm
+            return
+        if (typ & 0xFFFFFF00) == 0x61000000:       # 0x61 族其余型（含 0x423BC5 的 0x61000007 淡出）
+            self.spawn(self._p4_q("ui52c"), typ, x, y, prm)
             return
         self.p4_other.setdefault("52c", []).append((x, y, typ, prm))
 
@@ -8082,6 +8092,19 @@ class Page4Mixin:
             # 0x61000005：init 0x42730B（`[+0x1C]=a` 当前、`[+0x20]=b` 目标、`[+0x24]=d` 步进）
             # 链路 0 的载荷是 (-255, 0, 0x61000005, 16) = 16 帧淡入，正是开场把画面点亮的那条
             self.spawn_flash(a, b, d)
+        elif op == 5 and (c & 0xFFFFFF00) == 0x61000000:
+            # 0x61 族其余型（跳表 0x4273C0，索引 = type-0x61000001）：
+            #   0x61000007 init 0x42735E / 行为 0x427690 = BGM 主音量渐变
+            #     （每 8 帧 cur+=step 钳到 target → 0x44F950 = GM SysEx F0 7F 7F 04 01 00 v F7；
+            #      流 45 t=0 (127,127,127)=满音量、流 46 t=8390 (127,0,-8)=关末淡出）
+            #   0x61000002 init 0x42729A / 行为 0x427510 = 等 0x4AD49C+0x4AD43C 清空 → sysf|=2
+            #   0x61000003 init 0x4272B1 = 0x45B0A0(0x56CCB8, rec3, rec0!=0) 一次性
+            #   0x61000006 init 0x427332 = 0x45AF30(0x56CCB8,0x1000) → byte[0x56CCB3]=1
+            #   0x61000008 init 0x427385 / 行为 0x427710 = 录像驱动（mode 0 无视觉，480 帧倒计时）
+            # rec 布局同 op1..4：rec0=a、rec1=b、rec3=d（spawn 的 x/y/a3 形参承接）。
+            # VM 记录是无符号 dword，音量/步进/掩码都是带符号语义 ⇒ 先转有符号。
+            _s = lambda v: v - 0x100000000 if v & 0x80000000 else v
+            self.spawn(self._p4_q("ui52c"), c, _s(a), _s(b), _s(d))
         else:
             self.p4_other.setdefault(op, []).append(rec)
 

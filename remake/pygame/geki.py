@@ -1647,11 +1647,32 @@ class Pages(Page4Mixin):
                 e.beh = f"unimpl_6F_{idx}"
                 self.log(f"ui 0x6F idx {idx} 未实现（§16.7）")
         elif hi == 0x61000000:
-            # 跳表 0x4273C0，索引 = type + 0x9EFFFFFF：
-            #   1→0x427450  5→0x427600(亮度渐变,-255→0 步进)  6→0x430520  7→0x427690  8→0x427710(快照环)
+            # 跳表 0x4273C0，索引 = type - 0x61000001（0x427259/0x42729A/0x4272B1/0x4272DD/
+            # 0x42730B/0x427332/0x42735E/0x427385）；行为 thunk → 0x427510/0x427600/0x427690/0x427710
             if type_word == 0x61000005:
                 e.beh = "flash"                 # 0x42730B + 行为 0x427600
                 e.aux, e.a3, e.a4 = 0, 0, 0      # 由生成方按 desc 填 (-255/0/8 等)
+            elif type_word == 0x61000007:
+                # init 0x42735E：[+0x1C]=rec0(当前)、[+0x20]=rec1(目标)、[+0x24]=rec3(步进)、[+0x28]=0
+                e.beh = "bgmvol"                # 行为 0x427690：每 8 帧 SysEx 主音量（0x44F950）
+                e.aux, e.a3, e.a4 = int(x), int(y), int(a3)
+                e.t = 0                         # [+0x28] 帧计数
+            elif type_word == 0x61000002:
+                e.beh = "seq_gate"              # 行为 0x427510：两队列清空 → sysf|=2 死
+            elif type_word == 0x61000003:
+                # init 0x4272B1：[+0x1C]=0；一次性 0x45B0A0(0x56CCB8, rec3, rec0!=0)，行为 0x430520 首帧死
+                e.beh = "stat_bits"
+                e.aux, e.a3 = int(x), int(a3)
+            elif type_word == 0x61000006:
+                e.beh = "check_1000"            # init 0x427332：0x45AF30(0x56CCB8,0x1000)→[0x56CCB3]=1
+            elif type_word == 0x61000008:
+                # init 0x427385：[+0x1C]=(rec0+0xF)<<5、[+0x20]=rec0(mode)、[+0x24]=-256、[+0x28]=8；
+                # 行为 0x427710：mode 0 = 每 4 帧 0x459AE0(0x56B95C)（输入录像 tick）+ 倒计时，无视觉
+                e.beh = "recdrv"
+                e.aux = (int(x) + 0xF) << 5
+                e.a3 = int(x)
+                e.a4 = -256
+                e.t = 8
             else:
                 e.beh = "fade_in"
                 self.log(f"ui 0x61 type 0x{type_word:X} 未实现")
@@ -1786,6 +1807,16 @@ class Pages(Page4Mixin):
                 self._fade_in(e)
             elif e.beh == "flash":
                 self._flash(e)
+            elif e.beh == "bgmvol":
+                self._bgmvol(e)
+            elif e.beh == "seq_gate":
+                self._seq_gate(e)
+            elif e.beh == "stat_bits":
+                self._stat_bits(e)
+            elif e.beh == "check_1000":
+                self._check_1000(e)
+            elif e.beh == "recdrv":
+                self._recdrv(e)
             elif e.beh == "wipe_v":
                 self._wipe_v(e)
             elif e.beh == "wipe_h":
@@ -3009,6 +3040,67 @@ class Pages(Page4Mixin):
         e.aux = cur
         self.fade_to(cur, 0)                          # 0x44DC10(mgr, cur, 0)
         if cur == e.a3:
+            e.alive = False
+
+    # ---- 0x61 族其余型（页4 开场/关末；0x427690/0x427510/0x4272B1/0x427332/0x427710）----
+    def _bgmvol(self, e: UiEntity) -> None:
+        """0x427690（0x61000007 BGM 主音量渐变）：
+
+        ```
+        0x427693 ecx=[e+0x28]+1；al=cl；[e+0x28]=ecx
+        0x42769c test al,7 → 非 0 本帧结束
+        0x4276a4 cur=[e+0x1C]+step；[e+0x1C]=cur
+        0x4276b1 step<0 → cur<target 则钳到 target；step>0 → cur>target 则钳到 target
+        0x4276c8 0x44F950(0x4AB514, cur&0xFF)（GM SysEx 主音量）
+        0x4276de 返回 cur != target（setne）
+        ```"""
+        e.t += 1
+        if e.t & 7:
+            return
+        step = e.a4
+        cur = e.aux + step
+        if step < 0:
+            if cur < e.a3:
+                cur = e.a3
+        elif cur > e.a3:
+            cur = e.a3
+        e.aux = cur
+        if self.audio is not None:
+            self.audio.bgm_volume(cur & 0xFF)
+        if cur == e.a3:
+            e.alive = False
+
+    def _seq_gate(self, e: UiEntity) -> None:
+        """0x427510（0x61000002）：`0x430860(0x4AD49C)+0x430860(0x4AD43C)`（两队列存活计数）
+        为 0 且 `0x45AFC0(0x56CCB8,0x8000)==0` → `0x45AF60(0x56CC84,2)`（sysf|=2）并死；
+        否则继续活着。"""
+        n49 = sum(1 for q in (getattr(self, "p4_ui49c", []), getattr(self, "ui49c", []))
+                  for x in q if getattr(x, "alive", True))
+        n43 = sum(1 for x in getattr(self, "p4_q43c", []) if getattr(x, "alive", True))
+        if n49 + n43 == 0 and not self.sysb8.test(0x8000):
+            self.sysf.bits |= 2
+            e.alive = False
+
+    def _stat_bits(self, e: UiEntity) -> None:
+        """0x4272B1（0x61000003）：一次性 `0x45B0A0(0x56CCB8, rec3, rec0!=0)`；行为 0x430520 首帧死。
+        0x56CCB8 在复刻里双存（sysb8 位测 + p4_stat 镜像），两处都写。"""
+        mask = e.a3 & 0xFFFFFFFF
+        new = ((self.sysb8.bits & ~mask & 0xFFFFFFFF) | (mask if e.aux else 0)) & 0xFFFFFFFF
+        self.sysb8.bits = new
+        self.p4_stat[0x56CCB8] = new
+        e.alive = False
+
+    def _check_1000(self, e: UiEntity) -> None:
+        """0x427332（0x61000006）：`0x45AF30(0x56CCB8,0x1000)` → `byte[0x56CCB3]=1`；首帧死。"""
+        if self.sysb8.test(0x1000):
+            self.p4_stat[0x56CCB3] = 1
+        e.alive = False
+
+    def _recdrv(self, e: UiEntity) -> None:
+        """0x427710 的 mode 0 路径（0x61000008）：每 4 帧 0x459AE0(0x56B95C)——输入录像 tick，
+        复刻侧 run.py 已每帧记录 ⇒ 空操作；`[e+0x1C]--` 减到 0 死。"""
+        e.aux -= 1
+        if e.aux == 0:
             e.alive = False
 
     # 0x427710（0x61000008 = 状态快照环驱动，页2 不用）

@@ -196,6 +196,20 @@ class Audio:
         except Exception:
             pass
 
+    def bgm_volume(self, v: int) -> None:
+        """`0x44F950(0x4AB514, v)`：GM SysEx 主音量（F0 7F 7F 04 01 00 v F7，v=0..127）。
+
+        0x61000007（0x427690）每 8 帧发一次。复刻后端没有 MIDI 直通 ⇒ 折算成
+        `mixer.music` 音量（bgm() 的基准 0.45 对应 v=127）。"""
+        v = max(0, min(127, int(v)))
+        self.bgm_vol = v
+        if not self.enabled:
+            return
+        try:
+            self._pg.mixer.music.set_volume(0.45 * v / 127)
+        except Exception:
+            pass
+
     def _resolve_bgm(self, track: int):
         """优先用编译好的 OGG；没有就用 fluidsynth 现渲（结果缓存在 /tmp）。"""
         ogg = bgm_path(track)
