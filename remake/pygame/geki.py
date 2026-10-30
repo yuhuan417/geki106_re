@@ -1583,10 +1583,14 @@ class Pages(Page4Mixin):
         hi = type_word & 0xFF000000
         if hi == 0x46000000:
             if type_word == 0x46000001:
-                # 0x435AF8 ctor：矩形 (0x120,0x180)-(0x1DF,0x23F) = (288,384)-(479,575)
+                # 0x435AF8 ctor：层 2、src (0x120,0x180,0x1DF,0x23F)、
+                # dst=(x-96, y-96)、[+0x40]=0x4014E7（→ 0x437FC0 前 160F 静止后滑出）
                 e.beh = "panel_46"                # 行为 0x437FC0
                 e.rect = (0x120, 0x180, 0x1DF, 0x23F)
                 e.a3 = 0                          # 滑出位移累计
+                e.disp = DisplayNode(
+                    layer=2, rect=[0x120, 0x180, 0x1DF, 0x23F],
+                    dst=[x - 0x60, y - 0x60])     # 0x435B4A sub 0x60
             return e
         if hi == 0x42000000:
             # 0x42 家族（脚本 OP03 的摆放物）。目前只实现 0x42000004（色块条）；

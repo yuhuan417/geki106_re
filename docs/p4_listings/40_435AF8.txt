@@ -1,0 +1,48 @@
+; func 0x435af8  (45 insns)
+
+0x00435af8  mov     eax, dword ptr [esi + 0x38]
+0x00435afb  push    0x23f
+0x00435b00  push    0x1df
+0x00435b05  push    0x180
+0x00435b0a  lea     ecx, [esp + 0xf4]
+0x00435b11  push    0x120
+0x00435b16  mov     dword ptr [esi + 0x40], 0x4014e7
+0x00435b1d  mov     dword ptr [esi + 0x1c], ebx
+0x00435b20  push    ecx
+0x00435b21  mov     dword ptr [eax], 2
+0x00435b27  call    0x40238d   ; → 0x45a750
+0x00435b2c  mov     edi, eax
+0x00435b2e  mov     ebx, dword ptr [esi + 0x38]
+0x00435b31  add     ebx, 4
+0x00435b34  mov     eax, dword ptr [edi]
+0x00435b36  mov     ecx, dword ptr [edi + 4]
+0x00435b39  mov     edx, dword ptr [edi + 8]
+0x00435b3c  mov     edi, dword ptr [edi + 0xc]
+0x00435b3f  mov     dword ptr [ebx], eax
+0x00435b41  mov     dword ptr [ebx + 4], ecx
+0x00435b44  mov     dword ptr [ebx + 8], edx
+0x00435b47  mov     dword ptr [ebx + 0xc], edi
+0x00435b4a  mov     edx, dword ptr [esi + 8]
+0x00435b4d  mov     eax, dword ptr [esi + 4]
+0x00435b50  sub     edx, 0x60
+0x00435b53  push    edx
+0x00435b54  sub     eax, 0x60
+0x00435b57  jmp     0x43703c
+loc_43703c:
+0x0043703c  push    eax
+0x0043703d  call    0x401753   ; → 0x45a690
+0x00437042  add     esp, 0x1c
+0x00437045  mov     ecx, dword ptr [esi + 0x38]
+0x00437048  mov     dword ptr [ecx + 0x14], eax
+0x0043704b  mov     dword ptr [ecx + 0x18], edx
+0x0043704e  mov     edx, dword ptr [esi + 0x38]
+0x00437051  mov     byte ptr [edx + 0x1c], 1
+0x00437055  mov     ecx, dword ptr [esp + 0x3a8]
+0x0043705c  mov     eax, esi
+0x0043705e  pop     edi
+0x0043705f  pop     esi
+0x00437060  pop     ebp
+0x00437061  pop     ebx
+0x00437062  mov     dword ptr fs:[0], ecx
+0x00437069  add     esp, 0x3a4
+0x0043706f  ret     4
