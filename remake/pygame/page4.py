@@ -2485,7 +2485,11 @@ def _beh_10000001(self, e) -> bool:
         e.node.dst = (x + 0x40, y)
         e.node.visible = 1
     if self.p4_btn_attack() and not self.p4_key_test(0x10):
-        self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
+        e = self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
+        e.beh = "bullet_1b"                                # 0x430080
+        from geki import DisplayNode
+        e.disp = DisplayNode(layer=0, rect=[0xC0, 0x30, 0xDD, 0x4F],
+                             dst=[x + 0x13, y])
     if e.g32(0x18):
         return True
     n = (e.s32(0x20) - 1) & 0xFFFFFFFF              # 0x448DAE 剩余重生次数

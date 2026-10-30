@@ -1725,6 +1725,14 @@ class Pages(Page4Mixin):
             if hasattr(e, "m"):                       # 页4：字节模型实体（0x5C，走 [+0x40] 行为）
                 self.p4_call_behaviour(e)
                 continue
+            if e.beh == "bullet_1b":                  # 0x430080：x += 7
+                nx = e.s32(4) + 7
+                e.d32(4, nx)
+                if e.disp is not None:
+                    e.disp.dst[0] = nx
+                if nx >= 0x200:
+                    e.alive = False
+                continue
             if callable(e.beh):                       # 页4：行为直接是函数对象
                 e.alive = bool(e.beh(self, e))
                 continue

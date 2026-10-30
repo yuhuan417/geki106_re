@@ -1,0 +1,69 @@
+; func 0x448d50  (65 insns)
+
+0x00448d50  xchg    esp, eax
+0x00448d51  mov     ch, 0x4a
+0x00448d53  add     byte ptr [eax + eax*8 + 0x106a4b74], al
+0x00448d5a  mov     ecx, 0x56ccc0
+0x00448d5f  call    0x40208b   ; → 0x45aff0
+0x00448d64  test    al, al
+0x00448d66  jne     0x448da3
+0x00448d68  mov     eax, dword ptr [ebx + 4]
+0x00448d6b  mov     edx, dword ptr [ebx + 8]
+0x00448d6e  push    0
+0x00448d70  push    0x1b000001
+0x00448d75  add     eax, 0x13
+0x00448d78  push    edx
+0x00448d79  lea     ecx, [esp + 0x2c]
+0x00448d7d  push    eax
+0x00448d7e  push    ecx
+0x00448d7f  call    0x4023c4   ; → 0x430400
+0x00448d84  mov     ecx, 5
+0x00448d89  mov     esi, eax
+0x00448d8b  lea     edi, [esp + 0x20]
+0x00448d8f  add     esp, 0x14
+0x00448d92  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x00448d94  lea     edx, [esp + 0xc]
+0x00448d98  mov     ecx, 0x4ad46c
+0x00448d9d  push    edx
+0x00448d9e  call    0x40100f   ; → 0x430290
+loc_448da3:
+0x00448da3  mov     eax, dword ptr [ebx + 0x18]
+0x00448da6  test    eax, eax
+0x00448da8  jne     0x448cb8
+0x00448dae  mov     eax, dword ptr [ebx + 0x20]
+0x00448db1  dec     eax
+0x00448db2  mov     dword ptr [ebx + 0x20], eax
+0x00448db5  mov     ebx, eax
+0x00448db7  je      0x448dfb
+0x00448db9  push    ebx
+0x00448dba  push    0xb000001
+0x00448dbf  push    0xc8
+0x00448dc4  lea     eax, [esp + 0x2c]
+0x00448dc8  push    0xc8
+0x00448dcd  push    eax
+0x00448dce  call    0x4023c4   ; → 0x430400
+0x00448dd3  mov     ecx, 5
+0x00448dd8  mov     esi, eax
+0x00448dda  lea     edi, [esp + 0x20]
+0x00448dde  add     esp, 0x14
+0x00448de1  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x00448de3  lea     ecx, [esp + 0xc]
+0x00448de7  push    ecx
+0x00448de8  mov     ecx, 0x4ad40c
+0x00448ded  call    0x4016e5   ; → 0x448ff0
+0x00448df2  pop     edi
+0x00448df3  pop     esi
+0x00448df4  xor     al, al
+0x00448df6  pop     ebx
+0x00448df7  add     esp, 0x28
+0x00448dfa  ret     
+loc_448dfb:
+0x00448dfb  push    0x40
+0x00448dfd  mov     ecx, 0x56ccc0
+0x00448e02  call    0x401e1f   ; → 0x45af30
+0x00448e07  pop     edi
+0x00448e08  pop     esi
+0x00448e09  xor     al, al
+0x00448e0b  pop     ebx
+0x00448e0c  add     esp, 0x28
+0x00448e0f  ret     
