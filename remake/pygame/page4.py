@@ -6557,7 +6557,10 @@ class Page4Mixin:
                 if k <= 0:
                     continue                         # 0x4578B5 k==0 → 隐藏
                 lay = self.layers.tab.get(band.layer)
-                if lay is None:
+                if lay is None or lay.bind_id < 0:
+                    # 0x44CEE0 释放（op0xB 里 res==5 的层）后表面不存在 → 跳过。
+                    # 旧复刻 free_all 留了空层（bind_id=-1、全 0、无色键），
+                    # kind=240 的大字块贴出整块调色板 0 号色 = 底部白块（2026-10-31 修）。
                     continue
                 l, t, r, b = band.src
                 dx, dy = band.dst
