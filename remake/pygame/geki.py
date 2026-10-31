@@ -613,8 +613,26 @@ class Input:
     # [0x4AB454+0x4D]：键盘/摇杆位移总开关（0x44E7FC 处 `if (==0) 跳过整段 dx/dy 计算`）。
     # 真机实测（扫描码 0xD0 注入）：**按一次方向键正好走一项**，长按 0.5s 也只走一项
     # ⇒ 步进是"按下沿 × 一档"，不是连续位移（一格 = 0x80 = 128px，正好一条菜单带）。
+    # ⚠ 这条只适用于**菜单页**（预设 0-6，定步=0 → dx=±1000 仅取符号、幅值=预设步长
+    # 但按下沿语义是页1-3 实测的）。页4 战斗用**连续步进**（见 p4_cfg 管线）。
     kbd_move = True
     KBD_STEP = 0x80
+
+    # 0x498A88 预设表（每项 14 字节，0x44E4A0 拷进 [mgr+0x4C..0x58]）：
+    #   byte0=键盘使能 [mgr+0x4C]、byte1=鼠标使能 [+0x4D]、byte2=定步标志 [+0x4E]、
+    #   word@+4=键盘步长 [+0x50]、byte@+6=鼠标移位 [+0x52]、word@+8=捕获半径 [+0x54]、
+    #   word@+0xC→[mgr+0x58]：非 0 ⇒ 指针边界 (0x14,0x14)-(0x26C,0x1CC)，否则 (0,0)-(0x280,0x1E0)
+    P4_PRESET_TABLE = (
+        (1, 1, 0, 128, 0, 0, 0), (1, 1, 0, 54, 0, 0, 0), (1, 1, 0, 49, 0, 0, 0),
+        (1, 1, 0, 214, 0, 0, 0), (1, 1, 0, 100, 0, 0, 0), (1, 1, 0, 128, 0, 0, 0),
+        (1, 1, 0, 4, 0, 0, 0),
+        (0, 1, 0, 0, 0, 32, 1), (0, 1, 0, 0, 2, 0, 0), (0, 1, 0, 0, 0, 28, 1),
+        (0, 1, 0, 0, 0, 16, 1), (0, 1, 0, 0, 0, 40, 1), (0, 1, 0, 0, 0, 40, 1),
+        (0, 1, 0, 0, 0, 32, 1), (0, 1, 0, 0, 0, 12, 1),
+        (1, 0, 1, 5, 0, 0, 1), (1, 0, 1, 9, 0, 0, 0), (1, 0, 1, 4, 0, 0, 1),
+        (1, 0, 1, 2, 0, 0, 1), (1, 0, 1, 6, 0, 0, 1), (1, 0, 1, 4, 0, 0, 1),
+        (1, 0, 1, 4, 0, 0, 1), (1, 0, 1, 2, 0, 0, 1), (1, 1, 0, 4, 0, 5, 1),
+    )
 
     def __init__(self):
         self.rec = Record()
@@ -622,6 +640,8 @@ class Input:
         self.base = (0, 0)
         self._prev = (False, False)
         self._prevdir = {}          # 方向键"上一帧是否按住"，用于取按下沿
+        self.p4_cfg = None          # 页4 预设（set_preset4 装载）；None = 页1-3 菜单管线
+        self.mouse_tx, self.mouse_ty = 320, 240   # 鼠标目标位置（0x44E82B 的追踪目标）
 
     def set_mode(self, mode: int) -> None:
         """0x44EDA0(0x4AB454, mode)：输入模式（0 = 游戏内光标模式）。"""
@@ -634,6 +654,74 @@ class Input:
     speed = 0          # 预设记录 byte4（[mgr+0x50]）；0 = 未设预设，用下面的默认值
     KBD_STEP = 0x80
     RADIUS = 5
+
+    def set_preset4(self, fid: int, pos: tuple | None = None) -> None:
+        """0x44E4A0/0x44E620：装载页4 预设（表 0x498A88+fid*14，14 字节）。
+
+        fid 语义（0x446470 的 base+选机*2+方向）：7/9/11=鼠标模式 撃/凛/漢（dir1=+1）、
+        15/17/19=键盘模式 撃/凛/漢；23=阶段进场（键盘 4px/帧 + 鼠标 1:1 捕获 5）。
+        pos 非 None 时同设指针（0x44E620 的 [mgr+0x14]/[mgr+0x18]）——演员 ctor 尾
+        0x4464CA 用它把指针种子设到自机出生点（原作"无初始化漂移"的机制，2026-10-31）。
+        """
+        kb, ms, fixed, step, shift, catch, w12 = self.P4_PRESET_TABLE[fid]
+        self.p4_cfg = dict(kb=kb, ms=ms, fixed=fixed, step=step, shift=shift,
+                           catch=catch,
+                           bounds=((0x14, 0x14, 0x26C, 0x1CC) if w12
+                                   else (0, 0, 0x280, 0x1E0)))
+        if pos is not None:
+            self.set_pos(*pos)
+            self.mouse_tx, self.mouse_ty = int(pos[0]), int(pos[1])
+
+    def _build_p4(self, keys, mouse_delta: tuple[int, int], keycode: int) -> Record:
+        """页4 预设管线（0x44E660 的 0x44E7FC..0x44E9E2 段）。
+
+        - 鼠标使能时：目标 += 原始位移<<移位；指针**追赶目标**，单帧位移超过捕获半径
+          时按 4096/√d 方向限幅到半径（0x44E82B——鼠标 1:1 跟手，只有大跳才滑行）。
+        - 键盘使能时：按住即 ±步长/帧（0x44E8E3 取 ±1000 的**符号**、幅值=预设步长；
+          定步预设斜向 1.5×，0x44E930）。与鼠标量**相加**（预设 23 两者同开）。
+        - 钳位到预设边界（[mgr+0x58] 选 (20,20)-(620,460) 或全屏）。
+        """
+        cfg = self.p4_cfg
+        mdx, mdy = mouse_delta
+        sh = cfg["shift"]
+        dx = (mdx << sh) if cfg["ms"] else 0
+        dy = (mdy << sh) if cfg["ms"] else 0
+        if cfg["catch"]:
+            tx = self.mouse_tx + (mdx << sh)
+            ty = self.mouse_ty + (mdy << sh)
+            ddx, ddy = tx - self.x, ty - self.y
+            n2 = ddx * ddx + ddy * ddy
+            c = cfg["catch"]
+            if n2 > c * c:
+                inv = int(4096.0 / math.hypot(ddx, ddy))
+                ddx = (c * inv * ddx) >> 12
+                ddy = (c * inv * ddy) >> 12
+            dx, dy = ddx, ddy
+            self.mouse_tx, self.mouse_ty = tx, ty
+        kdx = -1000 if keys.get("left") else (1000 if keys.get("right") else 0)
+        kdy = -1000 if keys.get("up") else (1000 if keys.get("down") else 0)
+        if cfg["kb"] and (kdx or kdy):
+            s = cfg["step"]
+            if cfg["fixed"] and kdx and kdy:
+                s += s >> 1                     # 0x44E930 斜向 1.5×（仅定步预设）
+            dx += s if kdx > 0 else -s          # 0x44E93A 符号取自按键、幅值=预设步长
+            dy += s if kdy > 0 else -s
+        l, t, rt, b = cfg["bounds"]
+        if self.x + dx > rt:
+            dx = rt - self.x
+        if self.x + dx < l:
+            dx = l - self.x
+        if self.y + dy > b:
+            dy = b - self.y
+        if self.y + dy < t:
+            dy = t - self.y
+        self.x += dx
+        self.y += dy
+        r = Record()
+        r.x, r.y, r.dx, r.dy = self.x, self.y, dx, dy
+        r.key = keycode
+        self.rec = r
+        return r
 
     def set_preset(self, preset: int, flag: int = 0) -> None:
         """0x44E620(mgr, preset, x, y) → 0x44E4A0(mgr, preset, flag)：把预设记录
@@ -663,6 +751,12 @@ class Input:
         r.r0 = (not b0) and self._prev[0]
         r.r1 = (not b1) and self._prev[1]
         self._prev = (b0, b1)
+        if self.p4_cfg is not None:              # 页4 预设管线（按键/按钮边沿公用上面这段）
+            r2 = self._build_p4(keys, mouse_delta, keycode)
+            r2.b0, r2.b1 = b0, b1
+            r2.e0, r2.e1 = r.e0, r.e1
+            r2.r0, r2.r1 = r.r0, r.r1
+            return r2
         dx = dy = 0
         if self.kbd_move:                       # 0x44E7FC 的开关
             # 按下沿 → 走**一整档**（真机实测一按一项）；按住不连续推进
@@ -1363,9 +1457,29 @@ class Pages(Page4Mixin):
 
     # 0x458D60(page, 0,0,0,0)：场景重置
     def scene_reset(self) -> None:
-        """清 8 个队列 + 色带引擎(0x4CD484) + 0x4CD4A0/0x4CD590 + 回放(0x4CD5D8)
-        + 记录流(0x56B95C) + [0x56CC84]=0。"""
-        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
+        """0x458D60：清 8 条队列 + 12 个背景槽(0x457B90) + 色带引擎(0x4CD484)
+        + 0x4CD4A0/0x4CD590 + 回放(0x4CD5D8) + 记录流(0x56B95C) + [0x56CC84]=0。
+
+        队列序（0x458D60..0x458DA1）：40C(actorq) → 43C(q43c) → 46C → 49C → 4CC → 4FC → 52C。
+        旧复刻只清 46C/4FC/52C 三条，页4 的 0x42/演员/敌机实体和 12 槽会带进下一页
+        （2026-10-31 修，"页切换背景未清"的一半根因；另一半是共享 draw() 的页4 渲染遍）。"""
+        self.actorq.clear()                            # 0x4AD40C
+        self.p4_q43c.clear()                           # 0x4AD43C
+        self.ui46c.clear()                             # 0x4AD46C
+        self._p4_q("ui49c").clear()                    # 0x4AD49C
+        self.p4_ui49c.clear()                          # （同名分裂的旧列表，一并清）
+        self._p4_q("ui4cc").clear()                    # 0x4AD4CC
+        self.ui4fc.clear()                             # 0x4AD4FC
+        self.ui52c.clear()                             # 0x4AD52C
+        for s in getattr(self, "p4_bg", ()):            # 0x4AD55C ×12（0x457B90 复位）
+            s.params = [0] * 20
+            s.rates = [0] * 20
+            s.grid = []
+            s.bands = []
+            s.rem = 0
+            s.flags = 0
+            s.active = 0
+            s.acc = 0
         # 0x4560C0：色带引擎复位 → 回到初始一条 {color=0xB4, h=0x200}
         self.band_table = [[0xB4, 0x200]]
         self.band_count = 1
@@ -3691,16 +3805,21 @@ class Pages(Page4Mixin):
                 _h, _w = _b.shape[:2]
                 _nz = int((_b[::4, ::4] != 0).sum())
                 print(f"[layer] {_i} {_w}x{_h} nz/16={_nz} id={getattr(_l,'bind_id',None)}")
-        if getattr(self, "p4_bg", None):
-            self.p4_bg_draw()                           # 0x458EF5 → 0x457CB0（12 槽，最先绘制）
+        if getattr(self, "p4_bg", None) and self.page == 4:
+            # 0x458EF5 → 0x457CB0（12 槽，最先绘制）。⚠ 页4 专属：共享 draw() 原本
+            # 无条件执行，ESC 页4→页3 / 页3→页4 时页4 的地面字块/HUD 会画进别的页
+            # （2026-10-31 修，页1-3 金标时这些路径本就是空操作，加门不改哈希）。
+            self.p4_bg_draw()
         # 0x458EF0 的六条队列顺序：ui4cc → ui43c → ui49c → 0x4AD40C → ui46c → ui4fc
-        if getattr(self, "p4_q4cc", None) is None:
-            self.p4_q4cc = self._p4_q("ui4cc")
-        self._render_queue(c, self.p4_q4cc)             # 0x4AD4CC 页4 4CC 队列
-        # 0x458EF0 无条件依次调用 6 条链表的渲染（空表也调），不能因列表为空而跳过
-        self.p4_render_ents()                           # 0x4AD43C 页4 实体显示表
-        self._render_queue(c, self._p4_q("ui49c"))      # 0x4AD49C
-        self._render_queue(c, self._p4_q("ui4fc"))      # 0x4AD4FC
+        # ⚠ 页4 专属渲染遍（同 p4_bg_draw：加 page 门防跨页污染，2026-10-31）
+        if self.page == 4:
+            if getattr(self, "p4_q4cc", None) is None:
+                self.p4_q4cc = self._p4_q("ui4cc")
+            self._render_queue(c, self.p4_q4cc)         # 0x4AD4CC 页4 4CC 队列
+            # 0x458EF0 无条件依次调用 6 条链表的渲染（空表也调），不能因列表为空而跳过
+            self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
+            self._render_queue(c, self._p4_q("ui49c"))  # 0x4AD49C
+        self._render_queue(c, self._p4_q("ui4fc"))      # 0x4AD4FC（与页1-3 的 ui4fc 同表）
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
             self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）
@@ -3712,8 +3831,8 @@ class Pages(Page4Mixin):
         self.p2_blits = []
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
-        # 0x458F3C if (arg) { 0x45EED0(0x4CD4A0); 0x460A90(0x4CD590) }：HUD 渲染（页4）
-        if getattr(self, "p4_bg", None) is not None:
+        # 0x458F3C if (arg) { 0x45EED0(0x4CD4A0); 0x460A90(0x4CD590) }：HUD 渲染（页4 专属）
+        if getattr(self, "p4_bg", None) is not None and self.page == 4:
             self.p4_hud_draw()
         # 0x451316：页4 回放进度文字（`0x44D330`）画在 present 之前 ⇒ 叠在最上层。
         # 只在 `p4_debug_text()` 真的产出内容时才有值（门 `[0x56CCC9]`&`[0x56CCB5]`）。

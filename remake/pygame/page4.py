@@ -566,6 +566,12 @@ class Ent42(Ent):
     """0x42 家族。`tick()` 返回 1 = 活 / 0 = 死（调用方按 0x43A36D..0x43A377 收尾）。"""
 
     def __init__(self, x: int, y: int, typ: int, prm: int, owner=None):
+        # VM 记录是无符号 dword（如 陽=0x42000002 的 y=−50 以 0xFFFFFFCE 送达）。
+        # exe 侧坐标是 32 位**有符号**语义（0x430640 的 cmp jg、0x45A690 写入），
+        # 这里归一成 Python 有符号，否则 dst 会在 2^32 附近串味（陽 的 dst.y 越过
+        # 2^32 后 0x430640 恒判出屏 ⇒ 光爆开当帧就死，2026-10-31 修）。
+        x = x - 0x100000000 if 0x80000000 <= x <= 0xFFFFFFFF else x
+        y = y - 0x100000000 if 0x80000000 <= y <= 0xFFFFFFFF else y
         super().__init__(x, y, typ, prm)
         self._owner = owner
         self.kind = typ - 0x42000001
@@ -1086,47 +1092,30 @@ def p4_446540(self, e) -> None:
 
 
 def p4_446470(self, e, a: int, b: int) -> None:
-    """`0x446470(e, bl, dl)`：头像帧号选择 + 方向位维护（`ret 8`）。
+    """`0x446470(e, bl, dl)`：**切换输入预设**（战斗中自机的移速/捕获参数来源）。
 
     ```
     0x446475 0x40208B(0x4AB5B0, 0x2) ; neg al; sbb eax,eax; and eax,8; add eax,7
-             ⇒ base = 7（位2 未置，操作器 A）或 0xF（已置，操作器 B）
-    0x446497 0x4019C9(0x4AB5B0, 0xC000) → mode ; 0x4464A4 mode <<= 1
-    0x4464A8 ecx = (bl != 0) ? 1 : 0
-    0x4464AF dl = [e+0x1C] & 1                       ; 方向位
-    0x4464B2 if (dl != 0) { ecx += mode*2 + base ; 0x4019B0(0x4AB454, ecx, e.x, e.y, dir) }
-    0x4464D1 else        { ecx += mode*2 + base ; 0x40115E(0x4AB454, ecx, dir) }
-    0x4464E4 if (bl) [e+0x1C] |= 2 else [e+0x1C] &= 1
+             ⇒ base = 7（位1 未置 = 鼠标模式）或 0xF（已置 = 键盘模式；page3 菜单选择）
+    0x446497 0x4019C9(0x4AB5B0, 0xC000) → mode（选机 0..2）
+    0x4464B2 if (b != 0) { fid = base+mode*2+a ; 0x4019B0(0x4AB454, fid, e.x, e.y, dir) }
+             else  { fid = base+mode*2   ; 0x40115E(0x4AB454, fid, dir) }
+    0x4464E4 if (b) [e+0x1C] |= 2 else [e+0x1C] &= 1
     ```
+    0x4019B0 → 0x44E620 = 装预设**并把指针设到 (e.x, e.y)**——演员 ctor 尾调
+    (e,0,1) 即"指针种子=出生点"，原作自机无初始化漂移的机制（2026-10-31）。
     """
-    base = 0xF if self.keys.test(2) else 7            # 0x446481
-    mode = getattr(self, "p4_mode", 0) & 3            # 0x45AFC0(0x4AB5B0,0xC000)
-    fid = base + mode * 2 + (1 if a else 0)           # 0x4464A8/0x4464B7/0x4464C1
-    d = e.g32(0x1C) & 1                               # 0x4464AF
-    if b:
-        p4_446470_play(self, fid, e, d)                # 0x4019B0(0x4AB454, fid, x, y, dir)
-    else:
-        p4_446470_play(self, fid, e, d)                # 0x40115E(0x4AB454, fid, dir)
+    base = 0xF if self.keys.test(2) else 7            # 0x446481（鼠标/键盘模式）
+    mode = self.keys.field(0xC000) & 3                # 0x45AFC0(0x4AB5B0,0xC000) 选机
+    fid = base + mode * 2 + (1 if a else 0)
+    if b:                                             # 0x4464CA 0x44E620：预设+指针
+        self.inp.set_preset4(fid, (e.s32(0x04), e.s32(0x08)))
+    else:                                             # 0x4464DF 0x44E4A0：只装预设
+        self.inp.set_preset4(fid)
     if a:                                             # 0x4464E7
         e.d32(0x1C, e.g32(0x1C) | 2)
     else:
         e.d32(0x1C, e.g32(0x1C) & 1)
-
-
-def p4_446470_play(self, fid: int, e, d: int) -> None:
-    """`0x4019B0 → 0x44E620` / `0x40115E → 0x44E4A0`：**切换输入配置**（非头像帧）。
-
-    ```
-    0x44E4AB eax = fid*7 ; 0x44E4B7 表 = 0x498A88 + fid*14
-    0x44E4BE 复制 14 字节到 [mgr+0x4C]      ; 覆盖 +0x4C 摇杆启用 / +0x4E 标志 / +0x50 灵敏度
-    0x44E620 另写 [mgr+0x14] = x、[mgr+0x18] = y   ; 指针坐标
-    ```
-    """
-    self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
-    self.p4_avatar_fid = fid
-    rec = p4_avatar_rect(self, fid)                    # 0x4C 帧记录（图集现算）
-    if rec is not None:
-        self.p4_avatar_rec = rec
 
 
 _P4TAB = {}
@@ -2450,58 +2439,64 @@ def _beh_10000001(self, e) -> bool:
 
     ```
     0x448C78 t = ++[ent+0x1C]
-    0x448C87 if ([node+4] == 0) goto 激活流程         ; 显示矩形左边界为 0 ⇒ 隐藏中
-    0x448C8C   if ((t & 0xF) == 0) 0x45A790(node+4,-0x20,0,-0x20,0)   ; 每 16 帧换动画帧
-    0x448CA5   if ([node+8] == 0) 0x45AF60(0x56CCC0,1)
-    0x448CBC   return 1
-    激活：0x448CC1 if (0x45AFF0(0x56CCC0,7)) return 1  ; 开始键未按就等
-           x=[0x4AB59C]; y=[0x4AB5A0]; [ent+4]=x; [ent+8]=y
-           if (x>0x1BE) x=0x1BE, 0x44E470(0x4AB454,x,y)   ; 钳 446
-           if (y>0x190) y=0x190, 0x44E470(...)            ; 钳 400
-           [0x56CC8C] = 0x401753(x,y); node.dst = 0x401753(x+0x40,y)
-           if ([0x4AB594] && !0x45AFF0(0x56CCC0,0x10))
-               生成 0x1B000001 于 (x+0x13, y) 入 0x4AD46C
-           if ([ent+0x18]) return 1
-           if (--[ent+0x20]) { 生成 0x0B000001 于 (200,200) 入 0x4AD40C; return 0 }
+    0x448C87 if ([节点+4]（rect.l） != 0) {            ; 可见：只做飞翼动画
+    0x448C8C   if ((t & 0xF) == 0) 0x45A790(节点+4, -0x20,0,-0x20,0)  ; 源矩形左移一格
+    0x448CA5   if ([节点+4] == 0) 0x45AF60(0x56CCC0, 1) ; 动画走到 0 → 清 0x56CCC0 bit0
+    0x448CBC   return 1 }                             ; ⚠ 此分支**不开火不移动**
+    0x448CC1 rect.l == 0（动画完毕/重生）→ 每帧采纳指针：
+           if (0x45AFF0(0x56CCC0,7)) return 1        ; 开始键位仍置着就等
+           x = [0x4AB59C]; y = [0x4AB5A0]; [ent+4/8] = x/y
+           if (x>0x1BE) x=0x1BE, 0x44E470(0x4AB454,x,y)   ; 钳 446 并回写指针
+           if (y>0x190) y=0x190, 0x44E470(0x4AB454,x,y)   ; 钳 400
+           [0x56CC8C]/[0x56CC90] = (x,y)；节点 dst = (x+0x40, y)
+           0x448D4F if (byte[0x4AB594]（btn0 原始按住） && !0x45AFF0(0x56CCC0,0x10))
+               生成 0x1B000001 于 (x+0x13, y) 入 0x4AD46C      ; ★ 开火
+           if ([ent+0x18]（HP）) return 1
+           if (--[ent+0x20]) { 0x448FF0(rec(200,200,0x0B000001,命数)) 入 0x4AD40C; return 0 }
            else { 0x45AF30(0x56CCC0,0x40); return 0 }
     ```
+    开火读的是**输入记录 byte0**（[0x4AB594]，C/左键按住），不是 0x56CCC0 的位
+    （bit0 只在 ctor 置位、动画完成时清位，见 0x4460F9/0x448CAC）。
     """
-    e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
-    e.d32(0x1C, e.g32(0x1C))
-    hidden = getattr(e, "rect_left", 0) == 0
-    if not hidden:                                   # 已显示：原地待机
-        if e.s32(0x1C) & 0xF == 0 and e.node is not None:
-            self.p4_anim_step(e)                     # 0x45A790
-        if e.g32(0x24) == 0:
-            self.p4_key_reset(1)                     # 0x45AF60(0x56CCC0,1)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    node = e.node
+    if node is None:
         return True
-    if self.p4_key_test(7):                          # 0x45AFF0(0x56CCC0,7) 开始键
+    if node.rect[0] != 0:                             # 0x448C87 可见：飞翼动画
+        if (t & 0xF) == 0:
+            self.p4_anim_step(e)                      # 0x45A790 源矩形左移一格
+        if node.rect[0] == 0:                         # 0x448CA5 动画到达 0
+            self.p4_key_reset(1)                      # 0x45AF60(0x56CCC0,1) 清 bit0
+        return True
+    if self.p4_key_test(7):                           # 0x448CC1 开始键位
         return True
     x, y = self.p4_ptr()
-    if x > 0x1BE:                                    # 0x448CE5 钳 446
+    if x > 0x1BE:                                     # 0x448CE5 钳 446
         x = 0x1BE
-        self.p4_ptr_set(x, y)                        # 0x44E470
-    if y > 0x190:                                    # 0x448D00 钳 400
+        self.p4_ptr_set(x, y)                         # 0x44E470
+    if y > 0x190:                                     # 0x448D00 钳 400
         y = 0x190
         self.p4_ptr_set(x, y)
     e.d32(0x04, x)
     e.d32(0x08, y)
-    self.p4_player_pos = (x, y)                      # 0x56CC8C
-    if e.node is not None:
-        e.node.dst = (x + 0x40, y)
-        e.node.active = 1                            # byte[节点+0x1C]=1（渲染读 .active）
-    if self.p4_btn_attack() and not self.p4_key_test(0x10):
-        e = self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
-        e.beh = "bullet_1b"                                # 0x430080
+    self.p4_player_pos = (x, y)                       # 0x448D28 [0x56CC8C]/[0x56CC90]
+    if node is not None:
+        node.dst = (x + 0x40, y)                      # 0x448D3E
+        node.active = 1
+    if getattr(self.inp.rec, "b0", 0) and not self.p4_key_test(0x10):   # 0x448D4F
+        e2 = self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
+        e2.beh = "bullet_1b"                                # 0x430080
         from geki import DisplayNode
-        e.disp = DisplayNode(layer=0, rect=[0xC0, 0x30, 0xDD, 0x4F],
-                             dst=[x + 0x13, y])
+        e2.disp = DisplayNode(layer=0, rect=[0xC0, 0x30, 0xDD, 0x4F],
+                              dst=[x + 0x13, y])
     if e.g32(0x18):
         return True
-    n = (e.s32(0x20) - 1) & 0xFFFFFFFF              # 0x448DAE 剩余重生次数
+    n = (e.s32(0x20) - 1) & 0xFFFFFFFF              # 0x448DAE 剩余命数
     e.d32(0x20, n)
     if n:
-        self.spawn(self._p4_q("ui40c"), 0x0B000001, 200, 200, n)  # 0x448DB9 a3=n
+        self._p4_ent_into(self.actorq, 0x0B000001, 0xC8, 0xC8, n,
+                          beh=0x448C70)               # 0x448DB9 重生（命数递减）
         return False
     self.p4_key_raw_set(0x40)                        # 0x448DFB → 0x45AF30(0x56CCC0,0x40)
     return False
@@ -3091,6 +3086,10 @@ class Page4Mixin:
         # 复刻侧：`run.py` 已在每次 `advance()` 之前调过 `0x44EB60`（`inp.build`），
         # 这里不再重建，否则会把按下沿（e0/e1）吃掉。
         self.inp.set_pos(0, 0)
+        # 0x454A08 0x44E620(0x4AB454, 0x17, 0, 0, 0)：阶段进场装载**预设 23**
+        # （键盘 4px/帧 + 鼠标 1:1 捕获 5，两者同开）并把指针种子设 (0,0)。
+        # 战斗中自机行为经 0x446470 换到 7..12（鼠标模式）/15..20（键盘模式）。
+        self.inp.set_preset4(0x17, (0, 0))
 
         # 0x450BBD..0x450D59：21 条音效槽装载（0x450140）
         ok = True
@@ -4185,12 +4184,16 @@ class Page4Mixin:
 
     # ---- 行为里用到的小工具（都对应一个确切地址）---------------------------
     def p4_430640(self, e) -> bool:
-        """`0x430640(ecx=ent)`：节点矩形是否与 (0,0)-(0x27F,0x1DF) 相交。"""
+        """`0x430640(ecx=ent)`：节点矩形是否与 (0,0)-(0x27F,0x1DF) 相交（坐标有符号）。"""
         n = e.node
         if n is None:
             return False
         l, t, r, b = n.rect
         x, y = n.dst
+        if x >= 0x80000000:                      # 无符号存放的负坐标 → int32 归一
+            x -= 0x100000000
+        if y >= 0x80000000:
+            y -= 0x100000000
         if x > 0x27F:                            # 0x430647
             return False
         if (r - l) + x <= 0:                     # 0x430656 0x45A710 宽
@@ -6097,13 +6100,13 @@ class Page4Mixin:
 
         `0x45AFF0(0x56CCC0, mask)` 才是"攻击/暂停/无敌"这类运行期位；`0x4AB5B0` 存的是模式选择
         （bit0 鍛錬 / bit1 操作器），两者的写入点完全不同（见 `0x45060A` vs `0x451423`）。
+        存储统一放 `p4_stat[0x56CCC0]`（0x44604E 的 ctor 置位也写这里，2026-10-31 前
+        曾分裂成 `_p4_in` 属性与 p4_stat 两处互不可见）。
         """
-        if not hasattr(self, "_p4_in"):
-            self._p4_in = 0
-        return self._p4_in
+        return int(self.p4_stat.get(0x56CCC0, 0)) & 0xFFFFFFFF
 
     def p4_in_set(self, bits: int) -> None:
-        self._p4_in = bits & 0xFFFFFFFF
+        self.p4_stat[0x56CCC0] = bits & 0xFFFFFFFF
 
     def p4_key_test(self, mask: int) -> bool:
         """`0x45AFF0(0x56CCC0, mask)`：测输入状态位。"""
@@ -7017,27 +7020,20 @@ class Page4Mixin:
                 e.node.active = True
         if beh == 0x448C70:                               # 自机：ctor 在 0x445C00 的 0x44604E 支
             # 0x44605E [+0x40]=0x401E06 ; 0x446065 [+0xC]=0x10 ; 0x44606C byte[+0x10]=1
-            # 0x446073 [+0x1C]=a3 ; 0x44608C [+0x18]=1
+            # 0x446070 [+0x1C]=0 ; 0x446089 [+0x20]=rec[3]（命数） ; 0x44608C [+0x18]=1
+            # 0x4460F9 0x45AF30(0x56CCC0, 1)  ★ 置 0x56CCC0 bit0（动画期标志）
             e.d32(0x0C, 0x10)
             e.m[0x10] = 1
-            e.d32(0x1C, a3 & 0xFFFFFFFF)
+            e.d32(0x1C, 0)
+            e.d32(0x20, a3 & 0xFFFFFFFF)
             e.d32(0x18, 1)
-            # 0x44607B..0x446096 0x45A750(&rect, 0x80, 0x50, 0x9F, 0x6F) + 拷进节点 +4
-            # 0x4460B9..0x4460C4 dst = 0x401753(x+0x40, y)
-            # ⚠ 层号仍未定，暂时**不显示**（宁可空着也不画错）。
-            #   · 层号 = 节点 [+0]（`0x45A252 mov edx,[esi]` → `0x44D010(layer,&dst,&src)`）
-            #   · 本支 `0x446094 mov [ecx],esi` 的 esi 在 0x446096 的 call 之前，
-            #     按线性读法应为 0，但层0 = `bmex\bm_ora.ggd`（384×496 汉字图集），
-            #     (0x80,0x50) 处正是"撃"字 —— 与"层=0"矛盾，说明 esi 的来源还没追对。
-            #   · 记入 §15；在追到 esi 之前 active=False，不画。
-            # 层号 = 0：节点 [+0]（`0x45A252 mov edx,[esi]` → `0x44D010(0x4AA7B0,layer,&dst,&src)`）。
-            # 依据：开场脚本 res_45（OpngStream）的 op 0x0B 把 **层0 ← id 7 = bmcm\bm_cm48.ggd**
-            # （240×528 自机图集），层1 ← id 8 = bm_cm32；`0x454950` 先塞 bm_ora/bm_orb 只是预载，
-            # 脚本 t=0 就覆盖掉了。⇒ (0x80,0x50,0x9F,0x6F) 在 bm_cm48 里就是自机精灵。
+            self.p4_in_set(self.p4_in_bits() | 1)         # 0x4460F9
+            # 层号 = 0：节点 [+0]。依据：页4 进场 op0xB 层0 ← bmcm\bm_cm48.ggd
+            # （240×528 自机图集），(0x80,0x50,0x9F,0x6F) 即自机精灵（0x446096）。
             e.node = DNode(0, 0x80, 0x50)
             e.node.active = True
             e.node.rect = (0x80, 0x50, 0x9F, 0x6F)        # 0x45A750 填的 4 个 word
-            e.node.dst = (x + 0x40, y)
+            e.node.dst = (x + 0x40, y)                    # 0x4460BF +0x40 偏移
             e.node.active = True
         queue.append(e)
         return e
@@ -8090,42 +8086,20 @@ class Page4Mixin:
         return fn(self, e)
 
     def p4_spawn_actor1(self, x: int, y: int, prm: int) -> None:
-        """`0x445ECE`（演员 **type 1 = 自机本体**，VM op1 / 流 46 t=0 生成于 (0x172,0xF0)）。
+        """演员 **type 1 = 自机本体**（VM op1 / 流 46 t=0 生成于 (0x172,0xF0)）。
 
-        ```
-        0x445ED5 八项行为表 = P4_PLAYER_BEH（0x4466F0/0x4467D0/0x446890/0x446950/
-                             0x446A10/0x446AD0/0x446B50/0x446BD0）
-        0x445F1C 0x45AFF0(0x4AB5B0,2)（操作器位）→ 0/4 偏移；0x45AFC0(…,0xC000) 选机 0..2
-                 [e+0x40] = 表[偏移+选机]
-        0x445F3E [+0xC]=0xA ; byte[+0x10]=0 ; [+0x1C]=0 ; [+0x24/28/2C/30]=0
-        0x445F56 [+0x20] = (param!=1) ? -1 : 0（dec/neg/sbb 序列）
-        0x445F6D [+0x18]=1
-        0x445F76 节点：层 0（bm_cm48）、rect=(选机*0x30, 0, +0x2F, 0x2F)（撃/凛/漢 三格）、
-                 dst=(x-0x18, y-0x18)、**byte[节点+0x1C]=0（隐藏）**
-        0x446008 [0x56CC8C]=rec[0]、[0x56CC90]=rec[1]（自机坐标全局）
-        0x446470(e,0,1) ctor 尾先跑一拍行为 ⇒ 0x446600 的 -1 分支当场点亮节点
-        ```
+        构造全在 `p4_445ece`（0x445ECE 逐条，含八项行为表[(操作器位?4:0)+选机]、
+        [e+0x20]=(param!=1)?-1:0、层 0 撃/凛/漢 三格 rect、ctor 尾 0x446470(e,0,1)
+        ⇒ **指针种子=出生点**（原作无初始化漂移的机制）+ 0x446600 的 -1 分支当场
+        点亮节点）。这里只补 DNode 装配与入队（0x4AD40C = actorq）。
         """
         e = Ent(x, y, 1, prm)
-        op = 4 if self.keys.field(2) else 0               # 0x445F1C..0x445F2D（操作器位→偏移）
-        ship = self.keys.field(0xC000) & 3                # 0x45AFC0(…,0xC000) 选机 0..2
-        beh = P4_PLAYER_BEH[min(op + ship, 7)]
-        e.beh = beh
-        e.d32(0x40, beh)
-        e.d32(0x0C, 0xA)                                  # 0x445F3E
-        e.m[0x10] = 0                                     # 0x445F45
-        e.d32(0x1C, 0)                                    # 0x445F49
-        for off in (0x24, 0x28, 0x2C, 0x30):
-            e.d32(off, 0)                                 # 0x445F5A..0x445F6A
-        e.d32(0x20, 0xFFFFFFFF if prm != 1 else 0)        # 0x445F56 dec/neg/sbb
-        e.d32(0x18, 1)                                    # 0x445F6D
-        e.node = DNode(0, ship * 0x30, 0)                 # 0x445F74 [节点]=esi=0（层 0）
-        e.node.rect = (ship * 0x30, 0, ship * 0x30 + 0x2F, 0x2F)
-        e.node.dst = (x - 0x18, y - 0x18)                 # 0x445FE6 0x45A690(x-0x18, y-0x18)
+        e.node = DNode(0, 0, 0)                           # 0x445F74 [节点]=0（层 0）
+        self.p4_445ece(e, (x, y, 1, prm))
+        e.beh = e.g32(0x40)                               # 行为表[idx]（P4_BEH 按真址登记）
+        e.node.rect = getattr(e.node, "src", e.node.rect)  # 0x445FC6 的矩形落进渲染字段
         e.node.active = 0                                 # 0x445FFF byte[节点+0x1C]=0
-        self.actorq.append(e)                             # 0x4AD40C（= actorq）
-        self.p4_player_pos = (x, y)                       # 0x446008 [0x56CC8C]/[0x56CC90]
-        p4_446470(self, e, 0, 1)                          # 0x446003 ctor 尾
+        self.actorq.append(e)                             # 0x4AD40C
 
     def p4_vm_entity(self, op: int, rec: tuple) -> None:
         """op1..op5 → 五个队列原语（`0x448FF0`/`0x43BDC0`/`0x43A3C0`/`0x44B140`/`0x445AA0`）。

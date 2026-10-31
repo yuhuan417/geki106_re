@@ -1367,12 +1367,21 @@ def main():
     class _ZK:
         def test(self, b):
             return False
+        def field(self, mask):
+            return 0
+    class _IN2:
+        x, y = 0, 0
+        def set_preset4(self, fid, pos=None):
+            self.preset4 = (fid, pos)
+        def set_pos(self, x, y):
+            self.x, self.y = x, y
     class _Z(page4.Page4Mixin):
         def __init__(self, stat=None):
             self.calls = []
             self.p4_stat = dict(stat or {})
             self.keys = _ZK()
             self.p4_player_pos = None
+            self.inp = _IN2()
         def _p4_q(self, n):
             return n
         def spawn(self, *a):
@@ -1509,11 +1518,21 @@ def main():
     class _KN:
         def test(self, b):
             return False
+        def field(self, mask):
+            return 0
+    class _IN:
+        """0x4AB454 输入管理器桩（p4_446470 的预设装载写这里）。"""
+        x, y = 0, 0
+        def set_preset4(self, fid, pos=None):
+            self.preset4 = (fid, pos)
+        def set_pos(self, x, y):
+            self.x, self.y = x, y
     class _PN(page4.Page4Mixin):
         def __init__(self):
             self.p4_stat = {}
             self.keys = _KN()
             self.p4_player_pos = None
+            self.inp = _IN()
     class _Nd2:
         src = None
         dst = None
@@ -2171,7 +2190,8 @@ def main():
           and _ct20.get(0x445F5F) == ("sbb", "eax, eax")
           and _ct20.get(0x445F64) == ("mov", "dword ptr [ebx + 0x20], eax")
           and "e.d32(0x20, 0 if a3 == 1 else 0xFFFFFFFF)" in _src
-          and "0x0B000001, 200, 200, n)" in _src, "")
+          and "self._p4_ent_into(self.actorq, 0x0B000001, 0xC8, 0xC8, n," in _src
+          and "beh=0x448C70)" in _src, "")
     _rs = page4.Page4Mixin.p4_self_respawn_rec
     _rd = {i.address: (i.mnemonic, i.op_str)
            for i in _mdk.disasm(img[0x44370A - ib:0x443790 - ib], 0x44370A)}
