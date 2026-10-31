@@ -1471,6 +1471,10 @@ class Pages(Page4Mixin):
         self._p4_q("ui4cc").clear()                    # 0x4AD4CC
         self.ui4fc.clear()                             # 0x4AD4FC
         self.ui52c.clear()                             # 0x4AD52C
+        # 0x6F000007 的整屏人像/擦切是页13 队列实体的画布镜像：实体随队列清除，
+        # 镜像也要清——否则 页13(飞行员画面)→页4 每帧把人像贴回来（2026-10-31 修）。
+        self.p13_portrait_arr = None
+        self.wipe4f = []
         for s in getattr(self, "p4_bg", ()):            # 0x4AD55C ×12（0x457B90 复位）
             s.params = [0] * 20
             s.rates = [0] * 20
