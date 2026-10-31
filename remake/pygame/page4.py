@@ -1739,7 +1739,7 @@ def p4_446600(self, e) -> bool:
             e.d32(0x10, 1)
             e.d32(0x20, 0x12D)
             if e.node is not None:
-                e.node.visible = 1
+                e.node.active = 1          # 0x446627 byte[节点+0x1C]=1（渲染读 .active）
         elif t == 0x28:
             if not bool(getattr(self, "_p4_busy", 1)):
                 return False
@@ -1748,10 +1748,10 @@ def p4_446600(self, e) -> bool:
             e.d32(0x10, 1)
         elif t == 0x12C:
             if e.node is not None:
-                e.node.visible = 1
+                e.node.active = 1          # 0x446662
             self.p4_ccc2 = 0
         elif t > 0x78 and e.node is not None:
-            e.node.visible = t & 1
+            e.node.active = t & 1          # 0x44667B 闪烁
     e.d32(0x20, (t + 1) & 0xFFFFFFFF)
     e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
     if e.g32(0x30):
@@ -2489,7 +2489,7 @@ def _beh_10000001(self, e) -> bool:
     self.p4_player_pos = (x, y)                      # 0x56CC8C
     if e.node is not None:
         e.node.dst = (x + 0x40, y)
-        e.node.visible = 1
+        e.node.active = 1                            # byte[节点+0x1C]=1（渲染读 .active）
     if self.p4_btn_attack() and not self.p4_key_test(0x10):
         e = self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
         e.beh = "bullet_1b"                                # 0x430080
@@ -4640,7 +4640,7 @@ class Page4Mixin:
             jx = rng.randrange(0x80) - 0x3F                  # 0x460CD3 / 0x460CD6
             jy = rng.randrange(0x80) - 0x3F                  # 0x460CDF / 0x460CE2
             self.spawn(qfx, 0x41000004, px + jx, py + jy)    # 第 5 字段 = &(jx,jy)
-        self.spawn(self._p4_q("ui40c"), 1, px, py, 1)        # 0x460D1F 演员队列
+        self.p4_spawn_actor1(px, py, 1)                      # 0x460D1F 演员队列（0x445ECE，param=1 ⇒ 完整入场闪烁）
         self.p4_stat[M + 0x34] = self.p4_stat.get(M + 0x34, 0) + 1   # 0x460D2D
         self.p4_stat[M + 0x38] = self.p4_stat.get(M + 0x38, 0) + 1   # 0x460D32
         lives = self.p4_stat.get(M + 0x30, 0)                # 0x460D2A
@@ -6151,6 +6151,11 @@ class Page4Mixin:
         e.d32(0x28, (e.s32(0x28) + 1) & 3)
 
     def _p4_q(self, name: str) -> list:
+        if name == "ui40c":
+            # 0x4AD40C 的复刻侧本名是 self.actorq（geki 初始化、p4 帧序 0x448F80 tick）。
+            # 旧复刻在 _p4_q("ui40c") 里另造了一个无人 tick 的死列表，VM op1 生成的
+            # 自机（演员 type 1）从不更新（2026-10-31 修，"撃 常驻"的一半根因）。
+            return self.actorq
         q = getattr(self, name, None)
         if q is None:
             q = []
@@ -8084,6 +8089,44 @@ class Page4Mixin:
             return True
         return fn(self, e)
 
+    def p4_spawn_actor1(self, x: int, y: int, prm: int) -> None:
+        """`0x445ECE`（演员 **type 1 = 自机本体**，VM op1 / 流 46 t=0 生成于 (0x172,0xF0)）。
+
+        ```
+        0x445ED5 八项行为表 = P4_PLAYER_BEH（0x4466F0/0x4467D0/0x446890/0x446950/
+                             0x446A10/0x446AD0/0x446B50/0x446BD0）
+        0x445F1C 0x45AFF0(0x4AB5B0,2)（操作器位）→ 0/4 偏移；0x45AFC0(…,0xC000) 选机 0..2
+                 [e+0x40] = 表[偏移+选机]
+        0x445F3E [+0xC]=0xA ; byte[+0x10]=0 ; [+0x1C]=0 ; [+0x24/28/2C/30]=0
+        0x445F56 [+0x20] = (param!=1) ? -1 : 0（dec/neg/sbb 序列）
+        0x445F6D [+0x18]=1
+        0x445F76 节点：层 0（bm_cm48）、rect=(选机*0x30, 0, +0x2F, 0x2F)（撃/凛/漢 三格）、
+                 dst=(x-0x18, y-0x18)、**byte[节点+0x1C]=0（隐藏）**
+        0x446008 [0x56CC8C]=rec[0]、[0x56CC90]=rec[1]（自机坐标全局）
+        0x446470(e,0,1) ctor 尾先跑一拍行为 ⇒ 0x446600 的 -1 分支当场点亮节点
+        ```
+        """
+        e = Ent(x, y, 1, prm)
+        op = 4 if self.keys.field(2) else 0               # 0x445F1C..0x445F2D（操作器位→偏移）
+        ship = self.keys.field(0xC000) & 3                # 0x45AFC0(…,0xC000) 选机 0..2
+        beh = P4_PLAYER_BEH[min(op + ship, 7)]
+        e.beh = beh
+        e.d32(0x40, beh)
+        e.d32(0x0C, 0xA)                                  # 0x445F3E
+        e.m[0x10] = 0                                     # 0x445F45
+        e.d32(0x1C, 0)                                    # 0x445F49
+        for off in (0x24, 0x28, 0x2C, 0x30):
+            e.d32(off, 0)                                 # 0x445F5A..0x445F6A
+        e.d32(0x20, 0xFFFFFFFF if prm != 1 else 0)        # 0x445F56 dec/neg/sbb
+        e.d32(0x18, 1)                                    # 0x445F6D
+        e.node = DNode(0, ship * 0x30, 0)                 # 0x445F74 [节点]=esi=0（层 0）
+        e.node.rect = (ship * 0x30, 0, ship * 0x30 + 0x2F, 0x2F)
+        e.node.dst = (x - 0x18, y - 0x18)                 # 0x445FE6 0x45A690(x-0x18, y-0x18)
+        e.node.active = 0                                 # 0x445FFF byte[节点+0x1C]=0
+        self.actorq.append(e)                             # 0x4AD40C（= actorq）
+        self.p4_player_pos = (x, y)                       # 0x446008 [0x56CC8C]/[0x56CC90]
+        p4_446470(self, e, 0, 1)                          # 0x446003 ctor 尾
+
     def p4_vm_entity(self, op: int, rec: tuple) -> None:
         """op1..op5 → 五个队列原语（`0x448FF0`/`0x43BDC0`/`0x43A3C0`/`0x44B140`/`0x445AA0`）。
 
@@ -8096,8 +8139,11 @@ class Page4Mixin:
             self.p4_q43c.append(Ent(a, b, c, d))       # 0x43BDC0 → 0x43A7F0
             self.p4_n43c += 1
         elif op == 1:
-            # 0x46044F：0x430400(&rec,…) 后 0x448FF0(0x4AD40C,&rec) ⇒ ui40c
-            self.spawn(self._p4_q("ui40c"), c, a, b, d)
+            # 0x46044F：0x430400(&rec,…) 后 0x448FF0(0x4AD40C,&rec) ⇒ 演员队列
+            if c == 1:
+                self.p4_spawn_actor1(a, b, d)      # 0x445ECE：自机本体（撃/凛/漢）
+            else:
+                self.spawn(self._p4_q("ui40c"), c, a, b, d)
         elif op == 3:
             # 0x460411：0x430400(&rec,…) 后 0x43A3C0(0x4AD4CC,&rec) ⇒ ui4cc
             if (c & 0xFF000000) == 0x42000000:      # ctor 0x4355E0 的 0x42 家族分支
