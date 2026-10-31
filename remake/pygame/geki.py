@@ -3725,7 +3725,12 @@ class Pages(Page4Mixin):
         self.present()          # 0x458CB0 → 0x44D740（调色板操作 + Blt）
 
     def _render_queue(self, c: "Canvas", q) -> None:
-        """0x430840(`add ecx,4; jmp 0x45A170`)：按队列遍历显示表并 BltFast。"""
+        """0x430840(`add ecx,4; jmp 0x45A170`)：按队列遍历显示表并 BltFast。
+
+        dst 按 **int32** 归一后再交给 blit：页4 的 0x42/0x46 实体节点会把负坐标
+        以无符号 dword 形式存进 dst（如 陽=0x42000002 静止于 y=-98 → 0xFFFFFFBE），
+        原样传给 pygame 会被当成超大正坐标裁掉（2026-10-31 修，陽 下沉入画）。
+        对小正数这是无操作，页1-3 不受影响。"""
         for e in q:
             d = e.disp
             if d is None or not d.active:
@@ -3735,6 +3740,10 @@ class Pages(Page4Mixin):
                 continue
             left, top, right, bottom = (int(v) for v in d.rect)
             if right > left and bottom > top:
-                c.blit(lay.buf, (left, top, right, bottom), (int(d.dst[0]), int(d.dst[1])),
-                       key=lay.ckey)
+                dx, dy = int(d.dst[0]), int(d.dst[1])
+                if dx >= 0x80000000:
+                    dx -= 0x100000000
+                if dy >= 0x80000000:
+                    dy -= 0x100000000
+                c.blit(lay.buf, (left, top, right, bottom), (dx, dy), key=lay.ckey)
 

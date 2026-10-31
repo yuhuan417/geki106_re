@@ -6563,12 +6563,17 @@ class Page4Mixin:
                     continue
                 l, t, r, b = band.src
                 dx, dy = band.dst
+                if dx >= 0x80000000:                  # 负坐标以无符号 dword 存放 → 归一
+                    dx -= 0x100000000
+                if dy >= 0x80000000:
+                    dy -= 0x100000000
                 c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
                 self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
 
     def p4_render_ents(self) -> None:
         """`0x458EF0` 渲染遍里 0x4AD43C 队列那一轮：`0x45A170`→`0x44D010` flags=0x11（色键 0），
-        源矩形先按 (0,0,640,480) 裁剪窗裁（`0x459F70` 给的整屏）。"""
+        源矩形先按 (0,0,640,480) 裁剪窗裁（`0x459F70` 给的整屏）。dst 按 int32 归一
+        （0x42/0x46 实体会把负坐标存成无符号 dword，原样 blit 会被 pygame 裁掉）。"""
         c = self.canvas
         # 0x458EF0 的第 2 轮 = 0x402531 → 0x430840(0x4AD43C)；
         # 其余队列由 geki.draw() 里的 _render_queue 逐条调用（顺序同 0x458EF0）
@@ -6582,6 +6587,10 @@ class Page4Mixin:
                 continue
             l, t, r, b = nd.rect
             dx, dy = nd.dst
+            if dx >= 0x80000000:
+                dx -= 0x100000000
+            if dy >= 0x80000000:
+                dy -= 0x100000000
             c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
 
     # ---- 特殊类槽行为用到的三个助手（§16.180/§16.181）------------------
