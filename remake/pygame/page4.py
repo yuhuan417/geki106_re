@@ -4192,17 +4192,24 @@ class Page4Mixin:
         否则 `0x437920`（= `jmp [ent+0x40]`）派发行为；返回 0 ⇒ 清 `[+0x34]` 与 `node[+0x1C]`。"""
         keep = []
         for e in self._p4_q("ui4cc"):
-            if not hasattr(e, "tick"):
-                keep.append(e)
-                continue
             if not e.alive:                      # 0x43A361
                 continue
-            if e.tick():                         # 0x43A368 0x437920
-                keep.append(e)
+            if hasattr(e, "tick"):
+                # Ent42 等：自带 tick()
+                if e.tick():                     # 0x43A368 0x437920
+                    keep.append(e)
+                else:
+                    e.alive = 0                  # 0x43A374
+                    if e.node is not None:
+                        e.node.active = 0        # 0x43A377
             else:
-                e.alive = 0                      # 0x43A374
-                if e.node is not None:
-                    e.node.active = 0            # 0x43A377
+                # 0x41 族拖尾等：beh 派发（0x430550 等，走 p4_call_behaviour）
+                if self.p4_call_behaviour(e):
+                    keep.append(e)
+                else:
+                    e.alive = 0
+                    if e.node is not None:
+                        e.node.active = 0
         self._p4_q("ui4cc")[:] = keep
 
     # ---- 行为里用到的小工具（都对应一个确切地址）---------------------------
@@ -4339,6 +4346,73 @@ class Page4Mixin:
                     self.p4_hit_cb(a, b)
                     hits += 1
         return hits
+
+    # ---- 0x41 族：拖尾/粒子（ctor 0x428C70 大支 0x4294A1，行为 0x401B95→0x430550）----
+    # 表: (层, rect l,t,r,b, dst减, [+0x1C] 相位目标, [+0x20] 寿命, [+0x24] 闪烁使能)
+    P4_TRAIL_CTOR = {
+        0x41000015: (1, 0x100, 0xD0, 0x10F, 0xDF, 8, 1, 4, 0),   # 0x42BC40 每帧
+        0x41000016: (1, 0x100, 0xE0, 0x10F, 0xEF, 8, 1, 4, 0),   # 0x42BEE0 奇数帧
+        0x41000017: (0, 0x78, 0x1F8, 0x8F, 0x20F, 0xC, 2, 5, 1),  # 0x42C120 每帧
+        0x41000018: (1, 0x100, 0xF0, 0x10F, 0xFF, 8, 4, 4, 1),   # 0x42C210 每帧
+    }
+
+    def p4_spawn41(self, x: int, y: int, typ: int) -> None:
+        """0x41 族拖尾：0x430400(rec,x,y,typ) → 0x43A3C0(0x4AD4CC) → ctor 0x428C70
+        大支 0x4294A1（跳表 0x4299B8 idx4..7）。行为 0x401B95→0x430550 共享：
+        相位 [0x2C] 数到 [0x1C] ⇒ 寿命 [0x20]-- 且源矩形右滑一格（atlas 下一帧图），
+        寿命尽即死；[+0x24] 非 0 时偶数帧隐藏（闪烁）。"""
+        spec = self.P4_TRAIL_CTOR.get(typ)
+        if spec is None:
+            return
+        layer, l, t, r, b, dv, c1c, c120, c124 = spec
+        e = Ent(int(x), int(y), int(typ), 0)
+        e.d32(0x14, typ & 0xFFFFFFFF)
+        e.d32(0x40, 0x401B95)                          # thunk → 0x430550
+        e.beh = 0x430550
+        e.d32(0x1C, c1c)
+        e.d32(0x20, c120)
+        e.d32(0x24, c124)
+        e.d32(0x28, 0)
+        e.d32(0x2C, 0)
+        e.d32(0x18, 1)
+        e.d32(0x10, 0)                                 # 拖尾不参与碰撞（0x43C060 只查弹/敌）
+        e.node = DNode(layer, l, t)
+        e.node.rect = (l, t, r, b)
+        e.node.dst = (int(x) - dv, int(y) - dv)
+        e.node.active = 1
+        self._p4_q("ui4cc").append(e)
+
+    def _beh_430550(self, e) -> bool:
+        """`0x401B95` → `0x430550`：拖尾共享行为（0x41000015/16/17/18 共用）。
+
+        ```
+        0x430553 if ([0x2C] != [0x1C]) [0x2C]++ → 尾
+        else: [0x2C]=1 ; if (--[0x20] == 0) return 0   ; 寿命尽
+              0x45A790(节点+4, 宽, 0, 宽, 0)            ; 源矩形右滑一格（宽=r-l+1）
+        0x430595 if ([0x24] != 0) { c=[0x28]++; if ((c&1)==0) byte[节点+0x1C]=0 }
+                 else byte[节点+0x1C]=1
+        ```"""
+        if e.s32(0x2C) != e.s32(0x1C):
+            e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+        else:
+            e.d32(0x2C, 1)
+            life = (e.s32(0x20) - 1) & 0xFFFFFFFF
+            e.d32(0x20, life)
+            if life == 0:
+                return False
+            if e.node is not None:
+                l, tt, r, b = e.node.rect
+                w = r - l + 1
+                e.node.rect = (l + w, tt, r + w, b)    # 0x45A790(宽,0,宽,0)
+        if e.s32(0x24):
+            c = (e.s32(0x28) + 1) & 0xFFFFFFFF
+            e.d32(0x28, c)
+            if e.node is not None:
+                e.node.active = 0 if (c & 1) == 0 else 1
+            return True
+        if e.node is not None:
+            e.node.active = 1
+        return True
 
     def p4_hit_cb(self, b, a) -> None:
         """`0x43C170(b, a)`：命中回调。`b` = 我方子弹（arg1）、`a` = 被击中实体（arg2）。
@@ -8145,6 +8219,8 @@ class Page4Mixin:
         """`0x446450 = jmp [ent+0x40]`：按行为指针分派。未实现的行为先返回"存活"并计数，
         绝不假装完成——实现一个就在 `P4_BEH` 里登记一个。"""
         fn = P4_BEH.get(e.beh)
+        if fn is None and e.beh == 0x430550:
+            fn = type(self)._beh_430550                 # 拖尾共享行为（0x401B95→0x430550）
         if fn is None:
             self.p4_beh_missing[e.beh] = self.p4_beh_missing.get(e.beh, 0) + 1
             self.p4_beh_missing_types[(e.beh, e.s32(0x14))] = \

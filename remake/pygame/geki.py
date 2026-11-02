@@ -2322,9 +2322,8 @@ class Pages(Page4Mixin):
                     e.p["vx"], e.p["vy"] = vx_l[0], vy_l[0]
             self._fx12_integrate(e)                    # 0x42BF71
             self._fx12_place(e)                        # 0x42BF84 dst=(x-8,y-8)
-            if self.frames & 1:                        # 0x42BF95 test al,1
-                self.trailq.append({"x": e.p["x"], "y": e.p["y"],
-                                    "type": 0x41000016, "a3": 0})
+            if self.p4_frames & 1:                     # 0x42BF95 test al,1（页4 帧计数 [0x56CCA8]）
+                self.p4_spawn41(e.p["x"], e.p["y"], 0x41000016)   # 拖尾实体（0x429654）
             self._fx12_visibility(e)                   # 0x42BFD8 push 8
             return
         if e.p.get("kind") == "drop":                  # 0x42BDF0
@@ -2462,17 +2461,13 @@ class Pages(Page4Mixin):
                 e.p["cnt"] = cnt
                 e.p["blink"] = 1 if cnt >= 0 else 0    # 0x42C25B setns cl
                 trail_type = 0x41000018
-            self.trailq.append({"x": int(e.p["x"]), "y": int(e.p["y"]),
-                                "type": trail_type, "a3": 0})
+            self.p4_spawn41(e.p["x"], e.p["y"], trail_type)   # 拖尾实体（0x42971D/0x42969D）
             self._fx12_integrate(e)                    # 0x42C194 / 0x42C293
             self._fx12_place(e)                        # 0x42C1A2 减 0xC / 0x42C29E 减 8
             self._fx12_visibility(e)                   # push 8
             return
         if e.p.get("kind") == "trail":                 # 0x42BC40（0x12061124）
-            self.trailq.append({                       # 0x42BC5C..0x42BC7B
-                "x": int(e.p["x"]), "y": int(e.p["y"]),
-                "type": 0x41000015, "a3": 0,
-            })
+            self.p4_spawn41(e.p["x"], e.p["y"], 0x41000015)   # 拖尾实体（0x42960B）
             self._fx12_integrate(e)                    # 0x42BC80
             self._fx12_place(e)                        # 0x42BC87 sub 8
             self._fx12_visibility(e)                   # 0x42BCA3 push 0x10
@@ -2542,9 +2537,9 @@ class Pages(Page4Mixin):
     def _spawn_4100_0004(self, x: int, y: int, pt) -> None:
         """`0x42BAB9` 的投放：`0x4023C4(rec, x, y, 0x41000004, &(vx>>7, vy>>7))` → `0x4AD4CC`。
 
-        该类型的 ctor 尚未读（页13 上 `[+0x2C]` 恒 0，走不到这里），故先只记录不建实体。
+        ctor = 0x428D59（与碰撞火花同一实体）：复刻走 spark_spawn。
         """
-        self.log(f"0x41000004 投放 ({x},{y}) a3={pt} → ctor 未读，暂不建实体")
+        self.spark_spawn(x, y, pt[0], pt[1]) if isinstance(pt, tuple) else self.spark_spawn(x, y, 0, 0)
 
     def _fx12_visibility(self, e: UiEntity, m=None) -> None:
         """`0x4021E9`(m=半宽) 与 `[+0x18]` 的与：不满足即结束（`al && [+0x18]`）。
