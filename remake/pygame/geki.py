@@ -2210,6 +2210,8 @@ class Pages(Page4Mixin):
         e.p["px"] = int(x) << 8                       # [+0x24]
         e.p["py"] = int(y) << 8                       # [+0x28]
         e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
+        e.d32(0x04, int(x) & 0xFFFFFFFF)               # 同步原始字段（0x43C060 碰撞读 [e+4]/[e+8]）
+        e.d32(0x08, int(y) & 0xFFFFFFFF)
         # 0x42B62E/0x42B6B8：速度 = 生成记录 x（有符号 /4，cdq+and 3+sar 2）
         e.p["spd"] = int(int(x) >> 2) if speed == "x/4" else int(speed or 0)
         e.p["vis"] = 1                                 # [+0x18] = 1（ctor）
@@ -2251,6 +2253,8 @@ class Pages(Page4Mixin):
         # 但 0x42B683 支走 0x42B73E ⇒ 32×32 也减 8，故不能用 rect 宽度推
         # 0x42B30E 支在 ctor 尾部之前改写 [+8]（0x42B3B0），故 dst 必须用改写后的 y
         e.p["beh40"] = beh                     # [+0x40] 行为指针（判分支用）
+        e.raw[0x10] = 1                        # 0x42B243 byte[+0x10]=1：参与碰撞
+        e.d32(0x14, ty & 0xFFFFFFFF)           # 基础 ctor：[+0x14]=类型（碰撞分派读原始字段）
         e.disp = DisplayNode(int(layer), list(rect),
                              [int(e.p["x"]) - half, int(e.p["y"]) - half])
         self.ui46c.append(e)
@@ -2556,6 +2560,8 @@ class Pages(Page4Mixin):
         e.p["py"] += e.p["vy"]
         e.p["x"] = e.p["px"] >> 8                      # [+4] = [+0x24] sar 8
         e.p["y"] = e.p["py"] >> 8
+        e.d32(0x04, e.p["x"] & 0xFFFFFFFF)             # 同步原始字段（碰撞用）
+        e.d32(0x08, e.p["y"] & 0xFFFFFFFF)
         if e.disp:                                     # 0x42C3DB..0x42C3F7
             half = e.p.get("m", e.p["half"])
             e.disp.dst[0] = e.p["x"] - half

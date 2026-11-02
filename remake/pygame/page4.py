@@ -3508,12 +3508,13 @@ class Page4Mixin:
         # 0x451316：`0x44D330` 的 7 个实参（push 序 bg,fg,h,str,y,x,a0）
         self._p4_dbg_text = (s, 0, 0x1D4, 0x0C, 0xD9, 0xB4)
 
-    def p4_collide(self) -> None:
-        """0x451461..0x4514A6：`0x43BF60` 建上下文，`ctx+0x54=0`，再跑三组：
-        `0x43BFD0(ctx,0x4AD40C,0x4AD43C)`（演员×自弹）、`0x43C060(ctx,0x4AD46C,0x4AD43C)`
-        （46C×自弹）、`0x43C0F0(ctx,0x4AD49C,0x4AD40C)`（49C×演员）。
-        见 §16.269：类型 6 命中的最后一击分支已按 0x43C21B..0x43C302 落地。"""
-        return
+    def p4_collide(self) -> int:
+        """0x451461..0x4514A6：`0x43BF60` 建上下文（本体只做 `[ctx]=0x498754` vtable，
+        0x43BFB0 同），返回非 None 让 p4_step 跑三组：
+        `0x43BFD0(ctx,0x4AD40C,0x4AD43C)`（演员×43C）、`0x43C060(ctx,0x4AD46C,0x4AD43C)`
+        （46C 弹×43C 敌）、`0x43C0F0(ctx,0x4AD49C,0x4AD40C)`（49C 敌弹×演员）。
+        命中回调 p4_43c460（弹→敌：伤害/火花/最后一击）/p4_43ccc0 已按反汇编落地（§16.269）。"""
+        return 0x498754
 
     # ---- 0x42 家族（开场）----------------------------------------------
     def p4_spawn42(self, x: int, y: int, typ: int, prm: int) -> None:
@@ -5965,7 +5966,7 @@ class Page4Mixin:
         else:
             self._p4_43c460_dispatch(p, a, t0)                 # 0x43C4C0 jne 0x43C508 之前的分支
             return
-        self.spawn(self._p4_q("ui4cc"), 0x41000004, x, y, (ox, oy))   # 0x43C488 / 0x43C503
+        self.spark_spawn(x, y, ox, oy)                         # 0x43C488 → ctor 0x428D59
         self._p4_43c460_dispatch(p, a, t0)                     # 0x43C508 起
 
     def _p4_43c987(self, p, u: int) -> None:
