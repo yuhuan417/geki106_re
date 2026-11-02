@@ -1328,6 +1328,8 @@ def main():
             return n
         def spawn(self, *a):
             self.calls.append(a)
+        def spark_spawn(self, x, y, ax, ay):
+            self.calls.append(("SPARK", x, y, ax, ay))
     _he = page4.Ent(100, 50, 0x23000001, 0)
     _he.d32(0x14, 0x1000)
     _he.d32(0x1C, 0x400)
@@ -1349,16 +1351,17 @@ def main():
         tgt.d32(0x18, 0x7FFFFFFF)      # 血量远大于 k ⇒ 共用尾只扣血放 SE，不毁靶
         tgt.d32(0x10, 1)
         page4.Page4Mixin.p4_43c460(h, e, tgt)
-        return [(c[0], c[1]) for c in h.calls if c[0] != "SE"], e.s32(0x18)
+        return [(("SPARK",) if c[0] == "SPARK" else (c[0], c[1]))
+                for c in h.calls if c[0] != "SE"], e.s32(0x18)
     _c1 = _hit(0x12061128)
     _c2 = _hit(0x12081123)
     _c3 = _hit(0x120C112C)
     _c4 = _hit(0x1B000001)
     check("0x43C460 二级分发：0x12061128/0x12081123 造同类型入 ui46c；0x120C112C 置 [+0x30]=-3；"
           "0x1B000001 提前返回不走共用尾",
-          _c1[0] == [("ui4cc", 0x41000004), ("ui46c", 0x12061128)] and _c1[1] == 2
-          and _c2[0] == [("ui4cc", 0x41000004), ("ui46c", 0x12081123)]
-          and _c3[0] == [("ui4cc", 0x41000004)] and _c3[1] == 2
+          _c1[0] == [("SPARK",), ("ui46c", 0x12061128)] and _c1[1] == 2
+          and _c2[0] == [("SPARK",), ("ui46c", 0x12081123)]
+          and _c3[0] == [("SPARK",)] and _c3[1] == 2
           and _c4[0] == [] and _c4[1] == 0, "")
     check("0x43C460 的 cmp 链是**无符号**二叉查找（0x43C525 ja / 0x43C53B ja / 0x43C557 jne）",
           img[0x43C525 - ib:0x43C52B - ib] == bytes([0x0F, 0x87, 0x1C, 0x04, 0x00, 0x00])
@@ -3124,10 +3127,11 @@ def main():
           and _za2.g32(0x48) == 1 and _za2.m[0x4C] == 1
           and _zp.m[0x10] == 0 and _zp.g32(0x1C) == 4
           and _zs.calls[-1] == ("SE", 6, (0x300 - 0x140) << 4), "")
-    check("0x43C460 前半段：(type&0x7000)==0x1000 用 [0x1C]>>7/[0x20]>>7，其它不生成",
-          len(_h1.calls) == 1 and _h1.calls[0][1] == 0x41000004
-          and _h1.calls[0][2] == 100 and _h1.calls[0][3] == 50
-          and _h1.calls[0][4] == (8, 12) and _h2.calls == [], "")
+    check("0x43C460 前半段：(type&0x7000)==0x1000 用 [0x1C]>>7/[0x20]>>7，其它不生成"
+          "（火花走专用 spark_spawn = ctor 0x428D59，2026-11-03 改）",
+          len(_h1.calls) == 1 and _h1.calls[0][0] == "SPARK"
+          and _h1.calls[0][1] == 100 and _h1.calls[0][2] == 50
+          and _h1.calls[0][3] == 8 and _h1.calls[0][4] == 12 and _h2.calls == [], "")
     check("0x43C0B6 经 thunk 0x401136 指向 0x43C460（不是 0x43C170）—— p4_43c060 的接线已改正",
           img[0x43C0B6 - ib:0x43C0BB - ib] == bytes([0xE8, 0x7B, 0x50, 0xFC, 0xFF]), "")
     check("0x45E710 倍率：(min(word[0x2C],10) + min(d,100)) * rec[5] * rec[0]",
