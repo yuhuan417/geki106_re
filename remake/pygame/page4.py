@@ -4335,7 +4335,8 @@ class Page4Mixin:
                 if not b.g32(0x10):
                     continue
                 if self.p4_hit_test(b, a.s32(0x04), a.s32(0x08), a.s32(0x0C)):   # 0x43C011
-                    self.p4_hit_cb(b, a)                                          # 0x43C01E → 0x43C170
+                    # 0x43C01E → 0x43C170：回调 esi = **内层 qa**（walker 的 edi 最后 push）
+                    self.p4_hit_cb(a, b)
                     hits += 1
         return hits
 
@@ -4368,6 +4369,8 @@ class Page4Mixin:
                 b.d32(0x28, 0)
                 b.d32(0x20, 0x79)
                 return
+            self.p4_460c00()                              # 0x43C38B 死亡演出/命数递减/重生机
+            self.p4_45f570()                              # 0x43C395 量表重置
             b.d32(0x10, 0)                                # 0x43C39F
             b.d32(0x18, 0)
             return
@@ -4667,7 +4670,9 @@ class Page4Mixin:
         for _ in range(0x1E):                                # 0x460CCE..0x460D06
             jx = rng.randrange(0x80) - 0x3F                  # 0x460CD3 / 0x460CD6
             jy = rng.randrange(0x80) - 0x3F                  # 0x460CDF / 0x460CE2
-            self.spawn(qfx, 0x41000004, px + jx, py + jy)    # 第 5 字段 = &(jx,jy)
+            # 0x41000004 的 ctor = 0x428D59 ⇒ 复刻走 spark_spawn（速度取抖动方向，
+            # 幅度 = 抖动原值；4CC 火花渲染/寿命路径现成）
+            self.spark_spawn(px + jx, py + jy, jx * 4, jy * 4)
         self.p4_spawn_actor1(px, py, 1)                      # 0x460D1F 演员队列（0x445ECE，param=1 ⇒ 完整入场闪烁）
         self.p4_stat[M + 0x34] = self.p4_stat.get(M + 0x34, 0) + 1   # 0x460D2D
         self.p4_stat[M + 0x38] = self.p4_stat.get(M + 0x38, 0) + 1   # 0x460D32

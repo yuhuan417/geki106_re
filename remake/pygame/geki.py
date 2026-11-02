@@ -1866,7 +1866,11 @@ class Pages(Page4Mixin):
             if not e.alive:
                 continue
             if hasattr(e, "m"):                       # 页4：字节模型实体（0x5C，走 [+0x40] 行为）
-                self.p4_call_behaviour(e)
+                # 0x448F80 的 tick：行为返回 0 ⇒ byte[+0x34]=0 + 隐藏节点（0x448FA7..0x448FB0）
+                if not self.p4_call_behaviour(e):
+                    e.m[0x34] = 0
+                    if e.node is not None:
+                        e.node.active = 0
                 continue
             if e.beh == "bullet_1b":                  # 0x430080：x += 7
                 nx = e.s32(4) + 7
