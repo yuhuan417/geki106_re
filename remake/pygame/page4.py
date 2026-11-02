@@ -488,6 +488,7 @@ class Ent:
         self.buf2c = None                 # 0x4601CB 字形位图缓冲（0x4602D0 家族）
         self.flags38 = 0                  # 0x4602B2 标志字
         self.link24 = None                # 0x43CD77 演员链表头
+        self.p: dict = {}                 # 复刻侧 Python 链接（owner/pod1 等；不在 exe 内存模型里）
         if typ == 0x21000001:                    # 0x43A899（0x21 族里唯一有专有构造的）
             # 0x43A8AA [e+0x40] = 0x401E2E ；0x43A8B1 byte[+0x10]=1
             # 0x43A8B4 [+0xC]=0x18 ；0x43A8BB [+0x18]=1
@@ -1073,22 +1074,28 @@ def _beh_23000009(self, e) -> bool:
 
 
 def p4_446540(self, e) -> None:
-    """`0x446540`：出场初始化 —— 生成"头像"实体 `0x1000001` 入 `0x4AD40C`，并记到 `[+0x24]`。
+    """`0x446540`：自机出场初始化 —— 生成 **3 只武器挂舱 0x1000001** 入 0x4AD40C。
 
     ```
-    0x446548 0x4023C4(&rec, 0, 0, 0x1000001, ebx)   ; (x=0, y=0, type, 控制器指针)
-    0x446580 0x4016E5(0x4AD40C, &rec) → eax         ; 入队并返回新实体
-    0x446594 [ebx+0x24] = eax                       ; 记住子实体（供后续驱动）
-    0x446597 第二发：记录 +0x18 = 5                  ; 子实体参数
+    0x446548 0x430400(&rec, 0, 0, 0x1000001, ebx=自机)  ; rec[3] = 自机
+    0x446580 0x448FF0(0x4AD40C, &rec) → pod1 ; 0x446594 [自机+0x24] = pod1
+    0x446597 rec[3] = 5  → 0x448FF0 → pod2          ; 变体标记 5
+    0x4465ae rec[3] = 8  → 0x448FF0 → pod3          ; 变体标记 8
     ```
+    pod 的 ctor = 0x42C4D0（0x445C00 的 0x01 族分支，p4_42c4d0）：[+0x20]=rec[3]、
+    [+0x40] = 12 项发射器行为表[变体][选机]。**未解**：exe 的 pod2/3 的 [+0x20]=5/8
+    作为槽行为里的 owner 指针必崩（§15）——复刻侧三只 pod 的 owner 都取自机本体
+    （pod1 的 exe 语义正是如此；弹从自机位置按各槽节奏发出）。
     """
-    q = self._p4_q("ui40c")
-    c1 = self.spawn(q, 0x1000001, 0, 0)               # 0x446548
-    if c1 is not None:
-        e.d32(0x24, id(c1) & 0xFFFFFFFF)              # 0x446594
-    c2 = self.spawn(q, 0x1000001, 0, 0)               # 0x44658A 第二发
-    if c2 is not None:
-        c2.d32(0x18, 5)                               # 0x446597 参数 5
+    for a3 in (0, 5, 8):                               # 0x446548/0x446597/0x4465ae
+        pod = self._p4_ent_into(self.actorq, 0x1000001, 0, 0, 0)
+        if pod is None:
+            continue
+        pod.p["owner"] = e                             # [pod+0x20] = 自机（exe rec[3]；5/8 变体语义未解 §15）
+        self.p4_42c4d0(pod, (0, 0, 0x1000001, a3))
+        if a3 == 0:
+            e.d32(0x24, id(pod) & 0xFFFFFFFF)          # 0x446594 [自机+0x24] = pod1
+            e.p["pod1"] = pod                          # 复刻侧直引（[+0x24] 的 id 镜像不可解引用）
 
 
 def p4_446470(self, e, a: int, b: int) -> None:
@@ -2641,6 +2648,18 @@ P4_SPAWN_SLOTS = {
                    (0x12061128, 0x06000C00, 0x10)), "cadence3"),
 }
 
+# 0x42C4D0（pod ctor）的 12-thunk 表按"变体×选机"取行：0x1000001→thunks[选机]、
+# 0x1000002→thunks[4+选机]、0x1000003→thunks[8+选机]；thunk 解引用后恰与
+# P4_SPAWN_SLOTS 的 12 项一一对应（thunk 序 → 槽号 [0,1,2,3,4,5,6,8,10,11,7,9]）。
+# rec[3]（=pod 的 [+0x20]）在 0x446540 里是 ship/5/8——5/8 作为 owner 指针在 exe
+# 语义下必崩，真实再赋值点未解（§15）；复刻侧 owner 一律取自机本体（功能等价：
+# 弹幕从自机位置发出、按住攻击键按各槽节奏连发）。
+P4_POD_BEH = (
+    (0x42C810, 0x42CC50, 0x42D070, 0x42D370),   # 0x1000001：撃/凛/漢/(选机3)
+    (0x42C8F0, 0x42CD70, 0x42D150, 0x42D4A0),   # 0x1000002
+    (0x42CA70, 0x42CEF0, 0x42D260, 0x42D6A0),   # 0x1000003
+)
+
 
 def _p4_slot_behaviour(spec):
     """生成一个槽行为（12 项表共用骨架，§16.181）。"""
@@ -2650,7 +2669,7 @@ def _p4_slot_behaviour(spec):
         e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)          # 0x42CA7D 帧计数
         t = e.s32(0x1C)
         owner = e.p.get("owner")                             # 0x42CA7A ebp=[+0x20]
-        if self.p4_btn_attack() and owner is not None:       # 0x42CA81 byte[0x4AB594]
+        if getattr(self.inp.rec, "b0", 0) and owner is not None:   # 0x42C821 byte[0x4AB594] 原始按键
             if mode == "cadence3":
                 # 0x42CA91 cmp 2/jle → 0x42CB12（连 SE 都不播）
                 if t > 2:
@@ -2914,7 +2933,10 @@ def _beh_423980(self, e) -> bool:
     return n < 0x20                                # 0x4239FF/0x423A03 setl
 
 
+# 12 项武器槽行为（P4_SPAWN_SLOTS 生成的 _beh_p4slot_*）按真址登记——
+# pod ctor 0x42C4D0 把它们写进 [pod+0x40]，0x446450 按 [e+0x40] 分派。
 P4_BEH: dict[int, object] = {
+    **{ _a: globals()[f"_beh_p4slot_{_a:06X}"] for _a in P4_SPAWN_SLOTS },
     0x43AEB0: _beh_43AEB0,
     0x40E9B0: _beh_23000009,        # 类型 0x23000009（thunk 0x4015AA）
     0x4435C0: _beh_6B000001,        # 类型 0x6B000001（thunk 0x4020EF）开场状态机          # 类型 0x21000001（ctor 0x43A899 写 [+0x40]=0x401E2E）
@@ -4248,6 +4270,8 @@ class Page4Mixin:
         #   0x458EC0 0x4CD484 → 0x456270   色带推进（复刻侧在 draw 之后单独调 band_advance）
         self.tick_ui(self.actorq)                 # 0x4AD40C → 0x448F80
         self.tick_ui(self.ui46c)                  # 0x4AD46C → 0x430220
+        self.actorq = [x for x in self.actorq if getattr(x, "alive", True)]
+        self.ui46c = [x for x in self.ui46c if getattr(x, "alive", True)]
         self._p4_tick_ents()                      # 0x4AD43C → 0x43BC70
         self.tick_ui(self.p4_ui49c)               # 0x4AD49C → 0x4353A0
         self._tick_wipe4f()                       # 0x4AD4CC → 0x43A350（同队列的另一半工作）
@@ -5559,6 +5583,36 @@ class Page4Mixin:
         self.p4_stat[0x56CCC0] = w
         self.p4_stat["44e470_rec"] = (rec[0], rec[1]) if (rec is not None and len(rec) >= 2) else (0, 0)
 
+    def p4_42c4d0(self, e, rec=None) -> None:
+        """`0x401AF0` → `0x42C4D0`：**0x01 族（武器挂舱）构造器**，逐条按本体。
+
+        ```
+        0x42C4DC [+0x1C] = 0 ; 0x42C4EA [+0x24] = 0
+        0x42C4E7 [+0x20] = rec[3]                 ; 所有者/变体标记
+        0x42C4F8 [+0x18] = 1                      ; HP
+        0x42C4DF [+0x40] = 0x402059（默认，下面按变体/选机覆盖）
+        0x42C4ED eax = [+0x14] - 0x1000001：
+            ==0 → 0x42C599 [+0x40] = 表0[选机]    ; 0x402059/0x4011E0/0x401631/0x401DB6
+            ==1 → 0x42C57C [+0x40] = 表1[选机]    ; 0x401DD9/0x4019C4/0x40107D/0x4013CF
+            ==2 → 0x42C55F [+0x40] = 表2[选机]    ; 0x402027/0x40219E/0x40204A/0x401668
+        ```
+        12 个 thunk 解引用后恰为 P4_SPAWN_SLOTS 的 12 项发射器行为
+        （thunk 序 → 槽号 [0,1,2,3,4,5,6,8,10,11,7,9]）——挂舱 = **武器槽**：
+        按住攻击键按各槽节奏从所有者位置连发 0x12 族弹。
+        """
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x1C, 0)                                         # 0x42C4DC
+        e.d32(0x24, 0)                                         # 0x42C4EA
+        e.d32(0x20, a3 & 0xFFFFFFFF)                           # 0x42C4E7
+        e.d32(0x18, 1)                                         # 0x42C4F8
+        variant = (e.g32(0x14) - 0x1000001) & 0xFFFFFFFF       # 0x42C4F3
+        ship = self.keys.field(0xC000) & 3                     # 0x45AFC0(…,0xC000)
+        row = P4_POD_BEH[variant] if variant < len(P4_POD_BEH) else P4_POD_BEH[0]
+        beh = row[ship % len(row)]
+        e.d32(0x40, beh)
+        if beh in P4_BEH:
+            e.beh = beh                                        # 复刻分派按真址
+
     def p4_445c00(self, e, rec=None) -> str:
         """`0x445C00` 的 **type 分派**（`0x445CBE eax=[e+0x14]; 0x445CC1 cmp eax,8; ja 0x44603E`）。
 
@@ -5583,6 +5637,12 @@ class Page4Mixin:
         if typ == 1:                                           # 0x445CCD
             self.p4_445ece(e, rec)
             return "handled:1"
+        if (typ & 0xFF000000) == 0x01000000:                   # 0x445CAF：0x01 族（挂舱）
+            # 0x445CB4 jne 0x445CBE 跳过的前提是**非** 0x01 族；0x01 族先走
+            # 0x401AF0→0x42C4D0（pod ctor，行为表 12 项按变体/选机选），再进
+            # 0x445CBE 的 0x1/5/6/8 分派（0x1000001/2/3 落 0x446237 = 无二次构造）。
+            self.p4_42c4d0(e, rec)
+            return "handled:pod"
         if typ == 5:                                           # 0x445CD4
             self.p4_445e47(e, rec)
             return "handled:5"
@@ -6615,8 +6675,9 @@ class Page4Mixin:
                 v = vel(self)
         else:
             v = vel
-        self.spawn(self._p4_q("ui46c"), type_word,
-                   owner.s32(0x04) + dx, owner.s32(0x08), v)
+        e2 = self.fx12_spawn(type_word, owner.s32(0x04) + dx, owner.s32(0x08), v)
+        if e2 is not None:
+            self._p4_q("ui46c").append(e2)                 # 0x430290 → 0x4AD46C
 
     def p4_slot_se(self) -> None:
         """`0x42C880`：声像量 = `([0x56CC8C] - 0x140) << 4`，音效号 0。"""

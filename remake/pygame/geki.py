@@ -2365,6 +2365,19 @@ class Pages(Page4Mixin):
             if e.p["x"] >= 0x290 or not e.p.get("vis", 1):   # 0x42BD99 / 0x42BDA0
                 e.alive = False
             return
+        if e.p.get("kind") == "pulse" and e.p.get("beh40") == 0x401BE5:
+            # 行为 `0x42C050`（0x120B1121 = 撃 直射弹）：vy 绕回（|vy|>0x100 → ±0x100，
+            # 0x42C053..0x42C078）→ 积分 → dst=(x-0x10,y-0x10) → 0x4021E9(0x10) 出屏死。
+            vy = e.p["vy"]
+            if abs(vy) > 0x100:
+                e.p["vy"] = vy + (0x100 if vy <= 0 else -0x100)
+            self._fx12_integrate(e)                    # 0x42C07D → 0x42B980
+            if e.disp:
+                e.disp.dst[0] = e.p["x"] - 0x10        # 0x42C0BF
+                e.disp.dst[1] = e.p["y"] - 0x10
+            if not (self._on_screen(e.p["x"], e.p["y"], 0x10) and e.p.get("vis", 1)):
+                e.alive = False                        # 0x42C0CE
+            return
         if e.p.get("kind") == "pulse" and e.p.get("beh40") == 0x401BAE:
             # 行为 `0x42B9C0`（0x120B1121 / 0x12091122）：只有 vy 一条轴的衰减脉动
             d = e.p["vy"]                              # 0x42B9C7
