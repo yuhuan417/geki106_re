@@ -2627,6 +2627,16 @@ def _p4_slot_vel_trig_d4a0(self, owner) -> int:
 
 
 # 12 个槽至此全部登记（0x42D6A0 的速度 0xF000 = 正上方 16 像素/帧）。
+# 0x41 族各型的行为 thunk → 真地址（0x428C70 各 case 的 [e+0x40] 赋值）
+P4_41_BEH_THUNK = {
+    0x401B95: 0x430550,   # 通用粒子（0x41000001/08/0B/0F/15/16/17/18/19 共用）
+    0x40200E: 0x429D40,   # 碰撞火花（0x41000004）
+    0x401019: 0x42BA40,   # 激光纵条（0x41000005）
+    0x402275: 0x42C4D0,   # 激光横条（0x41000006）— 注意与 pod ctor 同地址！
+    0x401447: 0x42BEE0,   # 数字板（0x4100000C）
+    0x401172: 0x42C7B0,   # 放大窗（0x4100000D/0E）
+}
+
 P4_SPAWN_SLOTS = {
     0x42C810: (5, ((0x120B1121, 0x00000E00, 0x10),), "single"),
     0x42CC50: (5, ((0x12071126, 0xF4000A00, 0x10),
@@ -4336,51 +4346,67 @@ class Page4Mixin:
         if self.p4_sys_bits() & 2:                    # 0x43BFD4 0x45AFF0(0x56CCB8,2)
             return 0
         for a in list(qa):
-            if not a.g32(0x10):
-                continue
+            self._p4_set_col(a)
             for b in list(qb):
-                if not b.g32(0x10):
-                    continue
+                self._p4_set_col(b)
                 if self.p4_hit_test(b, a.s32(0x04), a.s32(0x08), a.s32(0x0C)):   # 0x43C011
                     # 0x43C01E → 0x43C170：回调 esi = **内层 qa**（walker 的 edi 最后 push）
                     self.p4_hit_cb(a, b)
                     hits += 1
         return hits
 
-    # ---- 0x41 族：拖尾/粒子（ctor 0x428C70 大支 0x4294A1，行为 0x401B95→0x430550）----
-    # 表: (层, rect l,t,r,b, dst减, [+0x1C] 相位目标, [+0x20] 寿命, [+0x24] 闪烁使能)
-    P4_TRAIL_CTOR = {
-        0x41000015: (1, 0x100, 0xD0, 0x10F, 0xDF, 8, 1, 4, 0),   # 0x42BC40 每帧
-        0x41000016: (1, 0x100, 0xE0, 0x10F, 0xEF, 8, 1, 4, 0),   # 0x42BEE0 奇数帧
-        0x41000017: (0, 0x78, 0x1F8, 0x8F, 0x20F, 0xC, 2, 5, 1),  # 0x42C120 每帧
-        0x41000018: (1, 0x100, 0xF0, 0x10F, 0xFF, 8, 4, 4, 1),   # 0x42C210 每帧
+    # ---- 0x41 族：全部 15 型（ctor 0x428C70，第一跳表 0x42997C + 大支 0x4294A1/0x4299B8）----
+    # 表: (层, rect l,t,r,b, dst减, [0x1C], [0x20], [0x24], 行为 thunk)
+    # 层 0 = bm_cm48 / 层 1 = bm_cm32
+    P4_41_CTOR = {
+        0x41000001: (0, 0xC0, 0,    0xEF, 0x2F, 0x18, 3, 5, 0, 0x401B95),  # 爆炸核心 48×48 撃
+        0x41000004: (1, 0xA0, 0,    0xBF, 0x1F, 0,    0, 0, 0, 0x40200E),  # 碰撞火花 32×32
+        0x41000005: (0, 0xC0, 0x90, 0xEF, 0xBF, 0x18, 0, 0, 0, 0x401019),  # 激光纵条
+        0x41000006: (0, 0xC0, 0x60, 0xEF, 0x8F, 0x18, 0, 0, 0, 0x402275),  # 激光横条
+        0x41000008: (0, 0xA0, 0x40, 0xBF, 0x5F, 0x10, 5, 0, 0, 0x401B95),  # 捕獲波纹
+        0x4100000B: (0, 0xA0, 0x40, 0xBF, 0x5F, 0x10, 1, 5, 0, 0x401B95),  # 粒子1
+        0x4100000C: (1, 0x174, 0x173, 0x17 + (0x18*0x30), 0x173 + (0x18*0x30), 0xC, 0, 0, 0, 0x401447),  # 数字板
+        0x4100000D: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x401172),                 # 放大窗（dst/rect 动态）
+        0x4100000E: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x401172),                 # 放大窗（同上）
+        0x4100000F: (0, 0xD0, 0xD0, 0xDF, 0xDF, 8, 2, 3, 0, 0x401B95),     # 粒子2
+        0x41000015: (1, 0x100, 0xD0, 0x10F, 0xDF, 8, 1, 4, 0, 0x401B95),   # trail 撃
+        0x41000016: (1, 0x100, 0xE0, 0x10F, 0xEF, 8, 1, 4, 0, 0x401B95),   # trail homing
+        0x41000017: (0, 0x78, 0x1F8, 0x8F, 0x20F, 0xC, 2, 5, 1, 0x401B95),  # trail arc1
+        0x41000018: (1, 0x100, 0xF0, 0x10F, 0xFF, 8, 4, 4, 1, 0x401B95),   # trail arc2
+        0x41000019: (1, 0x100, 0xE0, 0x10F, 0xEF, 8, 1, 6, 0, 0x401B95),   # trail slot 追加
     }
 
-    def p4_spawn41(self, x: int, y: int, typ: int) -> None:
-        """0x41 族拖尾：0x430400(rec,x,y,typ) → 0x43A3C0(0x4AD4CC) → ctor 0x428C70
-        大支 0x4294A1（跳表 0x4299B8 idx4..7）。行为 0x401B95→0x430550 共享：
-        相位 [0x2C] 数到 [0x1C] ⇒ 寿命 [0x20]-- 且源矩形右滑一格（atlas 下一帧图），
-        寿命尽即死；[+0x24] 非 0 时偶数帧隐藏（闪烁）。"""
-        spec = self.P4_TRAIL_CTOR.get(typ)
+    def p4_spawn41(self, x: int, y: int, typ: int, rec: tuple = ()) -> None:
+        """0x41 族全型 spawn：0x430400(rec,x,y,typ) → 0x43A3C0(0x4AD4CC) →
+        ctor 0x428C70（第一跳表 0x42997C 15 项 + 大支 0x4294A1 第二跳表 0x4299B8 9 项）。
+        共通字段：[+0x40]=行为 thunk、[+0x18]=1、[+0x1C/0x20/0x24]=型别参数、
+        节点层/rect 由各型决定。行为 0x430550 = 通用粒子（相位→寿命→矩形右滑→闪烁）。
+        0x4100000D/0E（放大窗）的 rect/dst 由 rec[3]（缩放码）动态计算——复刻侧
+        先用最小 rect 占位，效果帧由行为积分。"""
+        spec = self.P4_41_CTOR.get(typ)
         if spec is None:
             return
-        layer, l, t, r, b, dv, c1c, c120, c124 = spec
+        layer, l, t, r, b, dv, c1c, c120, c124, thunk = spec
         e = Ent(int(x), int(y), int(typ), 0)
         e.d32(0x14, typ & 0xFFFFFFFF)
-        e.d32(0x40, 0x401B95)                          # thunk → 0x430550
-        e.beh = 0x430550
+        e.d32(0x40, thunk)
+        e.beh = thunk
+        real = P4_41_BEH_THUNK.get(thunk)
+        if real is not None and real in P4_BEH:
+            e.beh = real
         e.d32(0x1C, c1c)
         e.d32(0x20, c120)
         e.d32(0x24, c124)
         e.d32(0x28, 0)
         e.d32(0x2C, 0)
         e.d32(0x18, 1)
-        e.d32(0x10, 0)                                 # 拖尾不参与碰撞（0x43C060 只查弹/敌）
+        e.m[0x10] = 1                                  # 0x41000004 参与碰撞（0x43C460 效果分配）
         e.node = DNode(layer, l, t)
         e.node.rect = (l, t, r, b)
         e.node.dst = (int(x) - dv, int(y) - dv)
         e.node.active = 1
         self._p4_q("ui4cc").append(e)
+        return e
 
     def _beh_430550(self, e) -> bool:
         """`0x401B95` → `0x430550`：拖尾共享行为（0x41000015/16/17/18 共用）。
@@ -6166,27 +6192,32 @@ class Page4Mixin:
         # 0x43C075 0x45B030(0x56CCB8, 2)：**bit2 清**时返回 1 → jne 跳过类型过滤
         bit2_clear = self.p4_bit_none(0x02)
         for e in list(qa):
-            if not e.g32(0x10):                                 # 0x43C094
-                continue
+            self._p4_set_col(e)
             if not bit2_clear and not (e.g32(0x14) & 0x8000):   # 0x43C085 test ah,0x80
                 continue
             for t in list(qb):
-                if not t.g32(0x10):
-                    continue
+                self._p4_set_col(t)
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):   # 0x43C0A9
                     self.p4_43c460(e, t)                        # 0x43C0B2 push edi / 0x43C0B3 push esi
                     hits += 1
         return hits
 
+
+    @staticmethod
+    def _p4_set_col(e) -> None:
+        """碰撞参与位 [0x10] = 1（Ent 用 .m、UiEntity 用 .raw）。"""
+        if hasattr(e, "m"):
+            e.m[0x10] = 1
+        elif hasattr(e, "raw"):
+            e.raw[0x10] = 1
+
     def p4_43c0f0(self, qa, qb) -> int:
         """`0x43C0F0(a, b)`：与 `0x43BFD0` 同形，但命中回调是 `0x43CCC0`（`0x43C135`）。"""
         hits = 0
         for e in list(qa):
-            if not e.g32(0x10):                                 # 0x43C108 byte
-                continue
+            self._p4_set_col(e)
             for t in list(qb):
-                if not t.g32(0x10):
-                    continue
+                self._p4_set_col(t)
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):
                     self.p4_43ccc0(e, t)                        # 0x43C135 → 0x401FDC
                     hits += 1
@@ -6299,6 +6330,10 @@ class Page4Mixin:
             # 旧复刻在 _p4_q("ui40c") 里另造了一个无人 tick 的死列表，VM op1 生成的
             # 自机（演员 type 1）从不更新（2026-10-31 修，"撃 常驻"的一半根因）。
             return self.actorq
+        if name == "ui49c":
+            # 0x4AD49C 的复刻侧本名是 self.p4_ui49c（p4 帧序 0x4353A0 tick）。
+            # 同 ui40c 的分裂根因，2026-11-03 修——敌方弹幕此前不被 tick 也不入碰撞。
+            return self.p4_ui49c
         q = getattr(self, name, None)
         if q is None:
             q = []
@@ -7364,8 +7399,10 @@ class Page4Mixin:
         vy = ((inv * dy) * spd) >> 8                      # 0x43B0BD
         if vx == 0 and vy == 0:                           # 0x43B0C0
             return
-        self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
-                   e.s32(0x04), e.s32(0x08), (vx, vy))     # 0x43B105 → 0x435440
+        eb = self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
+                        e.s32(0x04), e.s32(0x08), (vx, vy))     # 0x43B105 → 0x435440
+        if eb is not None:
+            eb.raw[0x10] = 1                           # 碰撞参与位（0x4306C0 检查）
 
     def _p4_dbg(self) -> None:
         import os
@@ -8218,9 +8255,12 @@ class Page4Mixin:
     def p4_call_behaviour(self, e: "Ent") -> bool:
         """`0x446450 = jmp [ent+0x40]`：按行为指针分派。未实现的行为先返回"存活"并计数，
         绝不假装完成——实现一个就在 `P4_BEH` 里登记一个。"""
+        if not isinstance(e.beh, int):
+            return True   # 字符串行为（UiEntity）由 tick_ui 分派，不走 p4_call_behaviour
         fn = P4_BEH.get(e.beh)
-        if fn is None and e.beh == 0x430550:
-            fn = type(self)._beh_430550                 # 拖尾共享行为（0x401B95→0x430550）
+        if fn is None:
+            # 0x41 族拖尾/粒子（0x401B95→0x430550）等 mixin 方法
+            fn = getattr(type(self), f"_beh_{e.beh:X}", None)
         if fn is None:
             self.p4_beh_missing[e.beh] = self.p4_beh_missing.get(e.beh, 0) + 1
             self.p4_beh_missing_types[(e.beh, e.s32(0x14))] = \
