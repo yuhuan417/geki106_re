@@ -1136,6 +1136,14 @@ class Pages(Page4Mixin):
             # 之前在这里顺带调它，会让页15 的舞台总控 0x6B000001 在 f0 tick，
             # 其行为 0x443606 调 0x43A320 把 0x4AD4CC 清空 ⇒ 开场 0x42 实体全被抹掉。
             self.p4_enter_ok = self.flags.is_empty()   # 0x4593C9 test al ⇒ 决定是否进帧循环
+        elif self.page == 5:
+            self.page5_enter()                    # 0x452730 記錄
+        elif self.page == 6:
+            self.page6_enter()                    # 0x4523C0 調整
+        elif self.page == 12:
+            self.page12_enter()                   # 0x4536E0 中间页（鍛錬→游戏）
+        elif self.page == 14:
+            self.page14_enter()                   # 0x453A60 OP movie
         else:
             self.log(f"page {self.page} 未实现 → quit")
             self.page = 0
@@ -1152,6 +1160,14 @@ class Pages(Page4Mixin):
         if self.page == 4:
             # 0x4593C2：`if (0x4505B0) { if (0x451110) while (0x451110); }`
             return self.p4_enter_ok and self.p4_step()
+        if self.page == 5:
+            return self.page5_step()              # 0x452890
+        if self.page == 6:
+            return self.page6_step()              # 0x4525E0
+        if self.page == 12:
+            return self.page12_step()             # 0x4538E0
+        if self.page == 14:
+            return self.page14_step()             # 0x453EA0
         return False
 
     def finish(self) -> None:
@@ -1166,6 +1182,14 @@ class Pages(Page4Mixin):
             self.page13_finish()
         elif self.page == 4:
             self.p4_finish()                      # 0x4593E5（进场失败也执行）
+        elif self.page == 5:
+            self.page5_finish()                   # 0x452910
+        elif self.page == 6:
+            self.page6_finish()                   # 0x452660
+        elif self.page == 12:
+            self.page12_finish()                  # 0x453970
+        elif self.page == 14:
+            self.page14_finish()                  # 0x453EA0 后半
 
     def advance(self) -> None:
         """一帧：step 返回 0 → finish（页号切换）→ 页机重新分发。"""
@@ -1660,6 +1684,155 @@ class Pages(Page4Mixin):
         self.log(f"page13.finish flags=0x{self.flags.bits:X} → page {self.page}"
                  f"（theatre=0x{self.theatre:X}）")
 
+    # ---- 页12：中间页（鍛錬 mode：页13 选人后 → 页12 → 页4/页15）--------------
+    def page12_enter(self) -> None:
+        """`0x4536E0`：装调色板 2（bm_pald）→ 层13 ← 0x0D（bm_otit）/层0 ← 0x0D →
+        SetCursorPos(320,240) → 0x458D60(0,0,0,0) 场景重置 → 生成 0x5F000014
+        （舞台文字显示实体）→ 0x4100000D 效果（放大窗）→ 0x45C740 排行榜读 →
+        0x45FE10 场景应用 → SetPeriod(4)。"""
+        self.flags.clear()
+        self.screen_fill = -1
+        self.pal = self.data and self._load_pal(2)
+        self.pal_now = self.pal
+        self.layers.bind(13, 43)                      # 0x44C640(13, 0x2B) ← bm_s1lg（关卡大字）
+        self.layers.color_key(13, 0)                  # 0x44CE60(13, 0)
+        self.inp.set_pos(320, 240)                    # 0x45377A
+        self.inp.set_preset4(4, (320, 240))           # 0x453786 0x44E620(preset 4, 320, 240)
+        self.scene_reset()                            # 0x4537A2 → 0x458D60
+        st = self.p4_stat
+        st[0x4AB5C8] = self.theatre                   # 0x45379C [0x4AB5C8] = 舞台 id
+        # 0x4537A8: 0x430400(rec, 0, 0x5F000014, 0) → 0x44B140(0x4AD4FC, rec)
+        m = self.spawn(self.ui4fc, 0x5F000014)
+        m.beh = "stage_text"                          # 舞台文字显示（第一幕　市街 等）
+        # 0x4537E3: 0x45C740(0x4AB5CC, 0, buf) → 排行榜读
+        st["45c740_buf"] = self.p4_45c740_score(0)
+        # 0x4537E8: 0x45FB80(this) — 记录流复位
+        self.stream_reset()
+        # 0x4537F1: 0x45FE10(0x4100000D, 0) → 场景应用（放大窗效果）
+        self._p4_43c9c2(None, None, 0)                # 场景应用的简化调用
+        self.timer.set_period(4)                      # 0x453814 0x45A490(4) = SetPeriod(4)
+        # 0x453830 0x45AFF0(0x4AB5C0, 0)：旗标读取（位 0x01 = 鍛錬）
+        self._p4_dbg()
+
+    def page12_step(self) -> bool:
+        """`0x4538E0`：泵 → draw → 色带 → 输入 → SetCursorPos → key → 色带 →
+        0x402261 → 旗标测试。返回 0x45AFF0(0x4AB5C0, 0)。"""
+        self.keys.update(self.inp.rec)
+        self.key_command(self.inp.rec.key)
+        self.begin_frame()
+        self.band_draw()
+        self._tick_spark4cc()
+        self.draw()
+        self.band_advance()
+        self._p4_dbg()
+        return self.flags.is_empty()                  # 0x45AFF0(0x4AB5C0, 0)
+
+    def page12_finish(self) -> None:
+        """`0x453970`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 页号映射：
+        0x100 → 页0、0x200 → 页3、0x10000 → [0x4AB5C8]==0x20008 ? 页15 : 页4、
+        其它 → 页0xFF。"""
+        self.timer.kill()
+        self.canvas.fill(0xB4); self.present()
+        self.canvas.fill(0xB4); self.present()
+        self.layers.free_all()
+        r = self.flags.lowest()
+        if r == 0x100:
+            self.page = 0
+        elif r == 0x200:
+            self.page = 3
+        elif r == 0x10000:
+            stage = self.p4_stat.get(0x4AB5C8, 0)
+            self.page = 15 if stage == 0x20008 else 4   # 0x4539EE: 鍛錬 stage 2 → 页15
+        else:
+            self.page = 0xFF
+
+    # ---- 页5：記錄（排行榜显示）------------------------------------------------
+    def page5_enter(self) -> None:
+        """`0x452730`：装调色板 2 → SetCursorPos(320,240) → SetPeriod(0)。"""
+        self.flags.clear()
+        self.screen_fill = -1
+        self.pal = self._load_pal(2)
+        self.pal_now = self.pal
+        self.inp.set_pos(320, 240)
+        self.inp.set_preset4(0, (320, 240))
+        self.timer.set_period(0)
+
+    def page5_step(self) -> bool:
+        """`0x452890`：泵 → 光标 → 输入 → SetCursorPos → key → 色带 → 0x402261 → 旗标。"""
+        self.keys.update(self.inp.rec)
+        self.key_command(self.inp.rec.key)
+        self.begin_frame()
+        self.band_draw()
+        self.draw()
+        self.band_advance()
+        return self.flags.is_empty()
+
+    def page5_finish(self) -> None:
+        """`0x452910`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 页3。"""
+        self.timer.kill()
+        self.canvas.fill(0xB4); self.present()
+        self.canvas.fill(0xB4); self.present()
+        self.layers.free_all()
+        self.page = 3                                 # 0x452910 无映射 → 默认回页3
+
+    # ---- 页6：調整（设置画面）----------------------------------------------------
+    def page6_enter(self) -> None:
+        """`0x4523C0`：装调色板 2 → SetCursorPos → SetPeriod(0)。"""
+        self.flags.clear()
+        self.screen_fill = -1
+        self.pal = self._load_pal(2)
+        self.pal_now = self.pal
+        self.inp.set_pos(320, 240)
+        self.inp.set_preset4(0, (320, 240))
+        self.timer.set_period(0)
+
+    def page6_step(self) -> bool:
+        """`0x4525E0`：泵 → draw → 输入 → SetCursorPos → key → 色带 → 旗标。"""
+        self.keys.update(self.inp.rec)
+        self.key_command(self.inp.rec.key)
+        self.begin_frame()
+        self.band_draw()
+        self.draw()
+        self.band_advance()
+        return self.flags.is_empty()
+
+    def page6_finish(self) -> None:
+        """`0x452660`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 页3。"""
+        self.timer.kill()
+        self.canvas.fill(0xB4); self.present()
+        self.canvas.fill(0xB4); self.present()
+        self.layers.free_all()
+        self.page = 3
+
+    # ---- 页14：OP movie（页3 的 0x2000000 出口）--------------------------------
+    def page14_enter(self) -> None:
+        """`0x453A60`：装调色板 → SetPeriod。"""
+        self.flags.clear()
+        self.screen_fill = -1
+        self.pal = self._load_pal(2)
+        self.pal_now = self.pal
+        self.timer.set_period(0)
+
+    def page14_step(self) -> bool:
+        """`0x453EA0`：播放 OP 动画帧。"""
+        self.begin_frame()
+        self.draw()
+        return not self.flags.is_empty()              # 旗标非空 → 离页
+
+    def page14_finish(self) -> None:
+        self.canvas.fill(0xB4); self.present()
+        self.canvas.fill(0xB4); self.present()
+        self.layers.free_all()
+        self.page = 3                                 # OP 完 → 回页3
+
+    def _load_pal(self, idx: int):
+        """加载第 idx 号调色板（从 pages_data.json 的 palettes）。"""
+        key = str(idx)
+        if "palettes" in self.data and key in self.data["palettes"]:
+            import numpy as _np
+            return _np.array(self.data["palettes"][key], dtype=_np.uint8)
+        return self.pal
+
     # ---- 页13 用到的两条外部调用（脚本 VM 未移植，音频已接上）----------------
     def flow_script_load(self, slot: int, ident: int) -> bool:
         """`0x450140(0x4AB4B0, slot, id)` = **波形装载**（槽数组 `mgr+8+slot*4`）。
@@ -1828,6 +2001,11 @@ class Pages(Page4Mixin):
                 e.disp = DisplayNode(0x0D,
                                      [left, 0x88 + 0x28 * k, left + w, 0xA7 + 0x28 * k],
                                      [MENU_ROW_DSTX[row], 0x118 + 0x30 * k])
+            elif idx == 18:                       # 0x5F000014：舞台文字（鍛錬 中间页的大字）
+                # 页12 的关卡标题：层 13（bm_s1lg）的 (0,0)-(0x1FF,0x7F) 128×64 大字
+                # dst 居中 (0x70, 0x50)，0x4294A1 的 0x4100000D 放大窗效果
+                e.beh = "stage_title12"
+                e.disp = DisplayNode(13, [0, 0, 0x1FF, 0x7F], [0x70, 0x50])
             elif idx == 25:                       # 0x5F00001B ctor 0x424EDB
                 # 选中槽的**高亮框**：每帧按 0x45AFC0(0x4AB5B0,0xC000) 重建源矩形
                 # （层3 bm_psel 的第 slot+5 条 48px 带），dst 固定 (0, 0x1C0)。
@@ -1923,6 +2101,8 @@ class Pages(Page4Mixin):
                 self._menu_root(e)
             elif e.beh == "menu_row":
                 self._menu_row(e)
+            elif e.beh == "stage_title12":
+                self._stage_title12(e)
             elif e.beh == "scene_bg":
                 self._scene_bg(e)
             elif e.beh == "fade_in":
@@ -3354,6 +3534,10 @@ class Pages(Page4Mixin):
             e.aux += 1
 
     # 0x4258F0（0x5F000006 的行为）：只改节点可见位 [node+0x1C]
+    def _stage_title12(self, e: UiEntity) -> None:
+        """0x5F000014（页12 的关卡标题）：静态显示，由页12 的 step 控制生命周期。"""
+        e.t += 1
+
     def _menu_row(self, e: UiEntity) -> None:
         """0x4258F0：可见 = 列位相同 且 (行 != 选中 或 选中项闪烁)。
 
