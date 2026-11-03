@@ -36,7 +36,7 @@ REMAKE = HERE.parent
 GAME_DIR = Path(os.environ.get("GEKI_DIR", REMAKE.parent.parent / "geki106"))
 DATA_PATH = REMAKE / "pages_data.json"
 
-from page4 import Page4Mixin
+from page4 import Page4Mixin, P4_SE_SLOTS
 
 W, H = 640, 480
 
@@ -1144,6 +1144,14 @@ class Pages(Page4Mixin):
             self.page12_enter()                   # 0x4536E0 中间页（鍛錬→游戏）
         elif self.page == 14:
             self.page14_enter()                   # 0x453A60 OP movie
+        elif self.page in (8, 9, 10):
+            self.page_results_enter()             # 0x453050 游戏结束/结算
+        elif self.page == 11:
+            # 0x4593C2：与页4 完全相同的 enter/step/finish（0x4505B0/0x451110/0x451C50）
+            self.p4_enter()
+            self.p4_enter_ok = self.flags.is_empty()
+        elif self.page == 15:
+            self.page15_enter()                   # 0x454950 第二关
         else:
             self.log(f"page {self.page} 未实现 → quit")
             self.page = 0
@@ -1168,6 +1176,13 @@ class Pages(Page4Mixin):
             return self.page12_step()             # 0x4538E0
         if self.page == 14:
             return self.page14_step()             # 0x453EA0
+        if self.page in (8, 9, 10):
+            return self.page_results_step()       # 0x453300
+        if self.page == 11:
+            # 0x4593C2：与页4 共用 enter/step/finish
+            return self.p4_enter_ok and self.p4_step()
+        if self.page == 15:
+            return self.page15_step()             # 0x454B30
         return False
 
     def finish(self) -> None:
@@ -1190,6 +1205,12 @@ class Pages(Page4Mixin):
             self.page12_finish()                  # 0x453970
         elif self.page == 14:
             self.page14_finish()                  # 0x453EA0 后半
+        elif self.page in (8, 9, 10):
+            self.page_results_finish()            # 0x4535A0
+        elif self.page == 11:
+            self.p4_finish()                      # 0x451C50（与页4 共用）
+        elif self.page == 15:
+            self.page15_finish()                  # 0x454CB0
 
     def advance(self) -> None:
         """一帧：step 返回 0 → finish（页号切换）→ 页机重新分发。"""
@@ -1746,8 +1767,96 @@ class Pages(Page4Mixin):
         else:
             self.page = 0xFF
 
+    # ---- 页8/9/10：游戏结束/结算（0x453050/0x453300/0x4535A0）--------------------
+    def page_results_enter(self) -> None:
+        """`0x453050`：装调色板 2 → SetCursorPos(320,240) → SetPeriod(0) → 场景重置。"""
+        self.flags.clear()
+        self.screen_fill = -1
+        self.pal = self._load_pal(2)
+        self.pal_now = self.pal
+        self.inp.set_pos(320, 240)
+        self.inp.set_preset4(0, (320, 240))
+        self.scene_reset()
+        self.timer.set_period(0)
+
+    def page_results_step(self) -> bool:
+        """`0x453300`：泵 → draw → 色带 → 输入 → SetCursorPos → key → 色带 → 旗标。"""
+        self.keys.update(self.inp.rec)
+        self.key_command(self.inp.rec.key)
+        self.begin_frame()
+        self.band_draw()
+        self.draw()
+        self.band_advance()
+        return self.flags.is_empty()
+
+    def page_results_finish(self) -> None:
+        """`0x4535A0`：KillTimer → 0xB4 fill+present ×2 → 释放层 → 页3（菜单）。"""
+        self.timer.kill()
+        self.canvas.fill(0xB4); self.present()
+        self.canvas.fill(0xB4); self.present()
+        self.layers.free_all()
+        self.page = 3                                 # 0x4535A0 无额外映射 → 默认回菜单
+
+    # ---- 页15：第二关游戏画面（0x454950/0x454B30/0x454CB0）--------------------
+    def page15_enter(self) -> None:
+        """`0x454950`：第二关的进场（与页4 的 0x4505B0 同族但独立）。装调色板/层/
+        生成 0x6B000001（舞台总控）→ 20 音效槽 → VM init → SetPeriod。"""
+        self.flags.clear()
+        self.screen_fill = -1
+        self.p4_frames = 0
+        self.p4_intro_gate = False
+        self._p4_sys = 0
+        self.p4_ccc8 = 1
+        self.pal = self._load_pal(1)
+        self.pal_now = self.pal
+        self.p4_load_palette(1)
+        b = self.p4_block()
+        self.p4_replay_header(b)
+        self.p4_write_state(b)
+        self.p4_engine(self._p4_dword(b, 0x16), self._p4_sword(b, 0x14),
+                       self._p4_sbyte(b, 0x1A), self._p4_sbyte(b, 0x19))
+        for a in range(0x14, 0x24, 4):
+            self.p4_stat[a] = 0
+        self.sysf.clear()
+        self.p4_replay_reset()
+        self.p4_layer_params()
+        self.p4_load_palette(1)
+        self.inp.set_pos(0, 0)
+        for slot, wav in P4_SE_SLOTS:
+            self.load_wave(slot, wav)
+        self.vm_init_script(self._p4_dword(b, 0x0E))
+        self.sysf.clear()
+        self.vm_step_frame()
+        self.p4_speed = 1
+        self.timer.set_period(0)
+        # 0x454950 的主体（与 0x4505B0 不同）：额外装层0/1（bm_ora/bm_orb）+
+        # 生成 0x6B000001（舞台总控实体）→ 0x4AD52C
+        self.layers.bind(0, 7)                        # bm_cm48
+        self.layers.bind(1, 8)                        # bm_cm32
+        self._p4_454950_extra()                       # 0x6B000001 + 音效
+        self.p4_enter_ok = self.flags.is_empty()
+
+    def _p4_454950_extra(self) -> None:
+        """0x454950 的独有部分（与页4 enter 的差异）：0x6B000001 舞台总控 +
+        音效槽 0x15/0x1A/0x2A/0x2B。"""
+        self.stage_globals_begin()
+        # 0x454A6A: 0x430400(rec, 0, 0, 0x6B000001, 0) → 0x44B140(0x4AD52C, rec)
+        _intro = self.spawn(self.ui52c, 0x6B000001)
+        _intro.beh = "intro_6b"
+        _intro.p["state"] = 0
+        _intro.p["cnt"] = 0
+        for slot, wav in ((0x0B, 0x15), (0x15, 0x27), (0x1A, 0x28), (0x2A, 0x1C)):
+            self.load_wave(slot, wav)
+
+    def page15_step(self) -> bool:
+        """`0x454B30`：与页4 step 同族（0x458E70/0x458EF0 遍），但跳过流程 VM。"""
+        return self.p4_step()
+
+    def page15_finish(self) -> None:
+        """`0x454CB0`：与页4 finish 同族。"""
+        self.p4_finish()
+
     # ---- 页5：記錄（排行榜显示）------------------------------------------------
-    def page5_enter(self) -> None:
         """`0x452730`：装调色板 2 → SetCursorPos(320,240) → SetPeriod(0)。"""
         self.flags.clear()
         self.screen_fill = -1
