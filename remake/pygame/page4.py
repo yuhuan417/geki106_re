@@ -7368,8 +7368,15 @@ class Page4Mixin:
             vy = ((inv * spd) * ebx) >> 8                 # 0x43B1FE
             if vx == 0 and vy == 0:                       # 0x43B215
                 continue
-            self.spawn(self._p4_q("ui49c"), typ,
-                       e.s32(0x04), e.s32(0x08), (vx, vy))   # 0x43B22B
+                eb2 = self.spawn(self._p4_q("ui49c"), typ,
+                           e.s32(0x04), e.s32(0x08), (vx, vy))
+            if eb2 is not None:
+                eb2.raw[0x10] = 1
+                eb2.d32(0x14, typ & 0xFFFFFFFF)
+                eb2.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
+                eb2.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
+                eb2.d32(0x0C, 0x18)
+                self._p4_q("ui49c").append(eb2)            # 0x435440: 显式入队   # 0x43B22B
 
     def p4_43B070(self, e, arg: int) -> None:
         """`0x43B070`：朝玩家生成一枚 `0x31` 族实体进 **0x4AD49C**。
@@ -7402,7 +7409,12 @@ class Page4Mixin:
         eb = self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
                         e.s32(0x04), e.s32(0x08), (vx, vy))     # 0x43B105 → 0x435440
         if eb is not None:
-            eb.raw[0x10] = 1                           # 碰撞参与位（0x4306C0 检查）
+            eb.raw[0x10] = 1                           # 0x4306C0 碰撞参与位
+            eb.d32(0x14, self.p4_43B020(e) & 0xFFFFFFFF)  # 基础 ctor [+0x14]=类型
+            eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)         # [+0x04] = x
+            eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)         # [+0x08] = y
+            eb.d32(0x0C, 0x18)                             # [+0x0C] = 半径 24
+            self._p4_q("ui49c").append(eb)                 # 0x435440: 显式入队 0x4AD49C
 
     def _p4_dbg(self) -> None:
         import os
