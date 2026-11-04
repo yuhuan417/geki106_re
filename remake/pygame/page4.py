@@ -2493,10 +2493,24 @@ def _beh_10000001(self, e) -> bool:
         node.active = 1
     if getattr(self.inp.rec, "b0", 0) and not self.p4_key_test(0x10):   # 0x448D4F
         e2 = self.spawn(self._p4_q("ui46c"), 0x1B000001, x + 0x13, y)   # 0x448D68..0x448D9E
-        e2.beh = "bullet_1b"                                # 0x430080
+        # ctor 0x42DF84 支（0x42D787 大 ctor 的 0x1B000001 叶子）：
+        # 0x430400 把 rec 拷进实体：rec[0]→[+4]、rec[1]→[+8]（UiEntity.spawn 不代写，
+        # fx12_spawn 同款显式补——碰撞 0x4306C0 读的就是这两个字段）
+        e2.d32(0x04, (x + 0x13) & 0xFFFFFFFF)
+        e2.d32(0x08, y & 0xFFFFFFFF)
+        e2.d32(0x14, 0x1B000001)              # 0x430480 [+0x14]=类型（碰撞分派读原始字段；
+                                              #   UiEntity.spawn 不代写——fx12_spawn 同款显式补）
+        e2.d32(0x0C, 0x10)                    # 0x42DFB3 [+0xC] = 0x10（碰撞半径）
+        e2.d32(0x10, 1)                       # 0x42DFBA byte[+0x10] = 1（参与碰撞）
+        e2.d32(0x18, 1)                       # 0x42DFBD [+0x18] = 1（HP）
+        e2.beh = "bullet_1b"                  # 0x42DFAC [+0x40] = 0x4018DE → 0x430080
         from geki import DisplayNode
+        # 节点：层 0（0x42D7B5 xor ebp,ebp ⇒ 0x42DFC1 mov [eax],ebp = 0，bm_cm48）、
+        # src (0xC0,0x30,0xDD,0x4F)（0x45A750）、dst = (rec0+0x40, rec1)（0x42DFF0）、可见
         e2.disp = DisplayNode(layer=0, rect=[0xC0, 0x30, 0xDD, 0x4F],
-                              dst=[x + 0x13, y])
+                              dst=[x + 0x13 + 0x40, y])
+        e2.disp.active = 1                    # 0x42E015 byte[node+0x1C] = 1
+        self.p4_key_raw_set(0x10)             # 0x42E00D 0x401E1F→0x45AF30(0x56CCC0,0x10) 开火中
     if e.g32(0x18):
         return True
     n = (e.s32(0x20) - 1) & 0xFFFFFFFF              # 0x448DAE 剩余命数
@@ -5624,7 +5638,11 @@ class Page4Mixin:
         self.p4_stat["44621a_ui46c"] = self.p4_stat.get("44621a_ui46c", 0) + 1   # 0x44621A
 
     def p4_44604e(self, e, rec=None) -> None:
-        """`0x44604E`：**自机头像**（type `0x0B000002`）构造器。
+        """`0x44604E`：**狙击自机**（type `0x0B000001`，行为 0x448C70）构造器。
+
+        载体只在两处生成：页15 回放控制器 `0x44372B`（计数 0xF0 + btn0 沿，(200,200)
+        命数 3）与 `0x448C70` 自身重生支 `0x448DBB`。按住攻击键开火 **0x1B000001**
+        （狙，29×31 bm_cm48 格 (0xC0,0x30)，pscr0004 的黄"狙"）——回放页专属链。
 
         ```
         0x44605E [e+0x40] = 0x401E06        ; → 0x448C70
@@ -5703,12 +5721,14 @@ class Page4Mixin:
         type==8  → 0x44601E
         type==9  → 0x446227
         type==10 → 0x446117
-        type==0x0B000002 → 0x44604E  自机头像（行为 0x401E06 → 0x448C70）
+        type==0x0B000001 → 0x44604E  狙击自机（行为 0x401E06 → 0x448C70）
         其它     → 0x446237（跳过）
         ```
 
         `0x44603E` 的算术还原：`eax -= 9`（9 走 0x446227）、`dec eax`（10 走 0x446117）、
-        再 `sub eax,0x0AFFFFF7` 为 0 ⇒ `type - 11 == 0x0AFFFFF7` ⇒ **`type == 0x0B000002`**。
+        再 `sub eax,0x0AFFFFF7` 为 0 ⇒ `(type − 10) − 0x0AFFFFF7 == 0` ⇒
+        **`type == 0x0B000001`**（0x0AFFFFF7 + 10 = 0x0B000001；旧笔记写 0x0B000002 是
+        减法基准数错 1，勘误 A-页4-5）。
 
         已落地的类型返回 `"handled:1"` / `"handled:5"`；其余返回 `"pending:<type>"`
         **并记录到 `p4_stat`**，不假装已构造（各 ctor 体尚未逐条读，§15）。
@@ -5738,9 +5758,9 @@ class Page4Mixin:
         if typ == 10:                                          # 0x446117
             self.p4_446117(e, rec)
             return "handled:10"
-        if typ == 0x0B000002:                                  # 0x44604E
+        if typ == 0x0B000001:                                  # 0x44604E
             self.p4_44604e(e, rec)
-            return "handled:0xb000002"
+            return "handled:0xb000001"
         self.p4_stat[("445c00_pending", typ)] = self.p4_stat.get(("445c00_pending", typ), 0) + 1
         return f"pending:{typ:#x}"
 
@@ -6134,7 +6154,8 @@ class Page4Mixin:
             elif u == 0x120C112C:                              # 0x43C953 → 0x43C97E
                 p.d32(0x30, 0xFFFFFFFD)                        # 0x43C97E [+0x30] = -3
             elif u == 0x1B000001:                              # 0x43C95A
-                p.d32(0x18, 0)                                 # 0x43C963
+                p.d32(0x18, 0)                                 # 0x43C963 弹 HP=0
+                a.d32(0x18, (a.s32(0x18) - 1) & 0xFFFFFFFF)    # 0x43C96C..0x43C972 靶 HP--（无条件）
                 return                                         # 0x43C97B ret 8（**不走**共用尾）
         elif u == 0x12061128:                                  # 0x43C530 → 0x43C987
             self._p4_43c987(p, u)
@@ -6295,8 +6316,13 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "r1", 0))
 
     def p4_anim_step(self, e) -> None:
-        """`0x45A790(节点+4, -0x20, 0, -0x20, 0)`：按 16 帧周期切自机动画帧。"""
-        e.d32(0x28, (e.s32(0x28) + 1) & 3)
+        """`0x45A790(节点+4, -0x20, 0, -0x20, 0)`：按 16 帧周期切自机动画帧
+        （源矩形整窗左移 0x20：0x80→0x60→0x40→0x20→0x00，rect.l 到 0 即动画毕）。"""
+        nd = e.node
+        if nd is None:
+            return
+        r = nd.rect
+        nd.rect = (r[0] - 0x20, r[1], r[2] - 0x20, r[3])   # 0x45A790 grow(-0x20,0,-0x20,0)
 
     def _p4_q(self, name: str) -> list:
         if name == "ui40c":

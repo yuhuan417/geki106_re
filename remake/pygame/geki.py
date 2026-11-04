@@ -2159,13 +2159,21 @@ class Pages(Page4Mixin):
                     if e.node is not None:
                         e.node.active = 0
                 continue
-            if e.beh == "bullet_1b":                  # 0x430080：x += 7
-                nx = e.s32(4) + 7
+            if e.beh == "bullet_1b":                  # 0x430080：狙击弹（0x1B000001）
+                if self.p4_key_test(7):               # 0x430083 0x45AFF0(0x56CCC0,7)：开始键位冻结
+                    continue
+                nx = (e.s32(4) + 7) & 0xFFFFFFFF      # 0x430097 x += 7
                 e.d32(4, nx)
-                if e.disp is not None:
-                    e.disp.dst[0] = nx
-                if nx >= 0x200:
-                    e.alive = False
+                d = e.disp
+                if d is not None:
+                    d.dst[0] = (d.dst[0] + 7) & 0xFFFFFFFF   # 0x4300A3 dst.x += 7（dst=ent+0x40 不变）
+                    # 右缘渐进裁剪（0x4300AC..0x4300D4）：
+                    #   x<=0x1E0 恒 rect.r = rect.l+0x20；x>0x1E0 起 rect.r = rect.l-x+0x200
+                    d.rect[2] = (d.rect[0] - nx + 0x200) if nx > 0x1E0 else (d.rect[0] + 0x20)
+                if nx < 0x200 and e.s32(0x18) != 0:   # 0x4300D5 jge（有符号）/HP=0 ⇒ 出屏或破
+                    continue                          # 0x4300E5 return 1
+                self.p4_key_reset(0x10)               # 0x4300E9 0x402400→0x45AF60(0x56CCC0,0x10)
+                e.alive = False                       # 0x4300F5 return 0（自杀）
                 continue
             if callable(e.beh):                       # 页4：行为直接是函数对象
                 e.alive = bool(e.beh(self, e))
