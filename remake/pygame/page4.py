@@ -986,11 +986,23 @@ def _beh_23000005_06(self, e) -> bool:
     """
     n = e.s32(0x2C)
     if n:
-        for i in range(n):                                    # ① 0x40E575 循环
-            v = (n - i)
-            self._p4_ent43c(0x23000006, e.s32(0x04), e.s32(0x08))
-            if self.p4_q43c:
-                self.p4_q43c[-1].d32(0x28, (-8 * v) & 0xFFFFFFFF)   # 0x40E57C neg/shl 3
+        # ① 0x40E528..0x40E599：`0x430400(&rec, x, y, 0x23000006, &buf)` + `0x43BDC0(0x4AD43C,&rec)`
+        #   循环 `do { buf[1] = -[+0x2C]*8; 入队 } while (--[+0x2C])`。
+        #   子体 ctor case5（0x40DA40）：[0x1C] = *buf = 父指针（0x40DA53）、
+        #   [0x20] = buf[1] = **相位种子 −v*8**（0x40DA5F，错峰起飞：t 数到 0 才按 ② 表获得速度）、
+        #   [0x24]=[0x28]=[0x2C]=0（0x40DA5C/62/65）。
+        #   复刻侧 raw[0x1C] 存父句柄（id&0x7FFFFFFF），真对象在 self.p4_links。
+        h = id(e) & 0x7FFFFFFF
+        self.p4_links[h] = e
+        v = n
+        while v:
+            c = self._p4_ent43c(0x23000006, e.s32(0x04), e.s32(0x08))
+            c.d32(0x1C, h)                                 # 0x40DA53 [0x1C] = 父
+            c.d32(0x20, (-8 * v) & 0xFFFFFFFF)             # 0x40DA5F [0x20] = −v*8（种子）
+            c.d32(0x24, 0)                                 # 0x40DA5C
+            c.d32(0x28, 0)                                 # 0x40DA62
+            c.d32(0x2C, 0)                                 # 0x40DA65
+            v -= 1
         e.d32(0x2C, 0)
     if e.s32(0x1C) == 0 and e.s32(0x14) != 0x23000005 and e.s32(0x20) == 0x172:
         e.d32(0x1C, 0)                                        # 0x40E599
@@ -998,32 +1010,39 @@ def _beh_23000005_06(self, e) -> bool:
     t = e.s32(0x20)
     if t == 0:                                                # 0x40E5D9
         e.d32(0x24, 0xFFFFFFFD)
-        e.d32(0x28, 0xFFFFFFFD if e.s32(0x08) <= 0xF0 else 3)  # 0x40E5DE
+        # 0x40E5DE..0x40E5F5：cl=(y<=0xF0) → ecx=((cl−1)&0xFFFFFFFA)+3 ⇒ **y≤240:+3、y>240:−3**
+        e.d32(0x28, 3 if e.s32(0x08) <= 0xF0 else 0xFFFFFFFD)
     elif t == 0x4B:                                           # 0x40E5FA
         e.d32(0x24, 0xFFFFFFFF)
-        v = e.s32(0x28) * 4
-        q = -v // 3 if v >= 0 else -((-v) // 3)               # 0x40E602 imul 0x55555556（向零取整）
+        num = -(e.s32(0x28) * 4)                              # 0x40E5FF neg / 0x40E609 shl 2
+        q = num // 3 if num >= 0 else -((-num) // 3)          # 0x40E602 imul 0x55555556（向零取整）
         e.d32(0x28, q & 0xFFFFFFFF)
     elif t == 0x78 and e.s32(0x14) == 0x23000006:              # 0x40E621
         self.p4_43B070(e, 0)
     elif t == 0x96:                                           # 0x40E63A
         e.d32(0x24, 4)
         v = e.s32(0x28)
-        e.d32(0x28, (-(v // 4)) & 0xFFFFFFFF)                  # 0x40E64C 向零取整
-    child = e.g32(0x1C)
-    if child and not self.p4_child_alive(child):               # 0x40E659
-        if e.s32(0x20) < 0:
-            return False
-        vx, vy = e.s32(0x24), e.s32(0x28)
-        e.d32(0x1C, 0)
-        e.d32(0x20, 0x14A)
-        if rng.randrange(2):                                   # 0x40E68B rand&1
-            e.d32(0x24, vy & 0xFFFFFFFF)
-            e.d32(0x28, (-vx) & 0xFFFFFFFF)
-        else:
-            e.d32(0x28, (-vy) & 0xFFFFFFFF)
-            e.d32(0x24, vx & 0xFFFFFFFF)
-    e.d32(0x20, (t + 1) & 0xFFFFFFFF)                          # 0x40E6AF
+        q = v // 4 if v >= 0 else -((-v) // 4)                # 0x40E64B cdq/and 3/sar 2（向零取整）
+        e.d32(0x28, (-q) & 0xFFFFFFFF)                        # 0x40E654 neg
+    h = e.g32(0x1C)
+    if h:
+        # ③ 0x40E659：[[0x1C]+0x34]==0（链接体已亡）→ 相位<0 自尽；否则随机 90° 变轨 + 相位 0x14A
+        linked = self.p4_links.get(h)
+        if linked is None or linked.m[0x34] == 0:
+            self.p4_links.pop(h, None)
+            if e.s32(0x20) < 0:
+                return False
+            vx, vy = e.s32(0x24), e.s32(0x28)
+            e.d32(0x1C, 0)
+            e.d32(0x20, 0x14A)
+            if self.p4_rand() & 1:                             # 0x40E68B rand&1
+                e.d32(0x24, vy & 0xFFFFFFFF)                   # bit=1: (vy, −vx)
+                e.d32(0x28, (-vx) & 0xFFFFFFFF)
+            else:
+                e.d32(0x24, (-vy) & 0xFFFFFFFF)                # bit=0: (−vy, vx)
+                e.d32(0x28, vx & 0xFFFFFFFF)
+    # 0x40E6A3 尾：**重新读内存** [0x20] 再 ++（③ 支刚写的 0x14A 不能被开头的陈旧 t 覆盖）
+    e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
     e.d32(0x04, (e.s32(0x04) + e.s32(0x24)) & 0xFFFFFFFF)      # 0x40E6B8
     e.d32(0x08, (e.s32(0x08) + e.s32(0x28)) & 0xFFFFFFFF)      # 0x40E6B0
     if e.node is not None:
@@ -1031,12 +1050,9 @@ def _beh_23000005_06(self, e) -> bool:
     return True
 
     def p4_child_alive(self, ptr: int) -> bool:
-        """`[[+0x1C]+0x34]`：子实体存活标志。"""
-        for q in (self.p4_q43c, self._p4_q("ui49c")):
-            for x in q:
-                if x.g32(0x34):
-                    return True
-        return False
+        """`[[+0x1C]+0x34]`：链接体（父/子）存活标志 —— 句柄 → self.p4_links 取对象读 [0x34]。"""
+        linked = getattr(self, "p4_links", {}).get(ptr)
+        return linked is not None and linked.m[0x34] != 0
 
 
 def _beh_23000009(self, e) -> bool:
@@ -3390,6 +3406,7 @@ class Page4Mixin:
         self.p4_seq = None            # 0x4CD484 序列引擎
         self.p4_q43c: list = []       # 0x4AD43C 主实体队列（所有实体类型共用）
         self.p4_n43c = 0
+        self.p4_links: dict[int, "Ent"] = {}   # 0x23 亲子链接句柄表（0x40E659 读 [[0x1C]+0x34]）
         self.p4_beh_missing: dict[int, int] = {}
         self.p4_beh_missing_types: dict[tuple, int] = {}
         self.p4_other: dict[int, list] = {}   # op1/3/4/5 的记录（ctor 未实现）
