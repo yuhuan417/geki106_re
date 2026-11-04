@@ -1567,7 +1567,7 @@ def main():
     _cd2_e5 = page4.Ent(0, 0, 0x5, 0)
     _cd2.p4_445c00(_cd2_e5, (0, 0, 0, 0))
     _av = _PN()
-    _av_e = page4.Ent(0x30, 0x40, 0x0B000002, 0)
+    _av_e = page4.Ent(0x30, 0x40, 0x0B000001, 0)
     _av_e.node = _Nd2()
     _av_r = _av.p4_445c00(_av_e, (0, 0, 0, 5))
     _t8 = _PN()
@@ -1686,9 +1686,11 @@ def main():
     _ok1 = (_o.p4_stat[0x4CD590 + 0x30] == 6 and _o.p4_stat[0x4CD590 + 0x3C] == 4
             and _o.p4_stat[0x4CD590 + 0x40] == 1 and _o.p4_stat[0x4CD590 + 0x44] == 1
             and _o.sequence_started())
-    _o.p4_stat[0x4CD590 + 0x2C] = 0x1000
+    # [+0x2C] = 0x460930 ctor 存的节点 2 指针（复刻侧 = st_icon_b DNode，0x460C00 置 0 与之相对）
+    _ib = type("_N", (), {"active": 0})()
+    _o.p4_stat["st_icon_b"] = _ib
     _o.sequence_start()
-    _ok2 = _o.p4_stat[0x1000 + 0x1C] == 1
+    _ok2 = _ib.active == 1
     check("0x460E40(0x4CD590) 启动序列：读 +0x3C 旧值 → [+0x30]=6 → [+0x3C]=旧值-1 → "
           "+0x40/0x44 各 +1 → byte[[+0x2C]+0x1C]=1；0x460EE0 getter 读 +0x40",
           _sq.get(0x460E40) == ("mov", "eax, dword ptr [ecx + 0x3c]")
@@ -2895,9 +2897,10 @@ def main():
           and _tae.node.src == (0, 0, 47, 47)
           and _tae.node.dst == (0x30 - 0x18, 0x40 - 0x18)
           and _ta.p4_stat.get("44621a_ui46c") == 1, "")
-    check("0x44604E 自机头像：行为 0x401E06、半径 0x10、**构造即活**(alive=1)、HP 1、"
+    check("0x44604E 狙击自机（type 0x0B000001，勘误 A-页4-5）：行为 0x401E06、半径 0x10、"
+          "**构造即活**(alive=1)、HP 1、"
           "节点 dst 的 x 偏 +0x40、frame=1、置 word[0x56CCC0] 的 bit0",
-          _av_r == "handled:0xb000002"
+          _av_r == "handled:0xb000001"
           and _av_e.g32(0x40) == 0x401E06 and _av_e.g32(0x0C) == 0x10
           and _av_e.m[0x10] == 1 and _av_e.g32(0x18) == 1 and _av_e.g32(0x20) == 5
           and _av_e.node.dst == (0x30 + 0x40, 0x40) and _av_e.node.frame == 1
