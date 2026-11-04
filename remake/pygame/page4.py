@@ -4519,7 +4519,8 @@ class Page4Mixin:
         0x460ABD 0x40238D(&rect, eax, 0x150, eax+0x17, 0x167)
         ```
         """
-        d = (value - 1) % 10                              # 0x460AA2..0x460AA7
+        d = value - 1                                     # 0x460AA2..0x460AA7
+        d = d % 10 if d >= 0 else -((-d) % 10)            # idiv 余数：符号随被除数（C 语义）
         x = d * 0x18                                      # 0x460AA9
         return (x, 0x150, x + 0x17, 0x167)
 
@@ -4660,18 +4661,26 @@ class Page4Mixin:
         l, t, r, b = ib.src
         ib.src = (l + d, t, r + d, b)                   # 0x45A790(node, ±0x18, 0, ±0x18, 0)
 
-    def p4_45a170_hud(self) -> None:
+    def p4_45a170_hud(self, keys=("hud_nodes", "hud_icon_a", "hud_icon_b",
+                                  "st_icon_a", "st_icon_b")) -> None:
         """`0x45A170(h+0x64)` / `0x45A170(0x4CD590+0x04)`：HUD 显示表渲染
-        （可见节点按 层/源矩形/目标点 色键贴屏，节点序 = 表序）。"""
+        （可见节点按 层/源矩形/目标点 色键贴屏，节点序 = 表序）。
+
+        两次渲染分先后（0x45EEF3 渲 0x4CD4A0 表 → 0x460AE7 渲 0x4CD590 表），
+        `keys` 参数用于分段调用。ctor 未写 src 的节点（0x460930 只写节点 1）
+        在原作里是未初始化内存且隐藏 ⇒ 这里直接跳过。"""
         c = self.canvas
-        for key in ("hud_nodes", "hud_icon_a", "hud_icon_b", "st_icon_a", "st_icon_b"):
+        for key in keys:
             for nd in st_nodes(self.p4_stat, key):
                 if not nd.active:
+                    continue
+                src = getattr(nd, "src", None)
+                if src is None:
                     continue
                 lay = self.layers.tab.get(nd.layer)
                 if lay is None:
                     continue
-                l, t, r, b = nd.src
+                l, t, r, b = src
                 dx, dy = nd.dst
                 c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
 
@@ -4689,53 +4698,15 @@ class Page4Mixin:
             self.p4_45e020()                          # 0x45EED3 → 0x45E020
             st[0x4CD4A0 + 0xE1] = 0
         self.p4_45e340()                              # 0x45EEEB
-        self.p4_45a170_hud()                          # 0x45EEF3 + 0x458F4D 两张表
+        self.p4_45a170_hud(("hud_nodes", "hud_icon_a", "hud_icon_b"))   # 0x45EEF3
         ib = st.get("st_icon_b")                      # 0x460AC5 用 [+0x2C] 节点
         t = st.get(0x4CD590 + 0x30, 0)
         t = t - 0x100000000 if t & 0x80000000 else t
-        if ib is not None and t != -1 and t > 0:
-            ib.src = self.p4_hud_rect(t)              # 0x460AA2..0x460AC3
-            ib.active = 1
-
-    def p4_hud_rebuild(self, h) -> None:
-        """`0x45E020`：HUD 一次性重建（待展开）。"""
-        self.p4_stat[0x45E020] = self.p4_stat.get(0x45E020, 0) + 1
-
-    def p4_hud_layout(self, h) -> None:
-        """`0x45E340`：血条/能量条排版。
-
-        ```
-        0x45E347 v = s16[+0x26]
-        0x45E34B if (v < 0xA0) {                      ; 未满：分段小格
-                    i = v >> 4
-                    node[+0xDC].src = (i*0x18, 0x1E0, i*0x18+0x17, 0x1F7);  return }
-        0x45E3A6 if (node[+0xDC].src.top != 0x1C8) {   ; 首次满格
-                    node.src = (0x48, 0x1C8, 0x5F, 0x1DF); [+0xE0] = 0 }
-        0x45E3FD [+0xE0] = (node.src.left == 0)
-        0x45E41A [+0xE0] ? 0x45A790(node, 0x18,0,0x18,0) : 0x45A790(node,-0x18,0,-0x18,0)
-        ```
-        """
-        v = h.s16(0x26)
-        if v < 0xA0:                                       # 0x45E34B
-            i = (v >> 4) & 0xF
-            x = i * 0x18
-            if h.node is not None:
-                h.node.src = (x, 0x1E0, x + 0x17, 0x1F7)
-            return
-        if h.node is not None and h.node.src[1] != 0x1C8:  # 0x45E3A6
-            h.node.src = (0x48, 0x1C8, 0x5F, 0x1DF)
-            h.d32(0xE0, 0)
-        if h.node is not None:
-            h.d32(0xE0, 1 if h.node.src[0] == 0 else 0)    # 0x45E3FD 至 0x45E40E
-            d = 0x18 if h.g32(0xE0) else -0x18             # 0x45E41A / 0x45E435
-            self.p4_anim_step(h)
-
-    def p4_hud_update(self, e) -> None:
-        """`0x460A90`：把数字矩形写进显示节点 `[+0x2C]+4`，再 `0x4011FE` 推进渲染表。"""
-        if e.node is not None:
-            e.node.src = self.p4_hud_rect(e.s32(0x30))    # 0x460ACE..0x460AE4
-            e.node.visible = 1
-        self.p4_stat[0x11FE] = self.p4_stat.get(0x11FE, 0) + 1   # 0x460AE7 → 0x45A170
+        # 0x460A90 无任何门：src 恒按 (t-1)%10 写（t=-1 时为负矩形，节点本身隐藏看不见）。
+        # 可见性只由 ctor(a3!=-1)/0x460E40(置1)/0x460C00(置0) 管理。
+        if ib is not None:
+            ib.src = self.p4_hud_rect(t)              # 0x460AA2..0x460AE4
+        self.p4_45a170_hud(("st_icon_a", "st_icon_b"))   # 0x460AE7 → 0x45A170(+0x04)
 
     def p4_frame_no(self) -> int:
         """`[0x56CCA8]`：全局帧计数器（`0x451442` 每帧 ++）。"""
@@ -4781,8 +4752,11 @@ class Page4Mixin:
             lives = (lives - 1) & 0xFFFFFFFF                 # 0x460D3A
             self.p4_stat[M + 0x30] = lives
             if lives == 0:                                   # 0x460D40 jne
-                # 0x460D42 是 `byte[[0x4CD590+0x2C] + 0x1C] = 0`——该指针的写入点
-                # 尚未定位（§15），故此处不写，避免凭空造一个实体。
+                # 0x460D42..0x460D55：byte[[0x4CD590+0x2C]+0x1C] = 0 —— 熄灭残撃数字节点
+                # （[+0x2C] = 0x460930 ctor 存的节点 2，与 0x460E40 的置 1 相对）。
+                ib = self.p4_stat.get("st_icon_b")
+                if ib is not None:
+                    ib.active = 0
                 self.p4_51_spawn(0, 0, 0x51000002, 0)               # 0x460D78 → 0x44B140
 
     def p4_45f660(self) -> None:
@@ -8396,7 +8370,6 @@ class Page4Mixin:
         ```
 
         注意顺序：**先读 `+0x3C`，再写 `+0x30`，最后写 `+0x3C`**（读的是旧值，减 1 后写回）。
-        `+0x2C` 的写入点仍未定位（§16.281），故这里为 0 时跳过那句 `byte[..]=1`。
         """
         s3c = self.p4_stat.get(0x4CD590 + 0x3C, 0)
         self.p4_stat[0x4CD590 + 0x30] = 6
@@ -8405,9 +8378,11 @@ class Page4Mixin:
                                          & 0xFFFFFFFF)
         self.p4_stat[0x4CD590 + 0x44] = ((self.p4_stat.get(0x4CD590 + 0x44, 0) + 1)
                                          & 0xFFFFFFFF)
-        p2c = self.p4_stat.get(0x4CD590 + 0x2C, 0)
-        if p2c:
-            self.p4_stat[p2c + 0x1C] = 1
+        # 0x460E5C..0x460E5F：byte[[+0x2C]+0x1C] = 1 —— 点亮残撃数字节点。
+        # [+0x2C] = 0x460930 ctor 存的节点 2（st_icon_b）；0x460C00 死亡链把它置 0。
+        ib = self.p4_stat.get("st_icon_b")
+        if ib is not None:
+            ib.active = 1
 
     P4_STAT_BASE = 0x4CD4A0
 
