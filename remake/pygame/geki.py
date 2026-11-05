@@ -1907,12 +1907,22 @@ class Pages(Page4Mixin):
         return self.flags.is_empty()
 
     def page6_finish(self) -> None:
-        """`0x452660`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 页3。"""
+        """`0x452970`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 旗标映射：
+        0x100→页0、0x200→页3、0x10000→页3、**0x1000000→页11（調整适用游戏）**、
+        其它→0xFF（0x4529AF..0x4529CC 实测）。"""
         self.timer.kill()
         self.canvas.fill(0xB4); self.present()
         self.canvas.fill(0xB4); self.present()
         self.layers.free_all()
-        self.page = 3
+        r = self.flags.lowest()                       # 0x452974 0x45B070
+        if r == 0x100:
+            self.page = 0
+        elif r in (0x200, 0x10000):
+            self.page = 3
+        elif r == 0x1000000:
+            self.page = 11                            # 0x4529C2：調整适用 → 页11
+        else:
+            self.page = 0xFF
 
     # ---- 页14：OP movie（页3 的 0x2000000 出口）--------------------------------
     def page14_enter(self) -> None:

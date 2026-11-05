@@ -3170,6 +3170,8 @@ class Page4Mixin:
     def p4_enter(self) -> None:
         """阶段进场。返回语义同 `0x45AFF0(0x4AB5C0,0)`（旗标是否为空）。"""
         self.p4_frames = 0                        # [0x56CCA8]
+        # 0x450AE7..0x450AFA：[0x56CCB4]=页机臂、[0x56CCB5]=(当前页 == 11)
+        self.p4_stat[0x56CCB5] = 1 if getattr(self, "page", 4) == 11 else 0
         self.p4_speed = 1                         # 0x450D98 `[App+0x2C4] = 1`（1=常速，8=快进，0=4×泵）
         self.p4_intro_gate = False                # [0x56CCB4]（只有 0x423B7B 置 1）
         self._p4_sys = 0                          # 0x450B00 0x401AAA→0x45AF10(0x56CCB8) 清系统位
