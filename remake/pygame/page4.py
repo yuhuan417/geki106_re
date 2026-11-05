@@ -3217,7 +3217,9 @@ class Page4Mixin:
             self.flags.set(8)                     # 0x450D62 `0x4AB5C0 |= 8`
 
         # 0x450D6E..0x450DA2
-        self.vm_init_script(self._p4_dword(b, 0x0E))   # 0x401D84 → 0x4602D0(0x56CC4C,?)
+        # 0x450D6E mov ecx,[esp+0x18]：块偏移 0x10 的 dword（= si*4+0x0B 组号 | 高字）。
+        # 旧读 0x0E ⇒ 0x4602D0 的 movsx cx 恒取 0 ⇒ 组号恒 0（永远播第 1 关的流组）。
+        self.vm_init_script(self._p4_dword(b, 0x10))   # 0x401D84 → 0x4602D0(0x56CC4C,组号)
         self.sysf.clear()                         # 0x450D7D 0x45AF10(0x56CC84,0)
         self.vm_step_frame()                      # 0x450D88 0x402149 → 0x460350
         self.p4_speed = 1                         # 0x450D98 `[App+0x2C4] = 1`
