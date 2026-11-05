@@ -604,7 +604,7 @@ class Ent:
     def _apply_family_init(self, typ: int, a: int, b: int, d: int) -> None:
         """0x24-0x2D 各族 ctor case 体（ENT24_INIT 等）。rec = (a, b, typ, d)。"""
         info = (ENT24_INIT.get(typ) or ENT25_INIT.get(typ) or ENT26_INIT.get(typ)
-                or ENT27_INIT.get(typ) or ENT28_INIT.get(typ))
+                or ENT27_INIT.get(typ) or ENT28_INIT.get(typ) or ENT29_INIT.get(typ))
         if info is None:
             return
         thunk = info["beh"]
@@ -808,6 +808,13 @@ class Ent:
                 for so, to in ((0x18, 0x18), (0x1C, 0x1C), (0x20, 0x20),
                                (0x24, 0x24), (0x28, 0x28), (0x2C, 0x2C), (0x30, 0x30)):
                     self.d32(to, tgt.g32(so))
+        if "d_all" in info:                            # 多字段 d_to（rec[3] → 各偏移）
+            for o in info["d_all"]:
+                self.d32(o, d & 0xFFFFFFFF)
+        if "r0_20" in info:
+            self.d32(0x20, a & 0xFFFFFFFF)
+        if "r1_24" in info:
+            self.d32(0x24, b & 0xFFFFFFFF)
         if "d3pair" in info:                           # 0x41200B：[0x1C]=*rec3、[0x20]=rec3[1]
             tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
             if tgt is not None:
@@ -1975,6 +1982,48 @@ ENT28_INIT = {
     0x28000017: {},                                                   # 跳表 0 = 无 ctor 无行为
     0x28000018: {"beh": 0x401B18, "r3sh": (0x1C, 4), "z20_24": True,
                  "r0sh": (0x28, 3), "r1sh": (0x2C, 3)},
+}
+
+
+# 0x29 族（关7）ctor case 表（0x41C040，跳表 0x41CBDC，33 型）——2026-11-06 批量提取
+# case 体在 0x41C06E..0x41CBDC。case6..10/15 共体 beh 0x4018A7(0x41E7B0)、imm {0x18:0x14}
+ENT29_INIT = {
+    0x29000001: {"beh": 0x402121, "imm": {0x1C: 0, 0x20: -0x10, 0x24: 0}, "d_to": 0x28},
+    0x29000002: {"beh": 0x40125D, "z1c_20_24": True, "imm": {0x28: -0xC8}, "d_to": 0x2C},
+    0x29000003: {"beh": 0x401758, "d_to": 0x1C, "r0_20": True, "r1_24": True,
+                 "imm": {0x28: 0, 0x2C: 0}},
+    0x29000004: {"beh": 0x4015A5, "imm": {0x1C: 0, 0x20: 0x10}},
+    0x29000005: {"beh": 0x40134D},
+    0x29000006: {"beh": 0x401D7F},
+    0x29000007: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
+    0x29000008: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
+    0x29000009: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
+    0x2900000A: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
+    0x2900000B: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
+    0x2900000C: {"beh": 0x40211C},
+    0x2900000D: {"beh": 0x4011EF},
+    0x2900000E: {"beh": 0x4021C6, "imm": {0x28: 0x40}},
+    0x2900000F: {"beh": 0x4019D8, "d_to": 0x1C},
+    0x29000010: {"beh": 0x401EFB},
+    0x29000011: {"beh": 0x4010BE, "imm": {0x1C: 0, 0x20: 0x10, 0x24: -2}},
+    0x29000012: {"beh": 0x4023A1, "z1c": True},
+    0x29000013: {"beh": 0x4017E9, "z1c": True},
+    0x29000014: {"beh": 0x4018CF, "z1c": True},
+    0x29000015: {"beh": 0x401398, "imm": {0x24: -8}, "d_to": 0x28},
+    0x29000016: {"beh": 0x4018A7},
+    0x29000017: {"beh": 0x40217B, "imm": {0x1C: 0, 0x20: 0x10}},
+    0x29000018: {"beh": 0x4013C5, "d_all": [0x1C, 0x20, 0x24, 0x28, 0x2C]},
+    0x29000019: {"beh": 0x401CCB, "imm": {0x04: -0xA0},
+                 "d_all": [0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30]},
+    0x2900001A: {"beh": 0x401384, "imm": {0x04: -0xA0}, "d_to": 0x1C},
+    0x2900001B: {"beh": 0x40140B, "imm": {0x04: -0xA0, 0x28: 3},
+                 "d_all": [0x1C, 0x20, 0x24]},
+    0x2900001C: {"beh": 0x40209F, "imm": {0x04: -0xA0, 0x24: 0}, "d_to": 0x1C},
+    0x2900001D: {"beh": 0x40209F, "imm": {0x04: -0xA0, 0x24: 0}, "d_to": 0x1C},
+    0x2900001E: {"beh": 0x401474, "imm": {0x20: 0x40, 0x24: 0}, "d_to": 0x1C},
+    0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0}},
+    0x29000020: {"beh": 0x401A82, "imm": {0x04: -0xA0}},
+    0x29000021: {"beh": 0x40166D, "imm": {0x2C: 0}},
 }
 
 
