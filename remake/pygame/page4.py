@@ -1553,6 +1553,16 @@ def p4_angle(a: int, b: int) -> int:
     return 0x708 - v if a >= 0 else 0x708 + v  # 第三/第四象限
 
 
+def page4_cos(ang: int) -> int:
+    """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
+    return p4_sin_q(ang, "cos")
+
+
+def page4_sin(ang: int) -> int:
+    """0x45AAF0：查表正弦。"""
+    return p4_sin_q(ang, "sin")
+
+
 def p4_sin_q(arg: int, which: str = "sin") -> int:
     """`0x45ABB0`（cos 表）/`0x45AAF0`（sin 表）：`|arg|%3600` 归一 + 象限重组。
 
@@ -1981,9 +1991,14 @@ def p4_laser(self, e, variant: str) -> bool:
         if sub is None:
             return
         # 0x446C78 / 0x446D61 / 0x446E5F / 0x446F4B：位置取子对象，第 5 字段传父指针
-        self.spawn(self._p4_q("ui46c"), 0x10008041,
-                   sub.s32(0x04), sub.s32(0x08), sub)
-        self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1   # 0x401AA5 记账
+        cur = self.spawn(self._p4_q("ui46c"), 0x10008041,
+                         sub.s32(0x04), sub.s32(0x08), sub)
+        self.p4_lock_ctor(cur, (sub.s32(0x04), sub.s32(0x08), 0x10008041,
+                                id(sub) & 0xFFFFFFFF))       # 0x42DABC ctor 落字段
+        cur.p["sub"] = sub
+        import page4 as _p4m
+        _p4m.p4_446470(self, sub, a, b)                       # 0x401AA5 → 0x446470（预设切换）
+        self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1   # 记账
 
     def raise_floor(v: int) -> None:
         if sub is not None and sub.s32(0x30) < v:                # 0x446CE1 / 0x446DD3 / 0x446EC3
@@ -3022,6 +3037,8 @@ P4_BEH: dict[int, object] = {
     0x446D30: _beh_446D30,
     0x446E20: _beh_446E20,
     0x446F10: _beh_446F10,
+    # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
+    # （_beh_<真址:X>，v4..v7 与 v0..v3 逐字节同语义）
     0x447410: _beh_447410,
     0x448C70: _beh_10000001,
     0x447F90: _beh_447F90,
@@ -3095,8 +3112,11 @@ class Page4Mixin:
                 else:
                     put(off, val)
 
-        # 0x450648 `0x45B030(0x4AB5B0,1)`：bit1 已置 → A_flag 变体（只写 5 个字段）
-        if self.keys.test(1):
+        # 0x450648 `0x45B030(0x4AB5B0,1)`：0x45B030 = **位清零测试**（bits&mask==0 → 1，
+        # 实测 0x45B03B neg/sbb/inc 序列）⇒ bit0 **未**置（通常游戏）走 A_flag：
+        # a3=6（残撃 5 可见）、a4=0x64（开场点击门开）。鍛錬（bit0 置）才走分支 A。
+        # 旧实现 test(1) 反向 ⇒ 普通周目命数不显示（2026-11-06 修正）。
+        if not self.keys.test(1):
             literals("A_flag")
             # 0x450651 `push ebx`(ebx=0) ⇒ `0x45AFC0(0x4AB5B0, 0)`：mask=0 恒返回 0
             # ⇒ neg/sbb/and 0x9F/add 0x64 的链条恒得 al = 0x64（与任何位无关）。
@@ -5580,7 +5600,8 @@ class Page4Mixin:
         0x43AE8E return H - [e+0x48]
         ```
         """
-        if (self.p4_stat.get(0x56CCA8, 0) & 0xFFFF) <= (e.g32(0x54) & 0xFFFF):   # 0x43AE68
+        now = self.p4_frame_no() & 0xFFFF                    # word[0x56CCA8]（p4_frames 镜像）
+        if now <= (e.g32(0x54) & 0xFFFF):                    # 0x43AE68
             return 0
         hp = e.g32(0x18)
         if hp & 0xF0000000:                                    # 0x43AE6F
@@ -6077,7 +6098,7 @@ class Page4Mixin:
         self.spawn(self._p4_q("ui4cc"), 0x41400507,
                    p.g32(0x00), a.g32(0x48), a)                 # 0x43C7D4
         a.d32(0x48, (a.g32(0x48) + 1) & 0xFFFFFFFF)             # 0x43C7FF
-        a.d32(0x54, (self.p4_stat.get(0x56CCA8, 0) + 0x10) & 0xFFFFFFFF)   # 0x43C80A
+        a.d32(0x54, (self.p4_frame_no() + 0x10) & 0xFFFFFFFF)   # 0x43C80A（word[0x56CCA8]+0x10）
         self.p4_stat[0x56CC98] = (self.p4_stat.get(0x56CC98, 0) + 1) & 0xFFFF   # 0x43C81B
         self.p4_stat[0x56CCA0] = (self.p4_stat.get(0x56CCA0, 0) + 1) & 0xFFFF   # 0x43C821
         self.p4_se_pan(6, (p.s32(0x04) - 0x140) << 4)           # 0x43C83B
@@ -6833,6 +6854,205 @@ class Page4Mixin:
             c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
 
     # ---- 特殊类槽行为用到的三个助手（§16.180/§16.181）------------------
+    # ---- 0x10008041 锁定准星（0x42DABC ctor + 0x42E460 族行为 + 0x42F4B0 矩形动画）----
+
+    def p4_lock_ctor(self, e, rec) -> None:
+        """`0x42DABC`（0x42D780 的 0x10 族分支）：0x10008041/0x10008043 构造。
+
+        ```
+        0x45AFF0(0x4AB5B0,2)=0x45B030 反测?? —— 0x40208B→0x45AFF0 普通测：bit1(操作器)置 → +4
+        行为表 8 项 0x401285/0x402338/0x402153/0x401866/0x4013E8/0x401E51/0x401CF3/0x401EB5
+            → 0x42E460/0x42E520/0x42E660/0x42E810/0x42EA70/0x42EB30/0x42EC70/0x42EE20
+            （idx = (bit1?4:0)+选机；4..7 与 0..3 逐字节同语义，仅 call 位移差——实测）
+        0x10008043 → 行为恒 0x4021A3(0x42F080)
+        [0xC]=0x30（半径 48）；byte[0x10]=1；[0x1C]=[0x20]=0；[0x24]=rec[3]（自机）；[0x28]=选机
+        [0x18]=-1；节点层 0、src (0x8D,0x2D,0x93,0x32)（7×6 锁点）、dst=(x−3,y−3)、byte[节点+0x1C]=[0x56CCC8]
+        ```
+        """
+        had_kb = self.keys.test(2)                          # 0x45AFF0(…,2) 普通测
+        ship = self.keys.field(0xC000) & 3
+        idx = (4 if had_kb else 0) + ship
+        # ⚠ UiEntity.spawn 不写 raw[0x14]（§16.345 陷阱）⇒ 类型判定用 type_word
+        is41 = (getattr(e, "type_word", e.g32(0x14))) == 0x10008041
+        if hasattr(e, "raw"):
+            e.d32(0x14, 0x10008041)                          # 补类型字段（碰撞分派读它）
+        e.d32(0x40, (0x4021A3 if not is41 else
+                     (0x401285, 0x402338, 0x402153, 0x401866,
+                      0x4013E8, 0x401E51, 0x401CF3, 0x401EB5)[idx % 8]))
+        # v4..v7 与 v0..v3 逐字节同语义（仅 call 位移差）⇒ beh 归并到 v0..v3 真址
+        e.beh = {0x401285: 0x42E460, 0x402338: 0x42E520, 0x402153: 0x42E660,
+                 0x401866: 0x42E810, 0x4013E8: 0x42E460, 0x401E51: 0x42E520,
+                 0x401CF3: 0x42E660, 0x401EB5: 0x42E810, 0x4021A3: 0x42F080}.get(e.g32(0x40), 0)
+        e.d32(0x0C, 0x30)
+        if hasattr(e, "m"):
+            e.m[0x10] = 1
+        else:
+            e.raw[0x10] = 1                                  # UiEntity：碰撞位走 raw
+        e.d32(0x1C, 0)
+        e.d32(0x20, 0)
+        a3 = rec[3] if (rec is not None and len(rec) > 3) else 0
+        e.d32(0x24, a3 & 0xFFFFFFFF)                        # 自机指针
+        e.d32(0x28, ship)
+        e.d32(0x18, 0xFFFFFFFF)
+        from geki import DisplayNode as _DN
+        e.node = _DN(layer=0, rect=[0x8D, 0x2D, 0x93, 0x32],
+                     dst=[e.s32(4) - 3, e.s32(8) - 3])      # 0x45A750 + 0x45A690(x−3,y−3)
+        e.disp = e.node
+        e.node.active = 1 if getattr(self, "p4_ccc8", self.p4_stat.get(0x56CCC8, 0)) else 0   # 0x42DBD3 byte[0x56CCC8]（p4_enter 置 1）
+        e.p["sub"] = self.p4_links.get(a3) if a3 in getattr(self, "p4_links", {}) else None
+
+    def _p4_lock_rect(self, e, shrink: bool) -> bool:
+        """`0x42F4B0(0x4012E4)`：准星矩形动画。arg≠0（按住）：rect 外扩 ±3 直到 l==0x60
+        （锁定环），dst −(3,3)；arg==0（松开）：内收直到 l==0x90，dst +(3,3)。
+        返回 1 = 已到目标尺寸。"""
+        nd = e.node
+        if nd is None:
+            return False
+        if shrink:
+            if nd.rect[0] == 0x60:
+                return True
+            nd.rect = (nd.rect[0] - 3, nd.rect[1] - 3, nd.rect[2] + 3, nd.rect[3] + 3)
+            nd.dst = (nd.dst[0] - 3, nd.dst[1] - 3)
+            return False
+        if nd.rect[0] == 0x90:
+            return True
+        nd.rect = (nd.rect[0] + 3, nd.rect[1] + 3, nd.rect[2] - 3, nd.rect[3] - 3)
+        nd.dst = (nd.dst[0] + 3, nd.dst[1] + 3)
+        return False
+
+    def _p4_lock_detach(self, e) -> None:
+        """0x42E4C3/0x42E5F0/0x42E781：松键或自机亡 → [0x24]=0、byte[0x10]=0（准星脱离）。"""
+        e.d32(0x24, 0)
+        if hasattr(e, "m"):
+            e.m[0x10] = 0
+        else:
+            e.raw[0x10] = 0
+
+    def _beh_42E460(self, e) -> bool:
+        """`0x42E460`（撃/鼠标；v4=0x42EA70 同）：吸附指针 + 矩形动画；松键/父亡脱离。"""
+        sub = e.p.get("sub")
+        if sub is not None and sub.alive:
+            nd = e.node
+            if nd is not None:
+                px, py = self.p4_ptr()
+                nd.dst = (nd.dst[0] + px - e.s32(4), nd.dst[1] + py - e.s32(8))
+            e.d32(0x04, self.p4_ptr()[0] & 0xFFFFFFFF)
+            e.d32(0x08, self.p4_ptr()[1] & 0xFFFFFFFF)
+            self._p4_lock_rect(e, True)                     # 0x4012E4(1)
+            if not getattr(self.inp.rec, "b1", 0) or not sub.alive:
+                self._p4_lock_detach(e)                     # 0x42E4C3
+            return True
+        return self._p4_lock_rect(e, False)                 # 0x42E4D2：脱离后内收，收完自灭
+
+    def _beh_42E520(self, e) -> bool:
+        """`0x42E520`（凛/鼠标；v5=0x42EB30 同）：自动索敌——0x43BD50 走 43C 表找
+        可锁定（0x43AE60>0）且 L1 最近者，8.8 定速 ((父[0x1C]&1)?3:11)/2 追踪
+        （[0x4AB5A4]/[0x4AB5A8] 任一非 0 减半）；无目标则原地。"""
+        sub = e.p.get("sub")
+        if sub is None or not sub.alive:
+            return self._p4_lock_rect(e, False)
+        best_x = best_y = 0x2710                            # 0x43BD5D 初始 (10000,10000)
+        for t in self.p4_q43c:
+            if not t.alive or self.p4_43ae60(t) == 0:
+                continue
+            dx = abs(t.s32(4) - e.s32(4)) + abs(t.s32(8) - e.s32(8))
+            if dx < abs(best_x - e.s32(4)) + abs(best_y - e.s32(8)):
+                best_x, best_y = t.s32(4), t.s32(8)
+        hit = (best_x != 0x2710 or best_y != 0x2710)
+        if hit:
+            sp = ((sub.g32(0x1C) & 1) and 3 or 11)
+            if self.p4_stat.get(0x4AB5A4, 0) or self.p4_stat.get(0x4AB5A8, 0):
+                sp >>= 1                                    # 0x42E57F
+            dx, dy = best_x - e.s32(4), best_y - e.s32(8)
+            nx, ny = self.p4_45aa80(dx, dy)                 # 0x40231F：定长归一（0x1000=1.0）
+            e.d32(8, (e.s32(8) + ((nx * dy * sp) >> 12)) & 0xFFFFFFFF)
+            e.d32(4, (e.s32(4) + ((nx * dx * sp) >> 12)) & 0xFFFFFFFF)
+            if e.node is not None:
+                nd = e.node
+                nd.dst = (nd.dst[0] + ((nx * dx * sp) >> 12), nd.dst[1] + ((nx * dy * sp) >> 12))
+        self._p4_lock_rect(e, True)                         # 0x42E5D8
+        if not getattr(self.inp.rec, "b1", 0) or not sub.alive:
+            self._p4_lock_detach(e)
+        return True
+
+    def _beh_42E660(self, e) -> bool:
+        """`0x42E660`（漢/鼠标；v6=0x42EC70 同）：绕自机横摆——pos=自机+[0x1C]，
+        自机 0x48 邻域内有敌（0x401280）则 [0x1C] ±2 朝敌钳 ±0x30，否则衰减 ∓2；
+        dst=(x−0x90, y−0x30)；矩形动画；父亡脱离（无松键门）。"""
+        sub = e.p.get("sub")
+        if sub is None or not sub.alive:
+            return self._p4_lock_rect(e, False)
+        sx, sy = self.p4_stat.get(0x56CC8C, 0), self.p4_stat.get(0x56CC90, 0)
+        off = e.s32(0x1C)
+        e.d32(4, sx & 0xFFFFFFFF)
+        e.d32(8, (sy + off) & 0xFFFFFFFF)
+        hit = False
+        for t in self.p4_q43c:                              # 0x401280(0x43BD50) 同族点测
+            if t.alive and abs(t.s32(4) - e.s32(4)) < 0x48 and abs(t.s32(8) - e.s32(8)) < 0x48:
+                hit = True
+                if e.s32(8) >= t.s32(8):
+                    off = -0x30 if off - 2 < -0x30 else off - 2
+                else:
+                    off = 0x30 if off + 2 > 0x30 else off + 2
+                break
+        if not hit and off != 0:
+            off += -2 if off >= 0 else 2                    # 0x42E730 衰减
+        e.d32(0x1C, off & 0xFFFFFFFF)
+        if e.node is not None:
+            nd = e.node
+            nd.dst = (e.s32(4) - 0x90, e.s32(8) - 0x30)
+        self._p4_lock_rect(e, True)                         # 0x42E771
+        if sub is not None and not sub.alive:
+            self._p4_lock_detach(e)                         # 0x42E781（无松键门）
+        return True
+
+    def _beh_42E810(self, e) -> bool:
+        """`0x42E810`（选机3/鼠标；v7=0x42EE20 同）：螺旋收敛——[0x20] 计数，
+        绕自机 r=200×(0x78−t)/0x78 角 40t 旋转（40159B cos/401A50 sin，8.8）；
+        t≥0x5A → byte[0x10]=1（可碰撞）；松键/父亡 → [0x24]=0、[0x1C]=−(0x78−t)×5/60；
+        脱离后 [0x1C] 每帧 −1，≤ −0x50 自灭。无矩形动画。"""
+        sub = e.p.get("sub")
+        t = e.s32(0x20)
+        if sub is not None and sub.alive:
+            sx, sy = self.p4_stat.get(0x56CC8C, 0), self.p4_stat.get(0x56CC90, 0)
+            r = 200 * (0x78 - t)
+            ang = 40 * t
+            dx = (page4_cos(ang) * r) >> 8
+            dy = (page4_sin(ang) * r) >> 8
+            e.d32(4, (sx + dx - 0x30) & 0xFFFFFFFF)
+            e.d32(8, (sy + dy - 0x30) & 0xFFFFFFFF)
+            if e.node is not None:
+                e.node.dst = (e.s32(4) - 0x30, e.s32(8) - 0x30)
+            if t >= 0x5A and e.s32(0x1C) == 0:
+                if hasattr(e, "m"):
+                    e.m[0x10] = 1
+                else:
+                    e.raw[0x10] = 1                         # 0x42E903
+            if not getattr(self.inp.rec, "b1", 0) or not sub.alive:
+                k = 0x78 - t
+                k = k + 4 * k if k >= 0 else -(4 * -k + k)  # 0x42E91E ×5 向零
+                e.d32(0x1C, ((-k * 0x99999999 >> 34) if False else (k // 60) * -1) & 0xFFFFFFFF)
+                # 0x42E93D：-(0x78−t)*5 与 0x99999999 魔数除 60 ⇒ [0x1C] = −(0x78−t)/12
+                e.d32(0x1C, (-(k // 12)) & 0xFFFFFFFF)
+                self._p4_lock_detach(e)
+        else:
+            if e.s32(0x1C) > -0x50:
+                sx, sy = self.p4_stat.get(0x56CC8C, 0), self.p4_stat.get(0x56CC90, 0)
+                r = 200 * t
+                ang = 40 * t
+                dx = (page4_cos(ang) * r * -5) >> 8
+                dy = (page4_sin(ang) * r * -5) >> 8
+                e.d32(4, (sx + dx - 0x30) & 0xFFFFFFFF)
+                e.d32(8, (sy + dy - 0x30) & 0xFFFFFFFF)
+                if e.node is not None:
+                    e.node.dst = (e.s32(4) - 0x30, e.s32(8) - 0x30)
+            else:
+                return False                                # 0x42E9DC 自灭
+        e.d32(0x20, (t + 1) & 0xFFFFFFFF)                   # 0x42E9C9
+        if e.s32(0x1C) != 0:
+            e.d32(0x1C, (e.s32(0x1C) - 1) & 0xFFFFFFFF)
+        return True
+
     def p4_fire_slot(self, owner, type_word, vel, dx: int) -> None:
         """`0x430400` 造记录 + `0x430290` 入 `0x4AD46C`：从**发射者子对象**位置发弹。
 

@@ -2179,6 +2179,9 @@ class Pages(Page4Mixin):
             if callable(e.beh):                       # 页4：行为直接是函数对象
                 e.alive = bool(e.beh(self, e))
                 continue
+            if isinstance(e.beh, int):                # 页4：int 真址 → p4_call_behaviour
+                e.alive = bool(self.p4_call_behaviour(e))
+                continue
             if e.beh == "open_timeline":
                 self._open_timeline(e)
             elif e.beh == "title_timeline":
