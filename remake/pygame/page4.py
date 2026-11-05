@@ -2077,6 +2077,90 @@ ENT2D_INIT = {
 }
 
 
+# 0x24 族高频行为转写（2026-11-06）
+
+def _beh_411990(self, e) -> bool:
+    """`0x411990`（0x2400000E，×266 最高频）：匀速直线 + 出屏/HP 门自灭。
+
+    [0x4] += [0x20]; [0x8] += [0x24]; node dst=(x−0x18, y−0x18)；
+    0x4021E9(0x18) 出屏测（margin 24）＋ [0x18]≠0 → 活，否则灭。
+    """
+    vx, vy = e.s32(0x20), e.s32(0x24)
+    e.d32(0x04, (e.s32(4) + vx) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(8) + vy) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    # 0x4021E9(0x18) 出屏测
+    x, y = e.s32(4), e.s32(8)
+    margin = 0x18
+    on_screen = (-margin < x < 0x280 + margin and -margin < y < 0x1E0 + margin)
+    return on_screen and e.g32(0x18) != 0
+
+
+def _beh_410E10(self, e) -> bool:
+    """`0x410E10`（0x24000001，×224）：亚像素直线+正弦减速+周期开火。
+
+    [0x1C] += [0x20](=−32)；[0x20] += [0x24](=±1)；[0x20] 到 ±0x20 → [0x24] 反转
+    （正弦周期）；x 低 2 位=0 时 0x45A790(node,0,[0x28],0,[0x28])（帧动画）；
+    y=[0x1C]>>3（定点 8.3 → x=src−2）；x < −0x18 或 HP=0 → 灭；
+    [0x20]==0 且 [0x24]==[0x2C] → 0x43B070(e,0) 开火。
+    """
+    accel = e.s32(0x20)
+    sub = e.s32(0x1C)
+    flip = e.s32(0x24)
+    sub = (sub + accel) & 0xFFFFFFFF
+    sub_s = sub - 0x100000000 if sub & 0x80000000 else sub
+    accel = (accel + flip) & 0xFFFFFFFF
+    accel_s = accel - 0x100000000 if accel & 0x80000000 else accel
+    e.d32(0x1C, sub)
+    e.d32(0x20, accel)
+    if accel_s == 0x20:
+        e.d32(0x24, 0xFFFFFFFF)        # 反转：加速衰减
+    elif accel_s == -0x20:
+        e.d32(0x24, 1)
+    # 帧动画：x 低 2 位=0 时
+    if (e.s32(4) & 3) == 0:
+        e.d32(0x28, e.s32(0x28))       # 原版 0x45A790(node,0,0x28,0,0x28)（src 步进）
+    # y 门：node dst.x == 0x120 → [0x28]=−0x30；== 0 → [0x28]=0x30
+    if e.node is not None:
+        if e.node.dst[0] == 0x120:
+            e.d32(0x28, 0xFFFFFFD0)
+        elif e.node.dst[0] == 0:
+            e.d32(0x28, 0x30)
+    # 开火
+    if accel_s == 0 and flip == e.s32(0x2C):
+        self.p4_43B070(e, 0)           # 0x40213F → 0x43B070
+    # 位移：x −= 2；y = [0x1C] >> 3（定点）
+    e.d32(4, (e.s32(4) - 2) & 0xFFFFFFFF)
+    y = sub_s >> 3
+    e.d32(8, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, y - 0x18)
+    return e.s32(4) >= -0x18 and e.g32(0x18) != 0
+
+
+def _beh_411200(self, e) -> bool:
+    """`0x411200`（0x24000005/06，×25）： scripted 移动 + 方向朝敌 + 周期开火。
+    逐条对 0x411200 反汇编（读定时追加精修）。"""
+    # 暂用 v0 式匀速近似：[0x20] 为打包速度
+    return _beh_411990(self, e)
+
+
+def _beh_411040(self, e) -> bool:
+    """`0x411040`（0x24000003，×18）：[0x20]=−32 匀速左移，[0x24]=rec3（火口）。"""
+    return _beh_411990(self, e)
+
+
+def _beh_411120(self, e) -> bool:
+    """`0x411120`（0x24000004，×5）：[0x20]=rec1<<3 匀速。"""
+    return _beh_411990(self, e)
+
+
+def _beh_411C10(self, e) -> bool:
+    """`0x411C10`（0x24000011）：[0x20]=*rec3（引用速度）、[0x24]=rec3[1]。"""
+    return _beh_411990(self, e)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -3561,6 +3645,10 @@ P4_BEH: dict[int, object] = {
     0x446D30: _beh_446D30,
     0x446E20: _beh_446E20,
     0x446F10: _beh_446F10,
+    # 0x24 族高频行为
+    0x411990: _beh_411990, 0x410E10: _beh_410E10,
+    0x411200: _beh_411200, 0x411040: _beh_411040,
+    0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
     # （_beh_<真址:X>，v4..v7 与 v0..v3 逐字节同语义）
     0x447410: _beh_447410,
