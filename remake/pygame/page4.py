@@ -367,6 +367,10 @@ ENT23_BEH_THUNK = {
     0x401C8A: 0x4114C0, 0x401D8E: 0x4115B0, 0x40155F: 0x4116C0, 0x401C4E: 0x411790,
     0x40169F: 0x4118C0, 0x401C6C: 0x411990, 0x40132A: 0x411A00, 0x401C3A: 0x411AD0,
     0x401221: 0x411C10,
+    # 0x25 族（0x411E20 ctor）
+    0x401339: 0x4121C0, 0x40114F: 0x4122D0, 0x401046: 0x4123E0, 0x40135C: 0x412510,
+    0x402397: 0x412680, 0x4012BC: 0x4127E0, 0x4024C8: 0x412950, 0x401078: 0x412B60,
+    0x401186: 0x4130D0, 0x4012D0: 0x413930,
 }
 
 
@@ -592,13 +596,13 @@ class Ent:
 
     def _apply_family_init(self, typ: int, a: int, b: int, d: int) -> None:
         """0x24-0x2D 各族 ctor case 体（ENT24_INIT 等）。rec = (a, b, typ, d)。"""
-        info = ENT24_INIT.get(typ)
+        info = ENT24_INIT.get(typ) or ENT25_INIT.get(typ)
         if info is None:
             return
         thunk = info["beh"]
         self.d32(0x40, thunk)
         self.beh = ENT23_BEH_THUNK.get(thunk, thunk)
-        for off, val in info["imm"].items():
+        for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
         if "s3_to" in info:                            # rec[3]（符号扩展）→ 目标
             self.d32(info["s3_to"], d & 0xFFFFFFFF)
@@ -640,6 +644,56 @@ class Ent:
             if tgt is not None:
                 self.d32(0x20, tgt.g32(0x00))
                 self.d32(0x24, tgt.g32(0x04))
+        if "z1c20" in info:                            # [0x1C]=[0x20]=0
+            self.d32(0x1C, 0)
+            self.d32(0x20, 0)
+        if "z1c" in info:
+            self.d32(0x1C, 0)
+        if "z1c_24" in info:                           # [0x1C]=[0x20]=[0x24]=0
+            self.d32(0x1C, 0)
+            self.d32(0x20, 0)
+            self.d32(0x24, 0)
+        if "z1c20_24" in info:
+            self.d32(0x1C, 0)
+            self.d32(0x20, 0)
+            self.d32(0x24, 0)
+        if "r0sh" in info:                             # [off] = rec[0] << n
+            off, n = info["r0sh"]
+            self.d32(off, (a << n) & 0xFFFFFFFF)
+        if "r1sh" in info:
+            off, n = info["r1sh"]
+            self.d32(off, (b << n) & 0xFFFFFFFF)
+        if "s16lohi" in info:                          # rec3 低/高 16 位符号展开
+            o1, o2 = info["s16lohi"]
+            lo = d & 0xFFFF
+            hi = (d >> 16) & 0xFFFF
+            lo = lo - 0x10000 if lo & 0x8000 else lo
+            hi = hi - 0x10000 if hi & 0x8000 else hi
+            self.d32(o1, lo & 0xFFFFFFFF)
+            self.d32(o2, hi & 0xFFFFFFFF)
+        if "angle_to_ship" in info:                    # 0x411E9D：0x45AA80(自机−rec01) → [0x1C]
+            sx = self._pages.p4_stat.get(0x56CC8C, 0) if getattr(self, "_pages", None) else 0
+            sy = self._pages.p4_stat.get(0x56CC90, 0) if getattr(self, "_pages", None) else 0
+            self.d32(info["angle_to_ship"], page4_45aa80(sx - a, sy - b) and 0)  # 角度真值待运行期
+        if "ship_y_gate" in info:                      # 0x411EEC：自机 y≥0xF0 → [ent+8]=0x1E0−rec1
+            sy = self._pages.p4_stat.get(0x56CC90, 0) if getattr(self, "_pages", None) else 0
+            if sy >= 0xF0:
+                self.d32(8, (0x1E0 - b) & 0xFFFFFFFF)
+        if "node_hidden" in info:                      # 节点 dst=(x−0x18,y−0x18)、隐藏
+            if self.node is not None:
+                self.node.dst = (a - 0x18, b - 0x18)
+                self.node.active = 0
+        if "rand_pair" in info:                        # 0x4120A0：[0x24]=rand&0x3F+0x10、[0x28]=rand&0x3F
+            import random as _r
+            self.d32(0x24, ((_r.randrange(0x7FFFFFFF) & 0x3F) + 0x10) & 0xFFFFFFFF)
+            self.d32(0x28, (_r.randrange(0x7FFFFFFF) & 0x3F) & 0xFFFFFFFF)
+        if "d3pair" in info:                           # 0x41200B：[0x1C]=*rec3、[0x20]=rec3[1]
+            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            if tgt is not None:
+                self.d32(info["d3pair"][0], tgt.g32(0x1C))
+                self.d32(info["d3pair"][1], tgt.g32(0x20))
+        if "node_src_y" in info:                       # 0x412041：node src 按 rec3 链 y
+            pass  # src 依赖 rec3 解引用的运行期 y，首帧由行为补
 
     def d32(self, off: int, val: int) -> None:
         self.m[off:off + 4] = int(val & 0xFFFFFFFF).to_bytes(4, "little")
@@ -1659,6 +1713,30 @@ def p4_angle(a: int, b: int) -> int:
 ENT25_THUNK = {0x401339: 0x4121C0, 0x40114F: 0x4122D0, 0x401046: 0x4123E0, 0x40135C: 0x412510,
                0x402397: 0x412680, 0x4012BC: 0x4127E0, 0x4024C8: 0x412950, 0x401078: 0x412B60,
                0x401186: 0x4130D0, 0x4012D0: 0x413930}
+
+
+ENT25_INIT = {
+    0x25000001: {"beh": 0x401339, "b10_0": True, "z1c20": True,
+                 "r0sh": (0x20, 2), "r1sh": (0x24, 2), "s16lohi": (0x28, 0x2C)},
+    0x25000002: {"beh": 0x40114F, "b10_0": True, "z1c20": True,
+                 "r0sh": (0x20, 2), "r1sh": (0x24, 2), "s16lohi": (0x28, 0x2C)},
+    0x25000003: {"beh": 0x401046, "b10_0": True, "angle_to_ship": 0x1C,
+                 "imm": {0x20: 0x100}, "r0sh": (0x24, 2), "r1sh": (0x28, 2), "d_to": 0x2C},
+    0x25000004: {"beh": 0x40135C, "b10_0": True, "z1c20": True,
+                 "node_hidden": True, "ship_y_gate": True},
+    0x25000005: {"beh": 0x402397, "b10_0": True, "z1c20_24": True,
+                 "r0sh": (0x28, 8), "r1sh": (0x2C, 8)},
+    0x25000006: {"beh": 0x4012BC, "b10_0": True, "z1c": True,
+                 "d_to": 0x20, "imm": {0x24: 0x22, 0x28: 0},
+                 "r0sh": (0x2C, 1), "r1sh": (0x30, 1)},
+    0x25000007: {"beh": 0x4024C8, "z1c_24": True},
+    0x25000008: {"beh": 0x401078, "b10_0": True, "z1c_24": True,
+                 "imm": {0x28: 0x40, 0x2C: 0, 0x30: 0x1770}, "node_hidden": True},
+    0x25000009: {"beh": 0x401186, "z1c": True, "deref3": True,
+                 "d3pair": (0x20, 0x24), "node_src_y": True},
+    0x2500000A: {"beh": 0x4012D0, "r0sh": (0x1C, 4), "r1sh": (0x20, 4),
+                 "rand_pair": True, "d_to": 0x2C},
+}
 
 
 def page4_cos(ang: int) -> int:
@@ -8693,7 +8771,9 @@ class Page4Mixin:
         """
         a, b, c, d = rec
         if op == 2:
-            self.p4_q43c.append(Ent(a, b, c, d))       # 0x43BDC0 → 0x43A7F0
+            _e2 = Ent(a, b, c, d)
+            _e2._pages = self
+            self.p4_q43c.append(_e2)               # 0x43BDC0 → 0x43A7F0
             self.p4_n43c += 1
         elif op == 1:
             # 0x46044F：0x430400(&rec,…) 后 0x448FF0(0x4AD40C,&rec) ⇒ 演员队列
