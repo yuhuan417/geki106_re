@@ -2161,6 +2161,42 @@ def _beh_411C10(self, e) -> bool:
     return _beh_411990(self, e)
 
 
+def _beh_416A50(self, e) -> bool:
+    """`0x416A50`（0x27000007，×608 最高频）：渐进逼近 + 单次开火 + 0x416440。
+
+    [0x20] 计数器：x<0x140 且 t<0x28 → t++；t>0x18 且 x>0x230 → t−−；
+    x += t>>3（渐进水平速度）；x > 0x1A4 且 [0x1C]≠0 → 0x43B070(e,0) 开火、[0x1C]=0；
+    尾调 0x416440（boss 0x27000011 spawner）；x≥0x298 或 HP=0 → 灭。
+    """
+    t = e.s32(0x20)
+    if t < 0x28 and e.s32(4) < 0x140:
+        t += 1
+    if t > 0x18 and e.s32(4) > 0x230:
+        t -= 1
+    e.d32(0x20, t & 0xFFFFFFFF)
+    e.d32(4, (e.s32(4) + (t >> 3)) & 0xFFFFFFFF)
+    if e.s32(4) > 0x1A4 and e.s32(0x1C) != 0:
+        self.p4_43B070(e, 0)
+        e.d32(0x1C, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    # 0x401F91 → 0x416440：0x27000011 boss spawner 检查（spawned 时跳过后续）
+    # 复刻侧暂不实现 boss spawner 的内联触发（0x27000011 由 op2 直接生成）
+    return e.g32(0x18) != 0 and e.s32(4) < 0x298
+
+
+def _beh_416940(self, e) -> bool:
+    """`0x416940`（0x27000006，×32）：正弦摆动 + 定时开火。"""
+    t = e.s32(0x20)
+    e.d32(0x24, 2 if e.s32(8) <= 0xF0 else -2)     # 0x416004 的持续判断
+    # 0x401BEF → 0x416940 本体待精修，暂用匀速直线近似
+    return _beh_411990(self, e)
+
+
+def _beh_416A50_wrap(e_self, e):
+    return _beh_416A50(e_self, e)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -3647,6 +3683,7 @@ P4_BEH: dict[int, object] = {
     0x446F10: _beh_446F10,
     # 0x24 族高频行为
     0x411990: _beh_411990, 0x410E10: _beh_410E10,
+    0x416A50: _beh_416A50, 0x416940: _beh_416940,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
