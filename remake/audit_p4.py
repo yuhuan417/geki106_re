@@ -1379,6 +1379,9 @@ def main():
         def set_pos(self, x, y):
             self.x, self.y = x, y
     class _Z(page4.Page4Mixin):
+        def p4_frame_no(self) -> int:
+            return self.p4_stat.get(0x56CCA8, 0)
+
         def __init__(self, stat=None):
             self.calls = []
             self.p4_stat = dict(stat or {})
