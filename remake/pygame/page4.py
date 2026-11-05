@@ -603,8 +603,8 @@ class Ent:
 
     def _apply_family_init(self, typ: int, a: int, b: int, d: int) -> None:
         """0x24-0x2D 各族 ctor case 体（ENT24_INIT 等）。rec = (a, b, typ, d)。"""
-        info = (ENT24_INIT.get(typ) or ENT25_INIT.get(typ)
-                or ENT26_INIT.get(typ) or ENT27_INIT.get(typ))
+        info = (ENT24_INIT.get(typ) or ENT25_INIT.get(typ) or ENT26_INIT.get(typ)
+                or ENT27_INIT.get(typ) or ENT28_INIT.get(typ))
         if info is None:
             return
         thunk = info["beh"]
@@ -757,6 +757,57 @@ class Ent:
             v = d % 3
             self.d32(0x40, (0x4016F9, 0x4013A7, 0x4020E5)[v])
             self.beh = {0x4016F9: 0x4185C0, 0x4013A7: 0x4185C0, 0x4020E5: 0x4185C0}.get(self.d32(0x40, 0) or 0, 0)
+        if "r1_20" in info:                            # [0x20] = rec[1]（原值）
+            self.d32(0x20, b & 0xFFFFFFFF)
+        if "r0_1C" in info:
+            self.d32(0x1C, a & 0xFFFFFFFF)
+        if "abs3_24" in info:                          # [0x24] = |rec[3]|（0x418CF3 cdq/xor/sub）
+            v = d - 0x100000000 if d & 0x80000000 else d
+            self.d32(0x24, abs(v) & 0xFFFFFFFF)
+        if "g0_gate" in info:                          # rec[3]>0 → K else N（setg/dec on rec3）
+            off, N, K = info["g0_gate"]
+            self.d32(off, (K if d > 0 else N) & 0xFFFFFFFF)
+        if "s12_gate2b" in info:
+            off, N, K, cc = info["s12_gate2b"]
+            cond = (d > 0) if cc == "g0" else (b >= 0xF0)
+            vv = K if cond else (((-1) & N) + K)
+            self.d32(off, vv & 0xFFFFFFFF)
+        if "rand_spawn" in info:                       # 0x418D5A：随机 x ∈[0x298,0x298+0x3F]、y=0x114
+            import random as _r
+            rx = 0x298 + (_r.randrange(0x7FFFFFFF) & 0x3F)
+            self.d32(4, rx & 0xFFFFFFFF)
+            self.d32(8, 0x114)
+            self.d32(0x20, (rx << 4) & 0xFFFFFFFF)
+            if self.node is not None:
+                self.node.dst = (rx - 0x18, 0x114 - 0x18)
+        if "rand_pair2" in info:                       # 0x418D8D：[0x2C] = rand&0x3F + 0x10
+            import random as _r
+            self.d32(0x2C, ((_r.randrange(0x7FFFFFFF) & 0x3F) + 0x10) & 0xFFFFFFFF)
+        if "r1_y8" in info:                            # 0x418F35：[ent+8] += (y≤F0 ? 0x1E : −0x3C)
+            v = 0x1E if b <= 0xF0 else -0x3C
+            self.d32(8, (b + v) & 0xFFFFFFFF)
+        if "node_dst_18" in info:
+            if self.node is not None:
+                self.node.dst = (a - 0x18, b - 0x18)
+        if "z24" in info:
+            self.d32(0x24, 0)
+        if "z28" in info:
+            self.d32(0x28, 0)
+        if "z2C" in info:
+            self.d32(0x2C, 0)
+        if "r1_2C" in info:
+            self.d32(0x2C, b & 0xFFFFFFFF)
+        if "d3_28" in info:                            # [0x28] = rec[3]
+            self.d32(0x28, d & 0xFFFFFFFF)
+        if "r3sh" in info:                             # [off] = rec[3] << n
+            off, n = info["r3sh"]
+            self.d32(off, (d << n) & 0xFFFFFFFF)
+        if "deref3_all" in info:                       # 0x41915B：全字段从 rec3[0x18..0x30] 拷
+            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            if tgt is not None:
+                for so, to in ((0x18, 0x18), (0x1C, 0x1C), (0x20, 0x20),
+                               (0x24, 0x24), (0x28, 0x28), (0x2C, 0x2C), (0x30, 0x30)):
+                    self.d32(to, tgt.g32(so))
         if "d3pair" in info:                           # 0x41200B：[0x1C]=*rec3、[0x20]=rec3[1]
             tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
             if tgt is not None:
@@ -1877,6 +1928,53 @@ ENT27_INIT = {
     0x27000010: {"beh": 0x4013A7, "z1c_20_24_28_2C": True, "d3mod3": True},
     0x27000011: {"beh": 0x4021E4, "z1c_24_28": True, "d_to_ptr": True,  # [0xC]=rec3[0xC]；拷父节点；[0x20]=rec1<<5
                  "r1sh": (0x20, 5)},
+}
+
+
+# 0x28 族（关6）ctor case 表（0x418CB0，跳表 0x419208，24 型）——2026-11-06 逐 case 读定
+# case 体在 0x418CDA..0x419208。case17 跳表项 0（无 ctor = 无行为）；case14/15 共体 beh 0x401230
+ENT28_INIT = {
+    0x28000001: {"beh": 0x40164A, "z1c": True, "r1_20": True,
+                 "abs3_24": True, "g0_gate": (0x28, 0, -1)},   # rec3>0 → 0; ≤0 → −1
+    0x28000002: {"beh": 0x401433, "z1c": True, "r1sh": (0x20, 4),
+                 "imm": {0x24: 0x3C}, "cmpgate": (0x28, 0xC, -6, "ge140"), "d_to": 0x2C},
+    0x28000003: {"beh": 0x4019F6, "z1c": True, "rand_spawn": True,       # 0x418D5A 随机落点
+                 "r0sh": (0x20, 4), "imm": {0x24: 0x1140},
+                 "rand_pair2": True},
+    0x28000004: {"beh": 0x4022E8, "z1c": True, "r0sh": (0x20, 4), "z24": True,
+                 "d_to": 0x28, "imm": {0x2C: 3, 0x30: 0}},  # rec3→[0x30]
+    0x28000005: {"beh": 0x401B8B, "z1c": True, "r1_20": True, "d_to": 0x24},
+    0x28000006: {"beh": 0x40248C, "z1c": True, "r1_20": True, "d_to": 0x24,
+                 "imm": {0x28: -4}},
+    0x28000007: {"beh": 0x40254A, "z1c": True, "r0sh": (0x20, 4), "r1sh": (0x24, 4),
+                 "imm": {0x28: 0x60, 0x2C: 0, 0x30: 0}},
+    0x28000008: {"beh": 0x4019F1, "z1c": True, "r1_20": True,
+                 "r1sh": (0x24, 4), "imm": {0x28: 0x10}, "d_to": 0x2C},
+    0x28000009: {"beh": 0x4021C1, "z1c": True, "s12_gate2": (0x20, 0x1E, -0x3C),  # y≥F0: −0x3C; y<F0: 0x1E
+                 "r1_y8": True, "d_to": 0x20, "z24": True,
+                 "node_dst_18": True},                             # node dst=(x−0x18,y−0x18)
+    0x2800000A: {"beh": 0x401B3B, "z1c": True, "r1sh": (0x20, 3), "d_to": 0x28},
+    0x2800000B: {"beh": 0x401CE4, "z1c": True, "r1sh": (0x20, 2), "imm": {0x24: -0x20}},
+    0x2800000C: {"beh": 0x402018, "z1c": True, "r0sh": (0x20, 4),
+                 "imm": {0x24: -0x60}, "d_to": 0x28, "r1_2C": True},
+    0x2800000D: {"beh": 0x401523, "z1c": True, "r1_20": True,
+                 "r0sh": (0x28, 2), "z24": True},
+    0x2800000E: {"beh": 0x401E92, "z1c": True, "imm": {0x20: -8},
+                 "r1sh": (0x24, 3), "z28": True, "d_to": 0x2C},
+    0x2800000F: {"beh": 0x4013AC, "z1c": True, "r1_20": True, "d_to": 0x24, "d3_28": True},
+    0x28000010: {"beh": 0x4024B9, "z1c": True, "r0sh": (0x20, 2), "r1sh": (0x24, 2),
+                 "imm": {0x28: 0x48, 0x2C: 0}},
+    0x28000011: {"beh": 0x4018BB, "z1c": True, "z20_24": True},       # 0x418E30 case体（r0sh/r1sh<<4+0x60）
+    0x28000012: {"beh": 0x4010AA, "z1c": True, "imm": {0x20: 0x40},
+                 "r0sh": (0x24, 3), "r1sh": (0x28, 3), "z2C": True},
+    0x28000013: {"beh": 0x4018F2, "z1c_20_24_28_2C": True},
+    0x28000014: {"beh": 0x401230, "r0_1C": True, "r1_20": True,
+                 "imm": {0x24: 0, 0x28: 0, 0x2C: 0x35, 0x30: 0}},
+    0x28000015: {"beh": 0x401230, "deref3_all": True},                # 0x41915B：全字段从 rec3[0x18..0x30] 拷
+    0x28000016: {"beh": 0x4012B7, "z1c": True, "d_to": 0x20},
+    0x28000017: {},                                                   # 跳表 0 = 无 ctor 无行为
+    0x28000018: {"beh": 0x401B18, "r3sh": (0x1C, 4), "z20_24": True,
+                 "r0sh": (0x28, 3), "r1sh": (0x2C, 3)},
 }
 
 
