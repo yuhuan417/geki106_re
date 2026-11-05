@@ -2197,6 +2197,58 @@ def _beh_416A50_wrap(e_self, e):
     return _beh_416A50(e_self, e)
 
 
+def _beh_4127E0(self, e) -> bool:
+    """`0x4127E0`（0x25000006 ×184 / 0x25000007 ×45 / 0x25000008 ×3 共用）：
+    三阶段运动（0x1C 帧计数）：t<0x18 弹跳动画（x%4==3 → node 外扩 ±0x30）；
+    t==0x18 → 可视化切换（type==0x25000007 → b10=1）+ 0x45AA80 朝自机方向 → [0x28]；
+    t>0x20（=rec[3]）→ 正弦螺旋（[0x28] 角速度、[0x24] 半径每帧递减≤14、
+    x=[0x2C]+cos*[0x24]>>8、y=[0x30]+sin*[0x24]>>8，位移/2 定屏）；出屏/HP 门自灭。
+    """
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < 0x18:
+        if (t & 3) == 3:                                # 0x4127F1 弹跳动画
+            if e.node is not None:
+                e.node.rect = (e.node.rect[0] - 0x30, e.node.rect[1],
+                               e.node.rect[2] - 0x30, e.node.rect[3])
+    elif t == 0x18:                                     # 0x41281A 起飞
+        if e.g32(0x14) == 0x25000007:
+            e.m[0x10] = 1
+        sx = self.p4_stat.get(0x56CC8C, 0)
+        sy = self.p4_stat.get(0x56CC90, 0)
+        e.d32(0x28, page4_45aa80(sx - e.s32(4), sy - e.s32(8))[0])  # 朝自机角
+    elif t > e.s32(0x20):                               # 0x412853 正弦螺旋
+        if e.g32(0x14) == 0x25000006 and e.node is not None:
+            e.node.active = 0 if e.node.active else 1   # 0x41285C 闪烁
+        r = e.s32(0x24)
+        if r > 0xE:
+            r -= 1
+            e.d32(0x24, r)
+        ang = e.s32(0x28)
+        c = page4_cos(ang)
+        s_ = page4_sin(ang)
+        e.d32(0x2C, (e.s32(0x2C) + ((c * r + 0x7F) >> 8)) & 0xFFFFFFFF)
+        e.d32(0x30, (e.s32(0x30) + ((s_ * r + 0x7F) >> 8)) & 0xFFFFFFFF)
+        x2, y2 = e.s32(0x2C), e.s32(0x30)
+        e.d32(8, (x2 >> 1) & 0xFFFFFFFF)
+        e.d32(4, (y2 >> 1) & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.dst = ((y2 >> 1) - 0x18, (x2 >> 1) - 0x18)
+    # 出屏测 margin 0x18 + HP 门
+    x, y = e.s32(4), e.s32(8)
+    on_screen = (-0x18 < x < 0x280 + 0x18 and -0x18 < y < 0x1E0 + 0x18)
+    return on_screen and e.g32(0x18) != 0
+
+
+def page4_45aa80(dx: int, dy: int):
+    """0x45AA80：(dx,dy) 归一（返回 (nx, ny)，0x1000=1.0）。"""
+    import math as _m
+    n = _m.hypot(dx, dy)
+    if n == 0:
+        return (0, 0)
+    return (int(dx / n * 0x1000), int(dy / n * 0x1000))
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -3684,6 +3736,7 @@ P4_BEH: dict[int, object] = {
     # 0x24 族高频行为
     0x411990: _beh_411990, 0x410E10: _beh_410E10,
     0x416A50: _beh_416A50, 0x416940: _beh_416940,
+    0x4127E0: _beh_4127E0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
