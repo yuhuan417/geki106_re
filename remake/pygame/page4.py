@@ -371,6 +371,13 @@ ENT23_BEH_THUNK = {
     0x401339: 0x4121C0, 0x40114F: 0x4122D0, 0x401046: 0x4123E0, 0x40135C: 0x412510,
     0x402397: 0x412680, 0x4012BC: 0x4127E0, 0x4024C8: 0x412950, 0x401078: 0x412B60,
     0x401186: 0x4130D0, 0x4012D0: 0x413930,
+    # 0x26 族（0x4139F0 ctor）
+    0x4021D5: 0x414080, 0x402392: 0x414170, 0x4017F8: 0x414380, 0x401FE1: 0x414460,
+    0x4019BF: 0x4145A0, 0x401EBA: 0x4148B0, 0x401C85: 0x414B50, 0x401CA8: 0x414C70,
+    0x401F46: 0x414E40, 0x401C3F: 0x414FB0, 0x4010FA: 0x415140, 0x4020E0: 0x415200,
+    0x401677: 0x415410, 0x4011D6: 0x415480, 0x401578: 0x4156D0, 0x401906: 0x4158A0,
+    0x40124E: 0x415980, 0x401EA6: 0x415A90, 0x4022D4: 0x415BB0, 0x401CD0: 0x415CE0,
+    0x401E9C: 0x415D70, 0x4015F0: 0x415E60, 0x4021CB: 0x414D60,
 }
 
 
@@ -596,7 +603,7 @@ class Ent:
 
     def _apply_family_init(self, typ: int, a: int, b: int, d: int) -> None:
         """0x24-0x2D 各族 ctor case 体（ENT24_INIT 等）。rec = (a, b, typ, d)。"""
-        info = ENT24_INIT.get(typ) or ENT25_INIT.get(typ)
+        info = ENT24_INIT.get(typ) or ENT25_INIT.get(typ) or ENT26_INIT.get(typ)
         if info is None:
             return
         thunk = info["beh"]
@@ -687,6 +694,29 @@ class Ent:
             import random as _r
             self.d32(0x24, ((_r.randrange(0x7FFFFFFF) & 0x3F) + 0x10) & 0xFFFFFFFF)
             self.d32(0x28, (_r.randrange(0x7FFFFFFF) & 0x3F) & 0xFFFFFFFF)
+        if "z1c_20" in info:
+            self.d32(0x1C, 0)
+            self.d32(0x20, 0)
+        if "z1c_24_28" in info:
+            self.d32(0x1C, 0)
+            self.d32(0x20, 0)
+            self.d32(0x24, 0)
+            self.d32(0x28, 0)
+        if "z20" in info:
+            self.d32(0x20, 0)
+        if "b10_ne0" in info:                          # byte[0x10] = (rec3 != 0)
+            self.m[0x10] = 1 if d != 0 else 0
+        if "node_vis_ne0" in info:                     # byte[节点+0x1C] = (rec3 != 0)
+            if self.node is not None:
+                self.node.active = 1 if d != 0 else 0
+        if "rand_pm4" in info:                         # 0x413A30：rand%2 → ±2 → [0x24]
+            import random as _r
+            v = 4 if (_r.randrange(0x7FFFFFFF) % 2) else 0
+            self.d32(info["rand_pm4"], ((v ^ 4) - 4 + 4 - 2) & 0xFFFFFFFF)  # neg/sbb/and 4/add −2
+        if "s12_gate" in info:                         # rec1≥0xF0 → +hi else +lo（setge/dec/and/add）
+            off, lo, hi = info["s12_gate"]
+            v = hi if b >= 0xF0 else lo
+            self.d32(off, v & 0xFFFFFFFF)
         if "d3pair" in info:                           # 0x41200B：[0x1C]=*rec3、[0x20]=rec3[1]
             tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
             if tgt is not None:
@@ -1736,6 +1766,44 @@ ENT25_INIT = {
                  "d3pair": (0x20, 0x24), "node_src_y": True},
     0x2500000A: {"beh": 0x4012D0, "r0sh": (0x1C, 4), "r1sh": (0x20, 4),
                  "rand_pair": True, "d_to": 0x2C},
+}
+
+
+# 0x26 族（关4）ctor case 表（0x4139F0，跳表 0x413E64，24 型）——2026-11-06 逐 case 读定
+# 位置索引：case 体在 0x413A19..0x413E63（见 dump），rec3 常经 word/deref 混合读
+ENT26_INIT = {
+    0x26000001: {"beh": 0x4021D5, "z1c": True, "imm": {0x20: -6},
+                 "rand_pm4": 0x24},                                # rand/2∓2 →[0x24]
+    0x26000002: {"beh": 0x402392, "z1c_24_28": True, "imm": {0x20: 4, 0x2C: 5}},
+    0x26000003: {"beh": 0x4017F8, "z1c": True, "r0sh": (0x20, 4), "r1sh": (0x24, 3),
+                 "imm": {0x28: 8}, "s12_gate": (0x2C, -0x60, 0xC0)},  # rec1≥0xF0 → +0xC0−0x60…→ −0x60/+0x60
+    0x26000004: {"beh": 0x401FE1, "z1c_20": True},
+    0x26000005: {"beh": 0x4019BF, "z20": True, "d_to": 0x1C,
+                 "imm": {0x24: 0x14, 0x28: 0x1E}},
+    0x26000006: {"beh": 0x401EBA, "d_to": 0x1C, "b10_ne0": True, "z20": True,
+                 "imm": {0x24: 0x14, 0x28: 0x9C40}, "node_vis_ne0": True},
+    0x26000007: {"beh": 0x401C85, "z1c": True, "r0sh": (0x24, 3),
+                 "imm": {0x28: -0x60, 0x2C: 6}},
+    0x26000008: {"beh": 0x401CA8, "z1c": True},                      # ← 0x413B86 亦是本 case（boss 0x26000018 spawner 引用点）
+    0x26000009: {"beh": 0x401F46, "z1c": True, "imm": {0x20: -0x1E0}, "b10_0": True},  # 0x413C57
+    0x2600000A: {"beh": 0x401C3F, "z1c": True, "imm": {0x20: -0x1E0}, "b10_0": True},  # 0x413C57 同体
+    0x2600000B: {"beh": 0x4010FA, "z1c": True},
+    0x2600000C: {"beh": 0x4020E0, "d_to": 0x20, "b10_ne0": True, "z1c": True,
+                 "imm": {0x24: 4}, "node_vis_ne0": True},
+    0x2600000D: {"beh": 0x401677, "z1c": True},
+    0x2600000E: {"beh": 0x4011D6, "z1c": True, "b10_ne0": True,
+                 "imm": {0x20: -0x10, 0x24: 0}, "d_to": 0x28},
+    0x2600000F: {"beh": 0x401578, "z1c": True, "b10_ne0": True, "d_to": 0x20,
+                 "r1sh": (0x24, 3), "s12_gate": (0x28, -0x18, 0x30)},
+    0x26000010: {"beh": 0x401906, "z1c": True, "imm": {0x20: -3, 0x24: 0}},
+    0x26000011: {"beh": 0x40124E, "z1c": True, "imm": {0x20: -2, 0x28: 7}},
+    0x26000012: {"beh": 0x40124E, "imm": {0x1C: 0x40, 0x20: 4, 0x28: 3}},
+    0x26000013: {"beh": 0x401EA6, "z1c": True, "imm": {0x20: -0x20, 0x24: 0}},
+    0x26000014: {"beh": 0x4022D4, "z1c_20": True},
+    0x26000015: {"beh": 0x401CD0, "z1c": True, "r0sh": (0x20, 6), "d_to": 0x24},
+    0x26000016: {"beh": 0x401E9C, "z1c_24_28": True, "imm": {0x20: 0x60}},
+    0x26000017: {"beh": 0x4015F0, "z1c": True, "d_to": 0x20},
+    0x26000018: {"beh": 0x4021CB, "z1c": True, "d_to": 0x20},        # 0x413BDE：rand 落点/0x244 距离衰减
 }
 
 
