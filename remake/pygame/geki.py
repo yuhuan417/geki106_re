@@ -1857,6 +1857,7 @@ class Pages(Page4Mixin):
         self.p4_finish()
 
     # ---- 页5：記錄（排行榜显示）------------------------------------------------
+    def page5_enter(self) -> None:
         """`0x452730`：装调色板 2 → SetCursorPos(320,240) → SetPeriod(0)。"""
         self.flags.clear()
         self.screen_fill = -1
