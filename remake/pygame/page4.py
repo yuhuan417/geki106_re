@@ -327,12 +327,46 @@ P4_445C00_THUNK = {
 }
 
 
+# 0x24 族（关2）ctor case 表（0x410A20，跳表 0x410CF4，17 型）——2026-11-06 逐 case 转写
+# case4/5 共体（0x410B13）：[0x1C]=rec[3]、[0x20]=(rec[1]<<16)|(rec[0]&0xFFFF)、[0x24]=0x240012、[0x28]=[0x2C]=0
+# case16：[0x20]=*rec[3]、[0x24]=rec[3][1]（解引用！）、[0x28]=rand%0x28 余数
+ENT24_INIT = {
+    0x24000001: {"beh": 0x4014CE, "imm": {0x20: -0x20, 0x24: 1, 0x28: 0x30}, "s3_to": 0x2C, "r1sh": (0x1C, 3)},
+    0x24000002: {"beh": 0x401834, "imm": {0x20: 0x40, 0x24: -1, 0x28: 0x30}, "s3_to": 0x2C, "r1sh": (0x1C, 4)},
+    0x24000003: {"beh": 0x401CEE, "imm": {0x1C: 0, 0x20: -0x20}, "d_to": 0x24},
+    0x24000004: {"beh": 0x401A73, "imm": {0x1C: 0, 0x24: -0x10}, "r1sh": (0x20, 3)},
+    0x24000005: {"beh": 0x4021AD, "imm": {0x24: 0x240012, 0x28: 0, 0x2C: 0},
+                 "p2016": True, "d3_to": 0x1C},
+    0x24000006: {"beh": 0x401AB9, "imm": {0x24: 0x240012, 0x28: 0, 0x2C: 0},
+                 "p2016": True, "d3_to": 0x1C},
+    0x24000007: {"beh": 0x401163, "imm": {0x1C: 0, 0x20: 0}},
+    0x24000008: {"beh": 0x40119A, "imm": {}},
+    0x24000009: {"beh": 0x401C8A, "imm": {0x1C: 0}, "d20_eq": True},
+    0x2400000A: {"beh": 0x401D8E, "imm": {0x1C: 0, 0x20: -0x14}, "d_to": 0x24},
+    0x2400000B: {"beh": 0x40155F, "imm": {0x1C: 8}},
+    0x2400000C: {"beh": 0x401C4E, "imm": {0x1C: 8, 0x20: 0x28}, "b10_0": True, "d_to": 0x24},
+    0x2400000D: {"beh": 0x40169F, "imm": {0x20: -8, 0x24: 0}, "r0m": (0x1C, 0x258)},
+    0x2400000E: {"beh": 0x401C6C, "imm": {0x1C: 0}, "d16_pair": (0x20, 0x24)},
+    0x2400000F: {"beh": 0x40132A, "imm": {0x1C: 0x20, 0x28: -0x30, 0x2C: 0x30},
+                 "r01sh8": (0x20, 0x24)},
+    0x24000010: {"beh": 0x401C3A, "imm": {0x1C: 0x20, 0x28: 0, 0x2C: 0},
+                 "r01sh16": (0x20, 0x24)},
+    0x24000011: {"beh": 0x401221, "imm": {0x1C: 0}, "deref3": True},
+}
+
+
 # 行为 thunk（写进 `[ent+0x40]`）→ 真实函数（`jmp rel32` 解引用）。
 # `P4_BEH` 一律按**真实地址**登记，ctor 时就把 thunk 解成真实地址存进 `Ent.beh`。
 ENT23_BEH_THUNK = {
     0x401C44: 0x40E070, 0x401FF0: 0x40E100, 0x401B1D: 0x40E230, 0x40118B: 0x40E460,
     0x401BD1: 0x40E520, 0x402180: 0x40E790, 0x401528: 0x40E8C0, 0x401181: 0x40EAF0,
     0x4015AA: 0x40E9B0,      # 类型 0x23000009 的 thunk（0x43A899 家族之外，经 ctor 表写入）
+    # 0x24 族（0x410A20 ctor，2026-11-06 解析）
+    0x4014CE: 0x410E10, 0x401834: 0x410F20, 0x401CEE: 0x411040, 0x401A73: 0x411120,
+    0x4021AD: 0x411200, 0x401AB9: 0x4112F0, 0x401163: 0x4113E0, 0x40119A: 0x411470,
+    0x401C8A: 0x4114C0, 0x401D8E: 0x4115B0, 0x40155F: 0x4116C0, 0x401C4E: 0x411790,
+    0x40169F: 0x4118C0, 0x401C6C: 0x411990, 0x40132A: 0x411A00, 0x401C3A: 0x411AD0,
+    0x401221: 0x411C10,
 }
 
 
@@ -533,9 +567,10 @@ class Ent:
             self.node.dst = (self.s32(0x04) - 0x18, self.s32(0x08) - 0x18)
             self.node.active = 1
             return
-        if (typ & 0x2F000000) == 0x23000000:      # 0x40D940 0x23 族
-            prop = ENT_PROP.get(typ & 0xFF)       # 0x43AC30 的 0x498000 记录
-            if prop is not None:
+        prop = ENT_PROP.get(typ & 0xFF)           # 0x43AC30 的 0x498000 记录
+        if prop is not None:
+            # ⚠ 原文在 0x23 分支内，但 0x498000 按 type&0xFF 各族共用（0x43AC30 对所有族调用）
+            if True:
                 self.d32(0x0C, prop[0])           # 半径
                 self.d32(0x18, prop[1])           # 存活门
                 self.d32(0x58, prop[2])
@@ -553,6 +588,58 @@ class Ent:
                     self.d32(info["d_to"], d & 0xFFFFFFFF)
                 if info.get("d20"):       # 0x40D98E：`[+0x20] = (b<=0xF0) ? -1 : 1`
                     self.d32(0x20, 0xFFFFFFFF if b <= 0xF0 else 1)
+        self._apply_family_init(typ, a, b, d)          # 0x24-0x2D 各族（ENT24_INIT 等）
+
+    def _apply_family_init(self, typ: int, a: int, b: int, d: int) -> None:
+        """0x24-0x2D 各族 ctor case 体（ENT24_INIT 等）。rec = (a, b, typ, d)。"""
+        info = ENT24_INIT.get(typ)
+        if info is None:
+            return
+        thunk = info["beh"]
+        self.d32(0x40, thunk)
+        self.beh = ENT23_BEH_THUNK.get(thunk, thunk)
+        for off, val in info["imm"].items():
+            self.d32(off, val & 0xFFFFFFFF)
+        if "s3_to" in info:                            # rec[3]（符号扩展）→ 目标
+            self.d32(info["s3_to"], d & 0xFFFFFFFF)
+        if "d_to" in info:
+            self.d32(info["d_to"], d & 0xFFFFFFFF)
+        if "d3_to" in info:
+            self.d32(info["d3_to"], d & 0xFFFFFFFF)
+        if "r1sh" in info:                             # [off] = rec[1] << n
+            off, n = info["r1sh"]
+            self.d32(off, (b << n) & 0xFFFFFFFF)
+        if "r0m" in info:                              # [off] = rec[0] - m
+            off, m = info["r0m"]
+            self.d32(off, (a - m) & 0xFFFFFFFF)
+        if "r01sh8" in info:                           # 0x410C47：rec[0]<<3 / rec[1]<<3
+            o1, o2 = info["r01sh8"]
+            self.d32(o1, (a << 3) & 0xFFFFFFFF)
+            self.d32(o2, (b << 3) & 0xFFFFFFFF)
+        if "r01sh16" in info:                          # 0x410C7F：rec[0]<<4 / rec[1]<<4
+            o1, o2 = info["r01sh16"]
+            self.d32(o1, (a << 4) & 0xFFFFFFFF)
+            self.d32(o2, (b << 4) & 0xFFFFFFFF)
+        if "p2016" in info:                            # 0x410B1D：[0x20]=(rec1<<16)|(rec0&FFFF)
+            self.d32(0x20, ((b << 16) | (a & 0xFFFF)) & 0xFFFFFFFF)
+        if "d20_eq" in info:                           # 0x410B7C：byte[0x10]=(rec3==0)、[0x20]=rec3
+            self.m[0x10] = 1 if d == 0 else 0
+            self.d32(0x20, d & 0xFFFFFFFF)
+        if "b10_0" in info:
+            self.m[0x10] = 0
+        if "d16_pair" in info:                         # 0x410C32：rec3 低/高 16 位符号展开
+            o1, o2 = info["d16_pair"]
+            lo = d & 0xFFFF
+            hi = (d >> 16) & 0xFFFF
+            lo = lo - 0x10000 if lo & 0x8000 else lo
+            hi = hi - 0x10000 if hi & 0x8000 else hi
+            self.d32(o1, lo & 0xFFFFFFFF)
+            self.d32(o2, hi & 0xFFFFFFFF)
+        if "deref3" in info:                           # 0x410CC8：[0x20]=*rec3、[0x24]=rec3[1]
+            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            if tgt is not None:
+                self.d32(0x20, tgt.g32(0x00))
+                self.d32(0x24, tgt.g32(0x04))
 
     def d32(self, off: int, val: int) -> None:
         self.m[off:off + 4] = int(val & 0xFFFFFFFF).to_bytes(4, "little")
