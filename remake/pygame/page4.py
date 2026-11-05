@@ -2249,6 +2249,49 @@ def page4_45aa80(dx: int, dy: int):
     return (int(dx / n * 0x1000), int(dy / n * 0x1000))
 
 
+def _beh_411470(self, e) -> bool:
+    """`0x411470`（0x24000008，×94）：恒速左移 −8/帧，node dst 同步；x<−0x18 或 HP=0 → 灭。"""
+    e.d32(4, (e.s32(4) - 8) & 0xFFFFFFFF)
+    if e.node is not None:
+        nd = e.node
+        nd.dst = (nd.dst[0] - 8, nd.dst[1])
+    return e.s32(4) > -0x18 and e.g32(0x18) != 0
+
+
+def _beh_410F20(self, e) -> bool:
+    """`0x410F20`（0x24000002，×86）：与 0x410E10 同构但 [0x20]=0x40、[0x1C]>>4、
+    正弦上限 ±0x40（非 ±0x20）、[0x24]=0x3C 开火门（非 [0x2C]）。"""
+    accel = e.s32(0x20)
+    sub = e.s32(0x1C)
+    flip = e.s32(0x24)
+    sub = (sub + accel) & 0xFFFFFFFF
+    sub_s = sub - 0x100000000 if sub & 0x80000000 else sub
+    accel = (accel + flip) & 0xFFFFFFFF
+    accel_s = accel - 0x100000000 if accel & 0x80000000 else accel
+    e.d32(0x1C, sub)
+    e.d32(0x20, accel)
+    if accel_s == 0x40:
+        e.d32(0x24, 0xFFFFFFFF)
+    elif accel_s == -0x40:
+        e.d32(0x24, 1)
+    if (e.s32(4) & 3) == 0:
+        e.d32(0x28, e.s32(0x28))
+    if e.node is not None:
+        if e.node.dst[0] == 0x120:
+            e.d32(0x28, 0xFFFFFFD0)
+        elif e.node.dst[0] == 0:
+            e.d32(0x28, 0x30)
+    if accel_s == 0 or abs(accel_s) == 0x40:
+        if e.s32(0x2C) != 0:
+            self.p4_43B070(e, 0)
+    e.d32(4, (e.s32(4) - 2) & 0xFFFFFFFF)
+    y = sub_s >> 4
+    e.d32(8, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, y - 0x18)
+    return e.s32(4) >= -0x18 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -3737,6 +3780,7 @@ P4_BEH: dict[int, object] = {
     0x411990: _beh_411990, 0x410E10: _beh_410E10,
     0x416A50: _beh_416A50, 0x416940: _beh_416940,
     0x4127E0: _beh_4127E0,
+    0x411470: _beh_411470, 0x410F20: _beh_410F20,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
