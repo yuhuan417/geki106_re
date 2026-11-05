@@ -1404,6 +1404,7 @@ def main():
     _j1.d32(0x10, 1)
     _j1.d32(0x18, 9)
     _ja = page4.Ent(0x10, 0x10, 0x2A000001, 0)
+    _ja.d32(0x18, 0)        # ENT2A_INIT 现设 HP=0x30D40；显式清 0 以测分派逻辑
     _jz = _Z()
     page4.Page4Mixin.p4_43c460(_jz, _j1, _ja)
     _jhit = [c for c in _jz.calls if c[0] == "ui4cc" and c[1] == 0x41000004]
