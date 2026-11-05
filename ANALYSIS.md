@@ -14118,3 +14118,16 @@ A_flag）：普通周目走 A_flag（a3=6 残撃 5 进场可见、a4=0x64 开场
 （[0x56CC98]/[0x56CCA0] 计数、敌[0x4C]/[0x48]/[0x54]=now+0x10、4CC 特效、SE6）。
 v1(凛) 自动索敌、v2(漢) 横摆、v3 螺旋。`word[0x56CCA8]` 应读 p4_frame_no
 （p4_stat 键从未被写——锁定门恒 0 的根因，已修）。
+
+### 16.350 各族 ctor 转写进度（2026-11-06）
+
+- **0x23**（关1，26 型）：ENT23_INIT 已有 14 个 op2 使用型 + 0x40DD27 等；缺行为
+  0x40210D(0x40EDB0)/0x4015B4(0x40F4F0)/0x4017EE(0x40F880 boss 十三态)。
+- **0x24**（关2，17 型）：**全部落地**（70ed991）——ENT24_INIT + 通用族应用器
+  `_apply_family_init`（通用键 r1sh/r0m/p2016/d16_pair/deref3/r0sh/r1sh/s16lohi/
+  angle_to_ship/ship_y_gate/node_hidden/rand_pair/d3pair/z1c 系列）。ENT_PROP 应用
+  从 0x23 分支内挪出（0x498000 各族共用按 type&0xFF）。
+- **0x25**（关3，11 型）：**case0..9 落地**（48bef1e）——ENT25_INIT；case10（0x4120C8）待读。
+- **0x26-0x2D**：跳表已批量提出（/tmp/fam_tables.json），case 体待逐族读。
+- 行为函数：0x24 族 17 个真址 0x410E10..0x411C10、0x25 族 10 个 0x4121C0..0x413930
+  均已并入 ENT23_BEH_THUNK（名字沿用，实为通用 thunk→真址表）；行为体本身待逐个转写。
