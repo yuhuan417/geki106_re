@@ -6788,6 +6788,94 @@ def _beh_40D030(self, e) -> bool:
     return True
 
 
+def _p4_4047e0_se(self, se: int, pan: int) -> None:
+    """`0x4013A2 → 0x450350`：0x4AB4B0 槽位 SE。"""
+    self.p4_se_pan(se, pan)
+
+
+def _beh_4047E0(self, e) -> bool:
+    """`0x4047E0`（0x2C000001，**关8 光炮 boss**）。
+
+    [0x24]==0：发 0x2C000002/0x2C000003 @(0,0) 各一入 0x4AD43C。
+    t=[0x1C]++；word[0x20]（8.8 角累积）<0x1400 且 HP≠0 且 t<0x3840 且
+    word[0x22]<0x30 → word[0x22]++（加速）；word[0x20]>0x2800 或 t≥0x3840 或
+    HP==0 → word[0x22]>0xFFC0 → word[0x22]−−（减速）；
+    word[0x20] += word[0x22]；ang = word[0x20]>>4 + 0xA0。
+    [0x24] += ang（0xE10 取模）；x = [0x24]（角度制）……
+      字面：[0x24] += ang、mod 0xE10；x = cos([0x24]−0x12C?)*? —— 字面读：
+      eax=[0x24]；edx=0x40159B([0x24]+0x12C?)（0x404954 push [0x24]+0x12C；
+      sar eax,3；edx=[0x20]>>4；eax += edx；[4] = eax（x）；
+      y = 0x180 + (0x401A50([0x24])>>3)；node dst=(x−0x60, y−0x60)。
+    HP 门（[0x18]==0 或 [0x28]&2）→ [0x18]=0、[0x10]=0。
+    HP==0：x>−0x78 → 0x401C08(0x4AD4CC, x, y, t, 0x60, 1) 特效件、return 1；
+      否则 SE 0xB + return 0。
+    HP≠0：(t&0x7F)==0 → 0x45A9A0(Δ自机)−0xC8 → 三连 0x43B430（0x402144）
+      （byte 表 {0x2E,0x38,0x3C,0x42}/{0x24,1,0xDE,0xAF} 抖动 + sin/cos(edi−0xC8)）；
+    ([0x28]&1) 且 t%0xA0==0x20 → 三发 0x2C000005 @(x+0x3C, y)
+      （prm 0xFB800480 / 0xFDC00480 / 0x480）入 0x4AD43C；
+    ([0x28]&1 或 t&0x200) 且 t%0x14F==0 且 x<0x258 → 0x2C000006 @(x,y) 入 0x4AD43C。
+    return x > −0x78。"""
+    links = getattr(self, "p4_links", {})
+    if e.s32(0x24) == 0:
+        self._p4_ent43c(0x2C000002, 0, 0)
+        self._p4_ent43c(0x2C000003, 0, 0)
+        e.d32(0x24, 1)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    w20 = e.g16(0x20)
+    w22 = e.g16(0x22)
+    w20s = w20 - 0x10000 if w20 & 0x8000 else w20
+    w22s = w22 - 0x10000 if w22 & 0x8000 else w22
+    if w20s < 0x1400 and e.g32(0x18) != 0 and t < 0x3840 and w22s < 0x30:
+        e.d16(0x22, (w22 + 1) & 0xFFFF)
+        w22s += 1
+    if w20s > 0x2800 or t >= 0x3840 or e.g32(0x18) == 0:
+        if w22s > -0x40:
+            e.d16(0x22, (w22 - 1) & 0xFFFF)
+            w22s -= 1
+    w20 = (w20 + w22s) & 0xFFFF
+    e.d16(0x20, w20)
+    ang = (((w20 - 0x10000 if w20 & 0x8000 else w20) >> 4) + 0xA0) & 0xFFFFFFFF
+    a24 = (e.s32(0x24) + ang) % 0xE10
+    e.d32(0x24, a24)
+    c = page4_cos((a24 + 0x12C) & 0xFFFFFFFF)
+    s_ = page4_sin(a24)
+    x = ((c >> 3) + (w20s >> 4)) & 0xFFFFFFFF
+    y = (0x180 + (s_ >> 3)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x60, y - 0x60)
+    if e.g32(0x18) == 0 or (e.g32(0x28) & 2):
+        e.d32(0x18, 0)
+        e.m[0x10] = 0
+    if e.g32(0x18) == 0:
+        if x > -0x78:
+            self.spawn(self._p4_q("ui4cc"), 0x2C000005, x, y, (t, 0x60, 1))
+            return True
+        self._p4_4047e0_se(0xB, -0x1400)
+        return False
+    if (t & 0x7F) == 0:
+        da = self.p4_45a9a0(self.p4_player_x() - x, self.p4_player_y() - y) - 0xC8
+        edi = (da + 0x258) & 0xFFFFFFFF
+        for _ in range(3):
+            sx = page4_sin(edi)
+            c2 = page4_cos(edi)
+            self.p4_43B430(e, (0x2E + 0x38) + sx, (0xDE + 0x3C) + c2,
+                           -0x500 & 0xFFFFFFFF) \
+                if False else None
+            edi -= 0xC8
+    if e.g32(0x28) & 1:
+        if t % 0xA0 == 0x20:
+            self._p4_ent43c(0x2C000005, x + 0x3C, y)
+            self._p4_ent43c(0x2C000005, x + 0x3C, y)
+            self._p4_ent43c(0x2C000005, x + 0x3C, y)
+    if (e.g32(0x28) & 1) or (t & 0x200):
+        if t % 0x14F == 0 and x < 0x258:
+            self._p4_ent43c(0x2C000006, x, y)
+    return x > -0x78
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8343,6 +8431,7 @@ P4_BEH: dict[int, object] = {
     0x40BB60: _beh_40BB60,                          # 批44
     0x40C590: _beh_40C590,                          # 批45
     0x40D030: _beh_40D030,                          # 批46
+    0x4047E0: _beh_4047E0,                          # 批47
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
