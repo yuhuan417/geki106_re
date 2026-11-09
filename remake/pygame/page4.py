@@ -5659,6 +5659,57 @@ def _beh_41EC40(self, e) -> bool:
     return parent.m[0x34] != 0
 
 
+def _beh_41EE00(self, e) -> bool:
+    """`0x41EE00`（0x29000010）：**外圈公转武装（半径 8 倍率）**。
+
+    父 = [0x1C] 句柄；相位 esi = clamp(父.[0x20] − [0x24], 0, 0xE10)；
+    x = 父.x + cos(esi)*[0x20]>>3、y = 父.y + sin(esi)*[0x20]>>3（[0x20]=半径）。
+    父.[0x28] 态：0 → 父.[0x24] ≠ 0 时父.[0x24] += (−1 − [0x18])、[0x18]=−1；
+    1 → HP≠0 → [0x18]=1；HP==0 → 父.[0x28]=2、[0x10]=0；
+    2 → [0x10]=0；0x41000001 + 0x41000004（±rand&0x1F−0xF）@(x,y) 入 0x4AD4CC。
+    父.[0x20]==0xAC8 且 [0x20]==4 → 0x43B610(e, 2y−父.y, 2x−父.x, 0)（对映狙击）。
+    node dst=(x−0x18,y−0x18)；return byte[父+0x34]。"""
+    h = e.s32(0x1C)
+    parent = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF) if h else None
+    if parent is None:
+        return False
+    esi = parent.s32(0x20) - e.s32(0x24)
+    if esi < 0:
+        esi = 0
+    elif esi > 0xE10:
+        esi = 0xE10
+    ang = esi & 0xFFFFFFFF
+    r = e.s32(0x20)
+    x = (parent.s32(0x04) + ((page4_cos(ang) * r) >> 3)) & 0xFFFFFFFF
+    y = (parent.s32(0x08) + ((page4_sin(ang) * r) >> 3)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    pst = parent.s32(0x28)
+    if pst == 0:
+        if y != 0:                                   # test edi(=y) — 半径非零门
+            pv = e.s32(0x18)
+            parent.d32(0x24, (parent.s32(0x24) + (-1 - pv)) & 0xFFFFFFFF)
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    elif pst == 1:
+        if e.g32(0x18) != 0:
+            e.d32(0x18, 1)
+        else:
+            parent.d32(0x28, 2)
+            e.m[0x10] = 0
+    else:
+        e.m[0x10] = 0
+        jx = (self.p4_rand() & 0x1F) - 0xF
+        jy = (self.p4_rand() & 0x1F) - 0xF
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        self.spawn(self._p4_q("ui4cc"), 0x41000004, x + jx, y + jy, (jx, jy))
+    if parent.s32(0x20) == 0xAC8 and r == 4:
+        self.p4_43B610(e, 2 * y - parent.s32(0x08),
+                       2 * x - parent.s32(0x04), 0)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return parent.m[0x34] != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7203,6 +7254,7 @@ P4_BEH: dict[int, object] = {
     0x41D990: _beh_41D990,                          # 批33
     0x41E960: _beh_41E960,                          # 批34
     0x41EB60: _beh_41EB60, 0x41EC40: _beh_41EC40,   # 批35
+    0x41EE00: _beh_41EE00,                          # 批36
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
