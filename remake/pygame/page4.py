@@ -4328,6 +4328,53 @@ def _beh_4145A0(self, e) -> bool:
     return False
 
 
+def _beh_4148B0(self, e) -> bool:
+    """`0x4148B0`（0x26000006）：**链体护卫机（45t 正弦纵摆）**。
+
+    t=[0x20]++；无链（[0x1C]==0）：t<0x258 且 t 奇 → 发 0x26000006 @
+    (0x298, 0xF0 + (45*sin(45t)>>5)) 入 0x4AD43C（45t=(t*5)*9、0x401A50=sin），
+    自身 y 同步；[0x24]>0 且 t<0x2D0 → return 1（等链体），否则 return 0。
+    有链：x −= 6；t==0xF 且 y 奇 → 0x43B360(e, 自机x, y+自机y−0x140, 0)；
+    (t&0xF)==0xF → 0x414010；HP≠−1 → [0x18]=−1 且 [链体+0x24]−−。
+    链体死（byte[+0x34]）→ 链体[0x28]=0、发 0x41000001 入 ui4cc +
+    3× 0x41000004（±rand%0x1F−0xF 抖动）+ return 0；
+    链体活：node.dst.x −= 6（0xFFFFFFFA）；return x > −0x18。"""
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)
+    h = e.s32(0x1C)
+    linked = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF) if h else None
+    if h == 0:
+        if t < 0x258 and (t & 1):
+            ang = (t * 5 * 9) & 0xFFFFFFFF
+            yy = 0xF0 + ((45 * page4_sin(ang)) >> 5)
+            e.d32(0x08, yy & 0xFFFFFFFF)
+            self._p4_ent43c(0x26000006, 0x298, yy)
+        return 1 if (e.s32(0x24) > 0 and t < 0x2D0) else False
+    x = (e.s32(0x04) - 6) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    y = e.s32(0x08)
+    if t == 0xF and (y & 1):
+        self.p4_43B360(e, self.p4_player_x(), y + self.p4_player_y() - 0x140, 0)
+    if (t & 0xF) == 0xF:
+        self.p4_414010(e)
+    if e.g32(0x18) != -1:
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+        if linked is not None:
+            linked.d32(0x24, (linked.s32(0x24) - 1) & 0xFFFFFFFF)
+    if linked is None or linked.m[0x34] != 0:
+        if linked is not None:
+            linked.d32(0x28, 0)
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        for _ in range(3):
+            jx = (self.p4_rand() & 0x1F) - 0xF
+            jy = (self.p4_rand() & 0x1F) - 0xF
+            self.spawn(self._p4_q("ui4cc"), 0x41000004, x + jx, y + jy, (jx, jy))
+        return False
+    if e.node is not None:                          # 0x414A96 dst.x −= 6
+        e.node.dst = (e.node.dst[0] - 6, e.node.dst[1])
+    return x > -0x18
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5852,6 +5899,7 @@ P4_BEH: dict[int, object] = {
     0x414460: _beh_414460,                          # 批13
     0x414FB0: _beh_414FB0,                          # 批14
     0x4145A0: _beh_4145A0,                          # 批15
+    0x4148B0: _beh_4148B0,                          # 批16
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
