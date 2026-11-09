@@ -4139,6 +4139,61 @@ def _beh_415A90(self, e) -> bool:
     return x > -0x18 and e.g32(0x18) != 0
 
 
+def _beh_414170(self, e) -> bool:
+    """`0x414170`（0x26000002）：t=[0x1C]++、s=[0x28]++。
+
+    s==0xD3（211）：速度 = 12×单位向自机（0x45AA80*Δ*12>>12）；
+    s==0x118（0xD3+0x45）：[0x20]=[0x24]=0（停）；
+    s==0x190（0x118+0x78）：x = ([0x2C]&1 ? 0x298−0x18? : −0x18)
+      （and 0x2B0/add −0x18 → 镜像 0x280+0x30−0x18）、y = rand%0x100+0x70、
+      [0x28]=0（重入）、[0x20] = ([0x2C]&1 ? −4 : +4)、[0x2C]−−（圈数递减）。
+    0x20≤s≤0xD2：若 s>0x5A 且 (vx≠自机x 或 vy≠自机y) → s=0xD2；
+      否则 vx=自机x、vy=自机y（吸附）。
+    其余：x+=vx、y+=vy；s>0xD2 且 (t&3)==0 且 0x4305F0(e,0x18) → 0x43B070(e,0)。
+    node dst=(x−0x18,y−0x18)；(t & (s≤0x5A ? 7 : 3))==0 → 0x414010；
+    return [0x2C]≠0 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    s = (e.s32(0x28) + 1) & 0xFFFFFFFF
+    e.d32(0x28, s)
+    if s == 0xD3:                                   # 0x4141F0 冲向自机
+        dx = self.p4_player_x() - e.s32(0x04)
+        dy = self.p4_player_y() - e.s32(0x08)
+        inv = self.p4_45aa80(dx, dy)
+        e.d32(0x20, (((inv * dx) * 12) >> 12) & 0xFFFFFFFF)
+        e.d32(0x24, (((inv * dy) * 12) >> 12) & 0xFFFFFFFF)
+    elif s == 0x118:                                # 0x4141E0 停
+        e.d32(0x20, 0)
+        e.d32(0x24, 0)
+    elif s == 0x190:                                # 0x41419A 重入
+        mirror = e.s32(0x2C) & 1
+        e.d32(0x04, (0x2B0 if mirror else -0x18) & 0xFFFFFFFF)   # −0x18+0x2B0?：0x298−0x18?→字面 0x298
+        e.d32(0x08, (self.p4_rand() & 0xFF) + 0x70)
+        e.d32(0x20, (-4 if mirror else 4) & 0xFFFFFFFF)
+        e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
+        e.d32(0x28, 0)
+    s = e.s32(0x28)
+    if 0x20 <= s <= 0xD2:
+        if s > 0x5A and (e.s32(0x20) != self.p4_player_x()
+                         or e.s32(0x24) != self.p4_player_y()):
+            e.d32(0x28, 0xD2)
+        else:
+            e.d32(0x20, self.p4_player_x() & 0xFFFFFFFF)
+            e.d32(0x24, self.p4_player_y() & 0xFFFFFFFF)
+        s = e.s32(0x28)
+    else:
+        e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF)
+        if s > 0xD2 and (t & 3) == 0 and self.p4_4305f0(e, 0x18):
+            self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    gate = 7 if s <= 0x5A else 3
+    if (t & gate) == 0:
+        self.p4_414010(e)
+    return e.s32(0x2C) != 0 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5659,6 +5714,7 @@ P4_BEH: dict[int, object] = {
     0x415480: _beh_415480,                          # 批9
     0x4156D0: _beh_4156D0,                          # 批10
     0x415A90: _beh_415A90,                          # 批11
+    0x414170: _beh_414170,                          # 批12
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
