@@ -2936,7 +2936,7 @@ def _beh_416BE0(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(4) > -0x18
 
 
-def _p4_41e1f0(self, e) -> None:
+def _p4_41e1f0(e) -> None:
     """`0x41E1F0`（漂移步进，0x4018E8）：[4]+=[2C]、[8]+=[30]；`0x45A6B0([0x38]+0x14,
     dx, dy)` 给显示节点 dst 同帧加同量（0x45A6B0 就是 `[ptr]+=a; [ptr+4]+=b`）；
     [0x28] 帧计数 ++。"""
@@ -2959,7 +2959,7 @@ def _p4_41e240(self, e) -> None:
     t = e.s32(0x28)
     if t == 0:
         e.d32(0x30, 6 if e.s32(0x1C) == 1 else -6)
-        self._p4_41e1f0(e)
+        _p4_41e1f0(e)
         return
     if 0x10 <= t < 0x16:
         v = e.s32(0x30)
@@ -2970,7 +2970,7 @@ def _p4_41e240(self, e) -> None:
         e.d32(0x2C, (e.s32(0x2C) + (-1 if e.s32(0x04) >= 0x140 else 1)) & 0xFFFFFFFF)
     elif e.s32(0x04) < -0x18 or e.s32(0x04) > 0x298:
         e.d32(0x18, 0)
-    self._p4_41e1f0(e)
+    _p4_41e1f0(e)
 
 
 def _p4_41e330(self, e) -> None:
@@ -2998,7 +2998,7 @@ def _p4_41e330(self, e) -> None:
         e.d32(0x2C, 11 if e.s32(0x08) >= 0xF0 else (-11 & 0xFFFFFFFF))
     if e.s32(0x2C) > 0 and x > 0x298:
         e.d32(0x18, 0)
-    self._p4_41e1f0(e)
+    _p4_41e1f0(e)
 
 
 def _p4_41e400(self, e) -> None:
@@ -3021,7 +3021,7 @@ def _p4_41e400(self, e) -> None:
                        e.s32(0x08) + self.p4_player_y() - 0xF0, 0x500)
     if e.s32(0x04) < -0x18:
         e.d32(0x18, 0)
-    self._p4_41e1f0(e)
+    _p4_41e1f0(e)
 
 
 def _p4_41e4c0(self, e) -> None:
@@ -3044,7 +3044,7 @@ def _p4_41e4c0(self, e) -> None:
         self.p4_43B070(e, 0)
     if t > 0x118 and (e.s32(0x04) < -0x18 or e.s32(0x04) > 0x298):
         e.d32(0x18, 0)
-    self._p4_41e1f0(e)
+    _p4_41e1f0(e)
 
 
 def _p4_41e5a0(self, e) -> None:
@@ -3074,7 +3074,7 @@ def _p4_41e5a0(self, e) -> None:
         else:                                   # st == 2
             if e.s32(0x08) > 0x1F8:
                 e.d32(0x18, 0)
-        self._p4_41e1f0(e)
+        _p4_41e1f0(e)
     t = e.s32(0x28)
     if 0xD2 <= t < 0xE8 and t != 0 and (t & 1):
         self.p4_43B360(e, 2 * e.s32(0x04) - 0x188, 2 * e.s32(0x08) - 0xF0, 0)
@@ -3100,7 +3100,7 @@ def _p4_41e6e0(self, e) -> None:
         e.d32(0x30, (e.s32(0x30) + (1 if e.s32(0x20) else -1)) & 0xFFFFFFFF)
     if e.s32(0x04) < -0x18:
         e.d32(0x18, 0)
-    self._p4_41e1f0(e)
+    _p4_41e1f0(e)
 
 
 def _beh_41E7B0(self, e) -> bool:
@@ -3146,7 +3146,7 @@ def _beh_41E7B0(self, e) -> bool:
             if vx == 0 and vy == 0:
                 e.d32(0x2C, -1 & 0xFFFFFFFF)
         return e.g32(0x18) != 0
-    self._p4_41e1f0(e)
+    _p4_41e1f0(e)
     if not self.p4_4305f0(e, 0x18):                 # 0x4021E9 → 0x4305F0
         return False
     return e.g32(0x18) != 0
@@ -3484,11 +3484,13 @@ def _beh_4112F0(self, e) -> bool:
     w20_s = w20 - 0x10000 if w20 & 0x8000 else w20
     if (w20 & 0x1F8) == 0 and e.s32(0x1C) != 0:
         self.p4_43B070(e, 0)
+    w24 = e.g16(0x24)
+    w26 = e.g16(0x26)
     if e.s32(0x28) != 0:
-        w24 = (e.g16(0x24) + (1 if e.s32(0x28) <= 0 else -1)) & 0xFFFF
+        w24 = (w24 + (1 if e.s32(0x28) <= 0 else -1)) & 0xFFFF
         e.d16(0x24, w24)
     if e.s32(0x2C) != 0:
-        w26 = (e.g16(0x26) + (1 if e.s32(0x2C) <= 0 else -1)) & 0xFFFF
+        w26 = (w26 + (1 if e.s32(0x2C) <= 0 else -1)) & 0xFFFF
         e.d16(0x26, w26)
     p28 = e.s32(0x28) + (w24 - 0x10000 if w24 & 0x8000 else w24)
     p2c = e.s32(0x2C) + (w26 - 0x10000 if w26 & 0x8000 else w26)
