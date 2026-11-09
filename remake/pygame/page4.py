@@ -7703,6 +7703,54 @@ def _beh_415BB0(self, e) -> bool:
     return y < 0x1F8 and e.g32(0x18) != 0
 
 
+def _beh_416CF0(self, e) -> bool:
+    """`0x416CF0`（0x2700000A）：**双圆轨摆动 + 计时爆散**。
+
+    [0x24] += [0x30]（相位累积）；t=++[0x1C]；
+    [0x28] += (90*sin(30*[0x24]))>>8、[0x2C] += (90*cos(30*[0x24]))>>8；
+    (t+0x1E)%0x5A==0 → [0x30]=2；t%0x5A==0 → [0x30]=1；
+    x=[0x28]>>4、y=[0x2C]>>4。
+    HP==0 → 0x45A790(node+4, 0x30, 0, 0x30, 0)、[0x24]−−、HP=−1、[0x10]=1；
+    HP>0x32 → HP=−1；链体（esi=[0x38]? 实为 [esi+0x24] 门）死或 HP==0 →
+    0x41000001 + 0x41000004 ×4（±rand&0x1F−0xF）@(x,y) 入 0x4AD4CC、return 0。
+    node dst 同步；return 1。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x30)) & 0xFFFFFFFF)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    a = (30 * e.s32(0x24)) & 0xFFFFFFFF
+    s_ = page4_sin(a)
+    c = page4_cos(a)
+    e.d32(0x28, (e.s32(0x28) + ((90 * s_) >> 8)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + ((90 * c) >> 8)) & 0xFFFFFFFF)
+    if (t + 0x1E) % 0x5A == 0:
+        e.d32(0x30, 2)
+    elif t % 0x5A == 0:
+        e.d32(0x30, 1)
+    x = (e.s32(0x28) >> 4) & 0xFFFFFFFF
+    y = (e.s32(0x2C) >> 4) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    hp = e.g32(0x18)
+    if hp == 0:
+        nd = e.node
+        if nd is not None:                    # 0x45A790(node+4, 0x30, 0, 0x30, 0)
+            nd.rect = (nd.rect[0] + 0x30, nd.rect[1], nd.rect[2] + 0x30, nd.rect[3])
+        e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+        e.m[0x10] = 1
+    elif hp > 0x32:
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    if e.m[0x34] == 0 or e.g32(0x18) == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        for _ in range(4):
+            jx = (self.p4_rand() & 0x1F) - 0xF
+            jy = (self.p4_rand() & 0x1F) - 0xF
+            self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                       x + jx, y + jy, (jx, jy))
+        return False
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -9271,6 +9319,7 @@ P4_BEH: dict[int, object] = {
     0x4114C0: _beh_4114C0, 0x411790: _beh_411790, 0x411A00: _beh_411A00,   # 批58
     0x414E40: _beh_414E40,                          # 批59
     0x4158A0: _beh_4158A0, 0x415BB0: _beh_415BB0,   # 批60
+    0x416CF0: _beh_416CF0,                          # 批61
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
