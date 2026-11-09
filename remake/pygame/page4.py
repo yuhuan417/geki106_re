@@ -5323,6 +5323,76 @@ def _p4_41ae20_tail(e, x: int, y: int, t: int) -> bool:
     return hp != 0
 
 
+def _beh_41D080(self, e) -> bool:
+    """`0x41D080`（0x29000002）：**编队长机（六翼）**。
+
+    t=++[0x1C]；t==1 → 六发 0x29000003 @(x+Δx, y+Δy) prm=父指针 入 0x4AD43C，
+    相对位 (−0xA0,0)(0x36,−0xAA)(0x5C,−0x30)(−0x3A,−0x5A)(0x60,0x4C)(−0x16,0x4C)。
+    [0x20] 相位：0 → x−− 到 0x1E0 → 1；1 → t&1==0 时 x−− 到 0x118 → 2、
+    (t&3)==0 → y += (自机y≥y ? +1 : −1)；2 → x++ 到 0x208 → 1。
+    [0x28] 计时/[0x24] 弹数：[0x24]==0 → [0x28]>0 ? [0x28]=−0x1E :
+    ([0x28]==0 → [0x24]=rand&3+1)；0<[0x24]≤4 且 [0x28]==0x80 → [0x24]=0。
+    t>0x1518 → HP=0。
+    HP≠0：0x430860(0x4AD43C)==1（队列忙）→ 仅 node dst=(x−0x60,y−0x60) return 1；
+    [0x2C]≠0 且 x>0x118 → x−−；node dst；return 1。
+    HP==0 → 0x49000005 @(x,y) prm=[0x2C] 并 return 0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 1:
+        for dx, dy in ((-0xA0, 0), (0x36, -0xAA), (0x5C, -0x30),
+                       (-0x3A, -0x5A), (0x60, 0x4C), (-0x16, 0x4C)):
+            c = self._p4_ent43c(0x29000003, e.s32(0x04) + dx, e.s32(0x08) + dy)
+            c.d32(0x18, (id(e) & 0x7FFFFFFF))    # prm = 父指针（句柄）
+            getattr(self, "p4_links", {})[id(e) & 0x7FFFFFFF] = e
+    ph = e.s32(0x20)
+    if ph == 0:
+        x = (e.s32(0x04) - 1) & 0xFFFFFFFF
+        e.d32(0x04, x)
+        if x == 0x1E0:
+            e.d32(0x20, 1)
+    elif ph == 1:
+        if (t & 1) == 0:
+            x = (e.s32(0x04) - 1) & 0xFFFFFFFF
+            e.d32(0x04, x)
+            if x == 0x118:
+                e.d32(0x20, 2)
+        if (t & 3) == 0:
+            y = e.s32(0x08)
+            sy = self.p4_player_y()
+            if sy != y:
+                e.d32(0x08, (y + (1 if sy >= y else -1)) & 0xFFFFFFFF)
+    else:                                            # ph == 2
+        x = (e.s32(0x04) + 1) & 0xFFFFFFFF
+        e.d32(0x04, x)
+        if x == 0x208:
+            e.d32(0x20, 1)
+    tm = (e.s32(0x28) + 1) & 0xFFFFFFFF
+    e.d32(0x28, tm)
+    n = e.s32(0x24)
+    if n == 0:
+        if tm > 0:
+            e.d32(0x28, -0x1E & 0xFFFFFFFF)
+        elif tm == 0:
+            e.d32(0x24, (self.p4_rand() & 3) + 1)
+    elif 0 < n <= 4:
+        if tm == 0x80:
+            e.d32(0x24, 0)
+    if t > 0x1518:
+        e.d32(0x18, 0)
+    if e.g32(0x18) != 0:
+        if e.g32(0x24 if False else 0x24) is None:
+            pass
+        # 0x430860(0x4AD43C) == 1：队列 +0x24 忙标志（复刻侧暂以 False 处理）
+        if e.s32(0x2C) != 0 and e.s32(0x04) > 0x118:
+            e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.dst = (e.s32(0x04) - 0x60, e.s32(0x08) - 0x60)
+        return True
+    self.spawn(self._p4_q("ui4cc"), 0x49000005, e.s32(0x04), e.s32(0x08),
+               e.s32(0x2C))
+    return False
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6862,6 +6932,7 @@ P4_BEH: dict[int, object] = {
     0x41BDA0: _beh_41BDA0,                          # 批28
     0x41BF60: _beh_41BF60,                          # 批29
     0x41AE20: _beh_41AE20,                          # 批30
+    0x41D080: _beh_41D080,                          # 批31
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
