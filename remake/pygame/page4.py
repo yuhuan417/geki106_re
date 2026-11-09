@@ -8489,6 +8489,49 @@ def _beh_406A20(self, e) -> bool:
     return True
 
 
+def _beh_406BD0(self, e) -> bool:
+    """`0x406BD0`（0x2C00000C）：**横列阵（主态门 + /3 步进）**。
+
+    0x4067A0(e, 主) 不活 → return；主死（byte[+0x34]）→ return 0。
+    a = 主.[0x28] − [0x28]；0x1E00 模归一；a∈(0,0x708] → [0x28] += a>>2；
+    a∈(−0x708,0] → 不动（jge 分支）。
+    x = 主.x + sin([0x28])/3（0x55555556 除法 = ÷3）、y = 主.y + cos([0x28])/3；
+    node dst = (x−[0xC], y−[0xC])；[0x18]!=0x2710 → 主.[0x2C]++；[0x18]=0x2710；
+    return 1。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if not self._p4_4067a0(e, main):
+        return True
+    if main is None or main.m[0x34] == 0:
+        return False
+    a = main.s32(0x28) - e.s32(0x28)
+    while a > 0x708:
+        a -= 0x1E00
+    while a < -0x708:
+        a += 0x1E00
+    if a > 0:
+        e.d32(0x28, (e.s32(0x28) + (a >> 2)) & 0xFFFFFFFF)
+    v28 = e.s32(0x28)
+    x = (main.s32(0x04) + self._p4_div3(page4_sin(v28))) & 0xFFFFFFFF
+    y = (main.s32(0x08) + self._p4_div3(page4_cos(v28))) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    base = e.s32(0x0C)
+    if e.node is not None:
+        e.node.dst = (x - base, y - base)
+    if e.g32(0x18) != 0x2710:
+        main.d32(0x2C, (main.s32(0x2C) + 1) & 0xFFFFFFFF)
+    e.d32(0x18, 0x2710)
+    return True
+
+
+@staticmethod
+def _p4_div3(v: int) -> int:
+    """0x55555556 魔数除法 = 向零取整 ÷3。"""
+    q = abs(v) // 3
+    return -q if v < 0 else q
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -10066,6 +10109,7 @@ P4_BEH: dict[int, object] = {
     0x4064E0: _beh_4064E0,                          # 批67
     0x4068C0: _beh_4068C0,                          # 批68
     0x406A20: _beh_406A20,                          # 批69
+    0x406BD0: _beh_406BD0,                          # 批70
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
