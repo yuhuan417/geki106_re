@@ -9059,6 +9059,111 @@ def _beh_4098E0(self, e) -> bool:
     return self.p4_4305f0(e, 0x40) and e.g32(0x18) != 0
 
 
+def _beh_409C20(self, e) -> bool:
+    """`0x409C20`（0x2D00001B，0x408540 铺出的侧翼）：**主位缩放 + 环射**。
+
+    主 = [0x1C] 句柄；主死 → return 0；[0x20]≠0 → 主.[0x30]=2（切入态 2）。
+    [0x28]==0（待机）：node dst=(x−0x10,y−0x10)；0x409760（缩放）；[0x30]−−<0 → 0。
+    [0x30]<0xCA：word[0x2C]/[0x2E] 追主（±0x12C 钳 / 0x40105A 0x30 步）；
+    word[0x24/0x26] += word[0x2C/0x2E]（|Δ|²>0x1000 → 0x40105A(0x30)；否则跳）；
+    x = 主.x + word[0x24]>>4、y = 主.y + word[0x26]>>4；0x409760。
+    [0x20]=0 → 铺 0x2D00001A @(主.x,主.y)（[主 0x20]=返回值）。
+    环射（esi=[0x20]=0x20 起 步 0x20 至 0x2A0）：word[0x24/0x26] 半径收缩门
+    （|Δ|²>0x90000 → 0x40105A(e) 0x1C0）；ang=[0x2C]：
+    cos/sin(ang)*esi 方向 0x2D00001A 卫星（[主 0x20]=返回值、[ebp 0x38].active=1）；
+    esi==0x2A0 时 0x33000022 @(打包位<<4) 入 0x4AD49C。
+    [0x30]≥0xCA：0x33000022 @(x,y, 0x100E0000|(打包位<<4)) 入 0x4AD49C。
+    [0x30]++ < 0xFD → 存活。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None or main.m[0x34] == 0:
+        return False
+    v20 = e.s32(0x20)
+    if v20 != 0:
+        main.d32(0x30, 2)
+    v28 = e.s32(0x28)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    v30 = e.s32(0x30)
+    if v28 == 0:
+        if e.node is not None:
+            e.node.dst = (x - 0x10, y - 0x10)
+        v30 = (v30 - 1) & 0xFFFFFFFF
+        e.d32(0x30, v30)
+        return 1 if v30 >= 0 else 0
+    if v30 < 0xCA:
+        w2c = e.g16(0x2C)
+        w2e = e.g16(0x2E)
+        da = (w2e - 0x10000 if w2e & 0x8000 else w2e) - (w2c - 0x10000 if w2c & 0x8000 else w2c)
+        da = max(-0xC, min(0xC, da))
+        w2c = (w2c + da) & 0xFFFF
+        e.d16(0x2C, w2c)
+        w2cs = w2c - 0x10000 if w2c & 0x8000 else w2c
+        w2es = w2e - 0x10000 if w2e & 0x8000 else w2e
+        dx = w2cs - (e.g16(0x24) - 0x10000 if e.g16(0x24) & 0x8000 else e.g16(0x24))
+        dy = w2es - (e.g16(0x26) - 0x10000 if e.g16(0x26) & 0x8000 else e.g16(0x26))
+        if dx * dx + dy * dy > 0x1000:
+            cur = [e.g16(0x24)]
+            tgt = [e.g16(0x26)]
+            self._p4_45ac70(tgt, cur, 0x30)
+            e.d16(0x24, cur[0] & 0xFFFF)
+            e.d16(0x26, tgt[0] & 0xFFFF)
+        else:
+            e.d16(0x24, w2cs & 0xFFFF)
+            e.d16(0x26, w2es & 0xFFFF)
+        w24 = e.g16(0x24)
+        w26 = e.g16(0x26)
+        x = (main.s32(0x04) + ((w24 - 0x8000 if w24 & 0x8000 else w24) >> 4)) & 0xFFFFFFFF
+        y = (main.s32(0x08) + ((w26 - 0x8000 if w26 & 0x8000 else w26) >> 4)) & 0xFFFFFFFF
+        e.d32(0x04, x)
+        e.d32(0x08, y)
+        if v20 == 0:
+            c = self._p4_ent43c(0x2D00001A, main.s32(0x04), main.s32(0x08))
+            c.d32(0x1C, id(main) & 0x7FFFFFFF)
+            main.d32(0x20, id(c) & 0x7FFFFFFF)
+            links[id(main) & 0x7FFFFFFF] = main
+        # 环射
+        esi = 0x20
+        while esi < 0x2A0:
+            w24s = w24 - 0x10000 if w24 & 0x8000 else w24
+            w26s = w26 - 0x10000 if w26 & 0x8000 else w26
+            if w24s * w24s + w26s * w26s > 0x90000:
+                cur3 = [w24s]
+                tgt3 = [w26s]
+                self._p4_45ac70(tgt3, cur3, 0x1C0)
+                w24s = cur3[0]
+                w26s = tgt3[0]
+            ang = w2cs
+            c3 = page4_cos(ang)
+            s3 = page4_sin(ang)
+            vx = -(c3 * esi)
+            vy = -(s3 * esi)
+            lim = min(esi, 0xC0)
+            cur4 = [vx]
+            tgt4 = [vy]
+            self._p4_45ac70(tgt4, cur4, lim)
+            vx = cur4[0]
+            vy = tgt4[0]
+            if v20 == 0:
+                c5 = self._p4_ent43c(0x2D00001A, main.s32(0x04), main.s32(0x08))
+                main.d32(0x20, id(c5) & 0x7FFFFFFF)
+            mx = main.s32(0x04) + (vx >> 4)
+            my = main.s32(0x08) + (vy >> 4)
+            self._p4_ent43c(0x2D00001A, mx, my)
+            esi += 0x20
+            if esi >= 0x2A0:
+                a = self.p4_45a9a0(-vx, -vy)
+                pack = ((mx & 0xFFF) | ((my & 0xFFFF) << 0x10)) << 4
+                self.spawn(self._p4_q("ui49c"), 0x33000022, x, y, pack & 0xFFFFFFFF)
+    else:
+        pack = ((x & 0xFFF) | ((y & 0xFFFF) << 0x10)) << 4
+        self.spawn(self._p4_q("ui49c"), 0x33000022, x, y,
+                   (0x100E0000 | pack) & 0xFFFFFFFF)
+    v30 = (v30 + 1) & 0xFFFFFFFF
+    e.d32(0x30, v30)
+    return v30 < 0xFD
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -10643,6 +10748,7 @@ P4_BEH: dict[int, object] = {
     0x407350: _beh_407350,                          # 批74
     0x408540: _beh_408540,                          # 批75
     0x4098E0: _beh_4098E0,                          # 批76
+    0x409C20: _beh_409C20,                          # 批77
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
