@@ -3954,6 +3954,55 @@ def _beh_414080(self, e) -> bool:
     return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
 
 
+def _beh_415200(self, e) -> bool:
+    """`0x415200`（0x2600000C）：**右侧编队发生器**。t=++[0x1C]；
+    [0x20]==0（展开态）：vy = (y≥0xF0 ? +4 : −0xC)；x += vy；x<−0xA0 →
+    [0x24]−− 且 y = rand%0x18 + 0x28（上移重置）；x > 0x320 → y = rand%0x18+0x190；
+    y > [0x1C]&&0x1F==0xF → 0x43B070(e,0)；(t&3)==3 → 0x414010；
+    alive = [0x24]≠0 且 HP≠0。
+    [0x20]≠0（编队态）：(t&0xF)!=0 → return 1；[0x20]−−==0 → 定版（[0x10]=1、
+    node.active=1、x=0x298、y=rand%0x18+0x190）；否则发 0x2600000C @
+    (0x298, rand%0x18+0x190) prm=rand/0x18 入 0x4AD43C 并 return 1。
+    rand = 0x45AD00 LCG；rand%N/÷N 经 0x462D71（push N 作除数残留）。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if e.s32(0x20) == 0:
+        y = e.s32(0x08)
+        vy = 4 if y >= 0xF0 else -0xC
+        e.d32(0x04, (e.s32(0x04) + vy) & 0xFFFFFFFF)
+        if e.s32(0x04) < -0xA0:
+            e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+            r = self.p4_rand() % 0x18
+            e.d32(0x08, (r + 0x28) & 0xFFFFFFFF)
+        if e.s32(0x04) > 0x320:
+            r = self.p4_rand() % 0x18
+            e.d32(0x08, (r + 0x190) & 0xFFFFFFFF)
+        y = e.s32(0x08)
+        if y > 0xF0 and (t & 0x1F) == 0xF:
+            self.p4_43B070(e, 0)
+        if (t & 3) == 3:
+            self.p4_414010(e)
+        if e.node is not None:
+            e.node.dst = (e.s32(0x04) - 0x18, y - 0x18)
+        return e.s32(0x24) != 0 and e.g32(0x18) != 0
+    # 编队态
+    if (t & 0xF) != 0:
+        return True
+    cnt = (e.s32(0x20) - 1) & 0xFFFFFFFF
+    e.d32(0x20, cnt)
+    if cnt == 0:                                    # 0x415281 定版
+        e.m[0x10] = 1
+        if e.node is not None:
+            e.node.active = 1
+        e.d32(0x04, 0x298)
+        e.d32(0x08, (self.p4_rand() % 0x18 + 0x190) & 0xFFFFFFFF)
+        return True
+    rnd = self.p4_rand()
+    q, r = divmod(rnd, 0x18)                        # 0x462D71(rand, 0x18)
+    self._p4_ent43c(0x2600000C, 0x298, r + 0x190, q)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5470,6 +5519,7 @@ P4_BEH: dict[int, object] = {
     0x415980: _beh_415980,                          # 批5
     0x415140: _beh_415140, 0x414C70: _beh_414C70,   # 批6
     0x414080: _beh_414080,                          # 批7
+    0x415200: _beh_415200,                          # 批8
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
