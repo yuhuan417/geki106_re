@@ -2691,6 +2691,127 @@ def _beh_4116C0(self, e) -> bool:
     return e.s32(4) > -0x18 and e.g32(0x18) != 0
 
 
+def _beh_415D70(self, e) -> bool:
+    """`0x415D70`（0x26000016 ×22）：渐进左移 [0x20]−−→x+=[0x20]>>3 + [0x1C] 奇偶
+    闪烁（node active 翻转）；[0x20]==−0x20 → 记录自机位置到 [0x24]/[0x28]；
+    t%8==0 && 自机在 ±0x20 内 → 0x401E56(=0x415650 朝向开火)；x<−0x18 或 HP=0 → 灭。"""
+    spd = (e.s32(0x20) - 1) & 0xFFFFFFFF
+    spd_s = spd - 0x100000000 if spd & 0x80000000 else spd
+    e.d32(0x20, spd)
+    e.d32(4, (e.s32(4) + (spd_s >> 3)) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    # 奇偶闪烁/开火
+    t = e.s32(0x1C)
+    if spd_s > 0:
+        vis = (t & 1) == 0                               # not eax and 1
+    else:
+        vis = ((t & 3) == 0)                             # and 3/neg/sbb/inc
+    if e.node is not None:
+        e.node.active = vis
+    if vis:
+        pass  # 0x401816 = 0x415650 朝向开火（复刻侧由碰撞/行为处理）
+    if spd_s == -0x20:                                   # [0x20]==−0x20 → 记自机
+        e.d32(0x24, self.p4_stat.get(0x56CC8C, 0))
+        e.d32(0x28, self.p4_stat.get(0x56CC90, 0))
+    elif (t & 7) == 0:
+        dx = e.s32(0x24) - e.s32(4)
+        dy = e.s32(0x28) - e.s32(8)
+        if abs(dx) < 0x20 and abs(dy) < 0x20:
+            pass  # 0x401E56 → 0x415650 开火
+    return e.s32(4) > -0x18 and e.g32(0x18) != 0
+
+
+def _beh_416FA0(self, e) -> bool:
+    """`0x416FA0`（0x2700000B ×14）：0x4170E4 字节跳表三态——追自机→正弦漂移→
+    帧动画→左移+开火→自灭。8.8 定点。"""
+    t = e.s32(0x1C)
+    if t <= 0x18:
+        st = (t >> 1) % 3
+        if st == 0:                                      # 追自机（0x45AA80 方向 → [0x20]）
+            sx = self.p4_stat.get(0x56CC8C, 0)
+            sy = self.p4_stat.get(0x56CC90, 0)
+            nx, ny = page4_45aa80(sx - e.s32(4), sy - e.s32(8))
+            e.d32(0x20, (nx if t % 4 else ny) & 0xFFFFFFFF)
+        elif st == 1:                                    # 帧动画 node 外扩 ±0x30
+            if e.node is not None:
+                e.node.rect = (e.node.rect[0] + 0x30, e.node.rect[1],
+                               e.node.rect[2] + 0x30, e.node.rect[3])
+        else:                                            # 左移+开火
+            if e.node is not None:
+                e.node.rect = (e.node.rect[0] - 0x60, e.node.rect[1],
+                               e.node.rect[2] - 0x60, e.node.rect[3])
+            self.p4_43B070(e, 0)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t > 0x18:
+        r = e.s32(0x20)
+        e.d32(0x24, (e.s32(0x24) + ((r * 3) >> 4)) & 0xFFFFFFFF)
+        e.d32(0x28, (e.s32(0x28) + ((r * 3) >> 4)) & 0xFFFFFFFF)
+        e.d32(8, (e.s32(0x24) >> 4) & 0xFFFFFFFF)
+        e.d32(4, (e.s32(0x28) >> 4) & 0xFFFFFFFF)
+        if t == 0x48:
+            e.d32(0x1C, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    if e.g32(0x18) == 0:
+        return False
+    if e.s32(0x2C) & 0xFFF0:
+        return e.s32(4) <= 0x298
+    return True
+
+
+def _beh_411AD0(self, e) -> bool:
+    """`0x411AD0`（0x24000010 ×14）：追踪自机（x/y 各朝自机加速 ±1/±4）+ t≥0x500
+    反向逃逸；每 0x80 帧 0x401D6B（=0x416CE0 波动特效）。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if (t & 0x7F) == 0:
+        pass  # 0x401D6B → 0x416CE0 波动特效
+    if t >= 0x500:                                       # 逃逸
+        e.d32(0x28, (e.s32(0x28) - 1) & 0xFFFFFFFF)
+        vy = e.s32(0x2C)
+        e.d32(0x2C, (vy + (2 if vy >= 0 else -2)) & 0xFFFFFFFF)
+    else:
+        sx = self.p4_stat.get(0x56CC8C, 0)
+        sy = self.p4_stat.get(0x56CC90, 0)
+        if e.s32(4) < sx:
+            vx = e.s32(0x28)
+            e.d32(0x28, (vx + (1 if vx < 0 else -4 if vx >= 0 else 0) + (1 if vx < 0 else 0)) & 0xFFFFFFFF)
+        else:
+            vx = e.s32(0x28)
+            e.d32(0x28, (vx + (-4 if vx >= 0 else 0) + (-4 if vx >= 0 else 3) + vx - vx) & 0xFFFFFFFF)
+        if e.s32(8) < sy:
+            vy = e.s32(0x2C)
+            e.d32(0x2C, (vy + (1 if vy < 0 else 0)) & 0xFFFFFFFF)
+        else:
+            vy = e.s32(0x2C)
+            e.d32(0x2C, (vy + (-2 if vy >= 0 else 0) + (1 if vy < 0 else 0)) & 0xFFFFFFFF)
+    vx, vy = e.s32(0x28), e.s32(0x2C)
+    e.d32(4, (e.s32(4) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(8, (e.s32(8) + vy) & 0xFFFFFFFF)
+    return e.g32(0x18) != 0
+
+
+def _beh_4115B0(self, e) -> bool:
+    """`0x4115B0`（0x2400000A ×14）：右移 [0x20]（rec1<<3 变化）+ 周期事件：
+    t==0x64 → 0x31000005 敌弹入 0x4AD49C；t∈{0xA0,0xDC,0x118} → 0x43B070(e,−[0x58])
+    + 0x401D6B 波动；t>0x154 → [0x20]++；x≥0x298 或 HP=0 → 灭。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0x64:
+        self.spawn(self._p4_q("ui49c"), 0x31000005, e.s32(4), e.s32(8), 0)
+    elif t in (0xA0, 0xDC, 0x118):
+        if e.s32(0x24) != 0:
+            self.p4_43B070(e, (-e.s32(0x58)) & 0xFFFFFFFF)
+    elif t > 0x154:
+        e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    e.d32(4, (e.s32(4) + e.s32(0x20)) & 0xFFFFFFFF)
+    if e.node is not None:
+        nd = e.node
+        nd.dst = (nd.dst[0] + e.s32(0x20), nd.dst[1])
+    return e.s32(4) <= 0x298 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -4188,6 +4309,8 @@ P4_BEH: dict[int, object] = {
     0x416680: _beh_416680,
     0x41F610: _beh_41F610, 0x4123E0: _beh_4123E0,
     0x419850: _beh_419850, 0x4116C0: _beh_4116C0,
+    0x415D70: _beh_415D70, 0x416FA0: _beh_416FA0,
+    0x411AD0: _beh_411AD0, 0x4115B0: _beh_4115B0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
