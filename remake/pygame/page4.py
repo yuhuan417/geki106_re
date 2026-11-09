@@ -2930,6 +2930,325 @@ def _beh_416BE0(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(4) > -0x18
 
 
+def _p4_41e1f0(self, e) -> None:
+    """`0x41E1F0`（漂移步进，0x4018E8）：[4]+=[2C]、[8]+=[30]；`0x45A6B0([0x38]+0x14,
+    dx, dy)` 给显示节点 dst 同帧加同量（0x45A6B0 就是 `[ptr]+=a; [ptr+4]+=b`）；
+    [0x28] 帧计数 ++。"""
+    dx = e.s32(0x2C)
+    dy = e.s32(0x30)
+    e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + dx, e.node.dst[1] + dy)
+    e.d32(0x28, (e.s32(0x28) + 1) & 0xFFFFFFFF)
+
+
+def _p4_41e240(self, e) -> None:
+    """`0x41E240`（0x41E7B0 相位 1，0x4011B8）：
+    t==0 → [0x30] = (相位==1 ? 6 : −6)（dec/neg/sbb 读 [0x1C]−1 的 CF）；
+    0x10≤t<0x16 → [0x30] ∓= 1（相位==1 减、否则加）；
+    t==0xC8 → 0x43B070(e,0) 朝机开火；
+    0xE6≤t<0xF0 → [0x2C] += (x≥0x140 ? −1 : +1)（横向折返步进）；
+    x < −0x18 或 > 0x298 → HP=0；每路结尾 0x41E1F0 漂移。"""
+    t = e.s32(0x28)
+    if t == 0:
+        e.d32(0x30, 6 if e.s32(0x1C) == 1 else -6)
+        self._p4_41e1f0(e)
+        return
+    if 0x10 <= t < 0x16:
+        v = e.s32(0x30)
+        e.d32(0x30, (v - 1) & 0xFFFFFFFF if e.s32(0x1C) == 1 else (v + 1) & 0xFFFFFFFF)
+    elif t == 0xC8:
+        self.p4_43B070(e, 0)
+    elif 0xE6 <= t < 0xF0:
+        e.d32(0x2C, (e.s32(0x2C) + (-1 if e.s32(0x04) >= 0x140 else 1)) & 0xFFFFFFFF)
+    elif e.s32(0x04) < -0x18 or e.s32(0x04) > 0x298:
+        e.d32(0x18, 0)
+    self._p4_41e1f0(e)
+
+
+def _p4_41e330(self, e) -> None:
+    """`0x41E330`（0x41E7B0 相位 2，0x401357）：
+    0x62≤t≤0xDA → t++，t==0xBC 时 0x43B070(e,0) 开火一次；其余帧走移动分支：
+    x<0xA0：y<0xF0 时 [0x30]++ 否则 [0x30]−−（到 0）；[0x30] 为奇时 [0x2C]++
+    （悬停充能 → 横漂加速）；x≥0xA0：[0x30]=0，[0x2C] = (y≥0xF0 ? +11 : −11)
+    （纵向朝中线）；[0x2C]>0 且 x>0x298 → HP=0；结尾 0x41E1F0。"""
+    t = e.s32(0x28)
+    if 0x62 <= t <= 0xDA:
+        e.d32(0x28, (t + 1) & 0xFFFFFFFF)
+        if t == 0xBC:
+            self.p4_43B070(e, 0)
+        return
+    x = e.s32(0x04)
+    if x < 0xA0:
+        if e.s32(0x08) < 0xF0:
+            e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)
+        elif e.s32(0x30) != 0:
+            e.d32(0x30, (e.s32(0x30) - 1) & 0xFFFFFFFF)
+        if e.s32(0x30) & 1:
+            e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+    else:
+        e.d32(0x30, 0)
+        e.d32(0x2C, 11 if e.s32(0x08) >= 0xF0 else (-11 & 0xFFFFFFFF))
+    if e.s32(0x2C) > 0 and x > 0x298:
+        e.d32(0x18, 0)
+    self._p4_41e1f0(e)
+
+
+def _p4_41e400(self, e) -> None:
+    """`0x41E400`（0x41E7B0 相位 3，0x40202C）：s = [0x20]+t；
+    s==0 → [0x2C]=−10；0x15≤s<0x1F → [0x2C]++；0xF0≤s<0xFF → [0x2C]−−；
+    t==0xD2 → `0x43B610(e, x+自机x−0x21C, y+自机y−0xF0, 0x500)`
+    （0x401997→0x43B610，弹型 0x43B5E0：0x25→0x31000008 / 否则 0x31000003）；
+    x<−0x18 → HP=0；结尾 0x41E1F0。"""
+    t = e.s32(0x28)
+    s = (e.s32(0x20) + t) & 0xFFFFFFFF
+    s_s = s - 0x100000000 if s & 0x80000000 else s
+    if s == 0:
+        e.d32(0x2C, -10 & 0xFFFFFFFF)
+    elif 0x15 <= s_s < 0x1F:
+        e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+    elif 0xF0 <= s_s < 0xFF:
+        e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
+    if t == 0xD2:
+        self.p4_43B610(e, e.s32(0x04) + self.p4_player_x() - 0x21C,
+                       e.s32(0x08) + self.p4_player_y() - 0xF0, 0x500)
+    if e.s32(0x04) < -0x18:
+        e.d32(0x18, 0)
+    self._p4_41e1f0(e)
+
+
+def _p4_41e4c0(self, e) -> None:
+    """`0x41E4C0`（0x41E7B0 相位 4，0x401D25）：s = [0x20]+t；
+    s==0 → [0x2C] = (x≥0x140 ? −6 : −18)；
+    0x1D≤s<0x23 → [0x2C] += (x≥0x140 ? −1 : +1)；
+    0xFA≤s<0x104 → [0x2C] += (x≥0x140 ? −1 : +1)（同向第二步进）；
+    t==0xF0 → 0x43B070(e,0)；t>0x118 且 x<−0x18 或 >0x298 → HP=0；结尾 0x41E1F0。"""
+    t = e.s32(0x28)
+    s = (e.s32(0x20) + t) & 0xFFFFFFFF
+    s_s = s - 0x100000000 if s & 0x80000000 else s
+    xge = e.s32(0x04) >= 0x140
+    if s == 0:
+        e.d32(0x2C, -6 if xge else -18)
+    elif 0x1D <= s_s < 0x23:
+        e.d32(0x2C, (e.s32(0x2C) + (-1 if xge else 1)) & 0xFFFFFFFF)
+    elif 0xFA <= s_s < 0x104:
+        e.d32(0x2C, (e.s32(0x2C) + (-1 if xge else 1)) & 0xFFFFFFFF)
+    if t == 0xF0:
+        self.p4_43B070(e, 0)
+    if t > 0x118 and (e.s32(0x04) < -0x18 or e.s32(0x04) > 0x298):
+        e.d32(0x18, 0)
+    self._p4_41e1f0(e)
+
+
+def _p4_41e5a0(self, e) -> None:
+    """`0x41E5A0`（0x41E7B0 相位 5，0x4018E3）：t∈[0x78,0xD2] → 仅 t++（悬停门）；
+    否则按状态 [0x20]：0 → [0x30]=0xC，y>0xF0 → 状态 1；
+    1 → 0x50≤y≤0x190 且 t>0x12C 且 [0x30]>0 → 状态 2，否则
+        [0x2C] += (x≥0x188 ? −4 : +4)、[0x30] += (y≥0xF0 ? −2 : +2)；
+    2 → y>0x1F8 → HP=0；
+    尾部：0xD2≤t<0xE8 且 t 奇 → `0x43B360(e, 2x−0x188, 2y−0xF0, 0)`
+    （0x401E56→0x43B360，弹型 0x43B020；镜点两侧交替开火）；漂移只在悬停门外执行。"""
+    t = e.s32(0x28)
+    if 0x78 <= t <= 0xD2:
+        e.d32(0x28, (t + 1) & 0xFFFFFFFF)
+    else:
+        st = e.s32(0x20)
+        if st == 0:
+            e.d32(0x30, 0xC)
+            if e.s32(0x08) > 0xF0:
+                e.d32(0x20, 1)
+        elif st == 1:
+            y = e.s32(0x08)
+            if 0x50 <= y <= 0x190 and t > 0x12C and e.s32(0x30) > 0:
+                e.d32(0x20, 2)
+            else:
+                e.d32(0x2C, (e.s32(0x2C) + (-4 if e.s32(0x04) >= 0x188 else 4)) & 0xFFFFFFFF)
+                e.d32(0x30, (e.s32(0x30) + (-2 if y >= 0xF0 else 2)) & 0xFFFFFFFF)
+        else:                                   # st == 2
+            if e.s32(0x08) > 0x1F8:
+                e.d32(0x18, 0)
+        self._p4_41e1f0(e)
+    t = e.s32(0x28)
+    if 0xD2 <= t < 0xE8 and t != 0 and (t & 1):
+        self.p4_43B360(e, 2 * e.s32(0x04) - 0x188, 2 * e.s32(0x08) - 0xF0, 0)
+
+
+def _p4_41e6e0(self, e) -> None:
+    """`0x41E6E0`（0x41E7B0 相位 6，0x401C53）：t==0 → [0x2C]=−8、[0x20]=(y≥0xF0)、
+    [0x30] = (y≥0xF0 ? −6 : +6)；0x50≤t<0x52 → [0x2C]+=4、[0x30] += ([0x20] ? +3 : −3)；
+    t==0xE6 → 0x43B070(e,0)；0x104≤t<0x10E → [0x30] += ([0x20] ? +1 : −1)；
+    x<−0x18 → HP=0；结尾 0x41E1F0。"""
+    t = e.s32(0x28)
+    if t == 0:
+        e.d32(0x2C, -8 & 0xFFFFFFFF)
+        yg = e.s32(0x08) >= 0xF0
+        e.d32(0x20, 1 if yg else 0)
+        e.d32(0x30, -6 if yg else 6)
+    elif 0x50 <= t < 0x52:
+        e.d32(0x2C, (e.s32(0x2C) + 4) & 0xFFFFFFFF)
+        e.d32(0x30, (e.s32(0x30) + (3 if e.s32(0x20) else -3)) & 0xFFFFFFFF)
+    elif t == 0xE6:
+        self.p4_43B070(e, 0)
+    elif 0x104 <= t < 0x10E:
+        e.d32(0x30, (e.s32(0x30) + (1 if e.s32(0x20) else -1)) & 0xFFFFFFFF)
+    if e.s32(0x04) < -0x18:
+        e.d32(0x18, 0)
+    self._p4_41e1f0(e)
+
+
+def _beh_41E7B0(self, e) -> bool:
+    """`0x41E7B0`（thunk 0x4018A7；0x29000007/08/09/0A/0B/16 ×20，ctor case
+    0x41C16E/0x41C55D）：**护卫/中boss 相位状态机**。
+
+    ```
+    if ([+0x24] != 0) {                       ; 跟踪体（param block[2]）
+        相位 [+0x1C] 1..6 → 0x41E240/330/400/4C0/5A0/6E0
+        跟踪体已死（[+0x34]）→
+            跟踪体类型 == 0x29000015（最终boss）
+              → 0x430400(&rec, x, y, 0x61000004, 0x10) + 0x445AA0(0x4AD52C,&rec)
+                （52C 亮度族条目）并 return 0（自灭）
+            否则 [+0x24]=0；速度 = 8×单位向自机向量
+              （0x45AA80(dx,dy)*dx>>9 / *dy>>9；两分量全 0 → [0x2C]=−1）
+    } else {
+        0x41E1F0 漂移；0x4305F0(e, 0x18)（半径 0x18 在屏判据，0x4021E9）
+        不在屏 → return 0
+    }
+    return HP([+0x18]) != 0
+    ```
+    复刻侧 [+0x24] 存跟踪体句柄（id&0x7FFFFFFF，p4_links 解对象），
+    与 0x23 亲子链接同一约定。
+    """
+    h = e.g32(0x24)
+    if h:
+        linked = getattr(self, "p4_links", {}).get(h)
+        ph = e.s32(0x1C)
+        {1: _p4_41e240, 2: _p4_41e330, 3: _p4_41e400,
+         4: _p4_41e4c0, 5: _p4_41e5a0, 6: _p4_41e6e0}.get(ph, lambda s, x: None)(self, e)
+        if linked is None or linked.m[0x34] == 0:
+            if linked is not None and linked.s32(0x14) == 0x29000015:
+                self.p4_spawn52c_flash(e.s32(0x04), e.s32(0x08), 0x61000004, 0x10)
+                return False
+            e.d32(0x24, 0)
+            dx = self.p4_player_x() - e.s32(0x04)
+            dy = self.p4_player_y() - e.s32(0x08)
+            inv = self.p4_45aa80(dx, dy)
+            vx = (inv * dx) >> 9                    # 0x41E885 sar 9
+            vy = (inv * dy) >> 9
+            e.d32(0x2C, vx & 0xFFFFFFFF)
+            e.d32(0x30, vy & 0xFFFFFFFF)
+            if vx == 0 and vy == 0:
+                e.d32(0x2C, -1 & 0xFFFFFFFF)
+        return e.g32(0x18) != 0
+    self._p4_41e1f0(e)
+    if not self.p4_4305f0(e, 0x18):                 # 0x4021E9 → 0x4305F0
+        return False
+    return e.g32(0x18) != 0
+
+
+def _beh_4185C0(self, e) -> bool:
+    """`0x4185C0`（thunk 0x401E7E；0x27000010 ×12）：**帧表 boss 发射器**。
+
+    入口：[0x30]&1（轮次奇偶）→ 位置镜像 (0x280−x, 0x1E0−y)；
+    t=[0x1C]+1 后按帧表分派（跳表 0x41897C/0x418A38）：
+    ```
+    0x050 → pos=(0x21C,−0x64); [0x10]=1; [0x24]=6
+    0x0A7 → [0x2C]=−1        0x0AD → [0x28]=−1,[0x2C]=0    0x0BC → [0x28]=0
+    0x0F0 → [0x20]=[0x24]=0  0x100 → 0x4177F0(0x18,0x190)（发 0x5100000A 入 4AD4FC）
+    0x13C → pos=(−0x60,0x190),[0x20]=0xC     0x18C → [0x20]=0
+    0x1A4 → pos=(0x474,0),[0x20]=−0xC,[0x24]=0x20,[0x2C]=−1
+    0x1EA → [0x20]=[0x24]=[0x2C]=0
+    0x28A → 0x4177F0(0xF0,0x30)
+    0x2C6 → pos=(0xF0,−0xA0),[0x24]=0x1C（贯落 [0x2C]=−1）
+    0x340 → [0x24]=[0x2C]=0  0x35E → 0x4177F0(0x268,0x186)
+    0x39A → pos=(0x2E4,0x186),[0x20]=0       0x3A6 → [0x28]=0
+    0x442 → 0x4177F0(0x268,0x1B0)
+    0x47E → pos=(0x2E4,0x244)，速度=12×单位向自机（0x45AA80*Δ*12>>12）
+    0x4E2 → pos=(−0x64,−0x64)，速度=12×单位向自机（Δ=自机+0x64−pos）
+    0x582 → [0x20]=[0x24]=0
+    0x5CD → [0x1C]=0（帧表回卷）；[0x30]++ ≥6 → return 0
+    ```
+    尾部每帧：[0x20]+=[0x28]、[0x24]+=[0x2C]、x+=[0x20]、y+=[0x24]（2× 子像素累加），
+    `0x417880(2)` 门控发 0x2700000B 进 0x4AD43C（周期 0x1000>>[0x30]，轮次奇偶定左右
+    边、y=0x190−0xA0*arg 或 0x50）；[0x30]&1 → 尾镜像；node.dst.x = x−0x60。
+    存活 = HP != 0。"""
+    if e.s32(0x30) & 1:                             # 0x4185CC 入口镜像
+        e.d32(0x04, (0x280 - e.s32(0x04)) & 0xFFFFFFFF)
+        e.d32(0x08, (0x1E0 - e.s32(0x08)) & 0xFFFFFFFF)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    shipx, shipy = self.p4_player_x(), self.p4_player_y()
+    if t == 0x50:
+        e.d32(0x04, 0x21C); e.d32(0x08, -0x64 & 0xFFFFFFFF)
+        e.m[0x10] = 1; e.d32(0x24, 6)
+    elif t == 0xA7:
+        e.d32(0x2C, -1 & 0xFFFFFFFF)
+    elif t == 0xAD:
+        e.d32(0x28, -1 & 0xFFFFFFFF); e.d32(0x2C, 0)
+    elif t == 0xBC:
+        e.d32(0x28, 0)
+    elif t == 0xF0:
+        e.d32(0x20, 0); e.d32(0x24, 0)
+    elif t == 0x100:
+        self.p4_4177f0(e, 0x18, 0x190)
+    elif t == 0x13C:
+        e.d32(0x04, -0x60 & 0xFFFFFFFF); e.d32(0x08, 0x190); e.d32(0x20, 0xC)
+    elif t == 0x18C:
+        e.d32(0x20, 0)
+    elif t == 0x1A4:
+        e.d32(0x04, 0x474); e.d32(0x08, 0)
+        e.d32(0x20, -0xC & 0xFFFFFFFF); e.d32(0x24, 0x20); e.d32(0x2C, -1 & 0xFFFFFFFF)
+    elif t == 0x1EA:
+        e.d32(0x20, 0); e.d32(0x24, 0); e.d32(0x2C, 0)
+    elif t == 0x28A:
+        self.p4_4177f0(e, 0xF0, 0x30)
+    elif t == 0x2C6:
+        e.d32(0x04, 0xF0); e.d32(0x08, -0xA0 & 0xFFFFFFFF)
+        e.d32(0x24, 0x1C); e.d32(0x2C, -1 & 0xFFFFFFFF)
+    elif t == 0x340:
+        e.d32(0x24, 0); e.d32(0x2C, 0)
+    elif t == 0x35E:
+        self.p4_4177f0(e, 0x268, 0x186)
+    elif t == 0x39A:
+        e.d32(0x04, 0x2E4); e.d32(0x08, 0x186); e.d32(0x20, 0)
+    elif t == 0x3A6:
+        e.d32(0x28, 0)
+    elif t == 0x442:
+        self.p4_4177f0(e, 0x268, 0x1B0)
+    elif t == 0x47E:
+        e.d32(0x04, 0x2E4); e.d32(0x08, 0x244)
+        dx = shipx - 0x2E4; dy = shipy - 0x244
+        inv = self.p4_45aa80(dx, dy)
+        e.d32(0x20, ((inv * dx) * 12) >> 12 & 0xFFFFFFFF)
+        e.d32(0x24, ((inv * dy) * 12) >> 12 & 0xFFFFFFFF)
+    elif t == 0x4E2:
+        e.d32(0x04, -0x64 & 0xFFFFFFFF); e.d32(0x08, -0x64 & 0xFFFFFFFF)
+        dx = shipx + 0x64; dy = shipy + 0x64        # Δ = 目标 − pos
+        inv = self.p4_45aa80(dx, dy)
+        e.d32(0x20, ((inv * dx) * 12) >> 12 & 0xFFFFFFFF)
+        e.d32(0x24, ((inv * dy) * 12) >> 12 & 0xFFFFFFFF)
+    elif t == 0x582:
+        e.d32(0x20, 0); e.d32(0x24, 0)
+    elif t == 0x5CD:                                # 0x418881 帧表回卷
+        e.d32(0x1C, 0)
+        rnd = (e.s32(0x30) + 1) & 0xFFFFFFFF
+        e.d32(0x30, rnd)
+        if rnd >= 6:
+            return False
+    # 0x41889F 尾部积分
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF)
+    self.p4_417880(e)                               # 0x40234C(2)：门控 0x2700000B
+    if e.s32(0x30) & 1:                             # 0x4188D0 尾镜像
+        e.d32(0x04, (0x280 - e.s32(0x04)) & 0xFFFFFFFF)
+        e.d32(0x08, (0x1E0 - e.s32(0x08)) & 0xFFFFFFFF)
+    if e.node is not None:                          # 0x418903 node+0x14 = x−0x60
+        e.node.dst = (e.s32(0x04) - 0x60, e.node.dst[1])
+    return e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -4430,6 +4749,7 @@ P4_BEH: dict[int, object] = {
     0x415D70: _beh_415D70, 0x416FA0: _beh_416FA0,
     0x411AD0: _beh_411AD0, 0x4115B0: _beh_4115B0,
     0x412510: _beh_412510, 0x419EC0: _beh_419EC0,
+    0x41E7B0: _beh_41E7B0, 0x4185C0: _beh_4185C0,   # 0x29 护卫状态机 / 0x27 帧表发射器
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
@@ -9091,6 +9411,68 @@ class Page4Mixin:
             eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)         # [+0x08] = y
             eb.d32(0x0C, 0x18)                             # [+0x0C] = 半径 24
             self._p4_q("ui49c").append(eb)                 # 0x435440: 显式入队 0x4AD49C
+
+    def _p4_43b_spawn(self, e, typ: int, tx: int, ty: int, arg: int) -> None:
+        """`0x43B610`（0x401997）/`0x43B360`（0x401E56）共用体：**朝指定点**生成一枚
+        0x31 族弹进 0x4AD49C（0x401861→0x435440）。速度公式与 0x43B070 相同：
+        `(4096/|d|)*分量*(0x43AF90(e,arg)>>4)>>8`；两分量全 0 不发。
+        两者唯一差异是弹型选择器：0x43B610 用 `0x43B5E0`（0x25→0x31000008、
+        否则 0x31000003），0x43B360 用 `0x43B020`（0x25→0x31000006、0x26→0x31000019、
+        0x27→0x31000001、否则 0x3100000A）。"""
+        dx = tx - e.s32(0x04)
+        dy = ty - e.s32(0x08)
+        spd = self.p4_43af90(e, arg) >> 4                 # 0x43B639 sar 4
+        inv = self.p4_45aa80(dx, dy)                      # 0x40231F → 0x45AA80
+        vx = ((inv * dx) * spd) >> 8                      # 0x43B64F sar 8
+        vy = ((inv * dy) * spd) >> 8
+        if vx == 0 and vy == 0:
+            return
+        eb = self.spawn(self._p4_q("ui49c"), typ, e.s32(0x04), e.s32(0x08), (vx, vy))
+        if eb is not None:
+            eb.raw[0x10] = 1                              # 0x4306C0 碰撞参与位
+            eb.d32(0x14, typ & 0xFFFFFFFF)
+            eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
+            eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
+            eb.d32(0x0C, 0x18)                            # 半径 24
+            self._p4_q("ui49c").append(eb)
+
+    def p4_43B610(self, e, tx: int, ty: int, arg: int) -> None:
+        """`0x43B610`（thunk 0x401997）：定点瞄准弹，弹型 0x43B5E0。"""
+        hi = e.s32(0x14) & 0xFF000000
+        typ = 0x31000008 if hi == 0x25000000 else 0x31000003   # 0x43B5E0
+        self._p4_43b_spawn(e, typ, tx, ty, arg)
+
+    def p4_43B360(self, e, tx: int, ty: int, arg: int) -> None:
+        """`0x43B360`（thunk 0x401E56）：定点瞄准弹，弹型 0x43B020。"""
+        self._p4_43b_spawn(e, self.p4_43B020(e), tx, ty, arg)
+
+    def p4_417880(self, e) -> None:
+        """`0x417880`（0x40234C）：**轮次门控护卫生成**。
+
+        ```
+        0x417885 cl = [e+0x30]（轮次）；cl < 2 → 不发
+        0x417891 edx = (0x1000 >> cl) − 1；[e+0x1C] & edx != 0 → 不发（帧门）
+        0x4178A0 x = (cl&1) ? −0x18 : 0x298（左右边轮换）
+        0x4178B2 y = arg==0 ? 0x50 : 0x190 − 0xA0*arg（arg 固定 2 → 0x50）
+        0x430400(&rec, x, y, 0x2700000B, 0) → 0x401FA5(0x4AD43C,&rec)
+        ```"""
+        cl = e.s32(0x30)
+        if cl < 2:
+            return
+        if e.s32(0x1C) & ((0x1000 >> cl) - 1):
+            return
+        x = -0x18 if (cl & 1) else 0x298
+        self._p4_ent43c(0x2700000B, x, 0x50)
+
+    def p4_4177f0(self, e, x: int, y: int) -> None:
+        """`0x4177F0`（0x401717）：发 **0x5100000A** 入 0x4AD4FC（ui4fc）。
+
+        `[e+0x30]&1`（轮次奇偶）→ 位置镜像 (0x280−x, 0x1E0−y)。
+        `0x430400(&rec, x, y, 0x5100000A, 0)` → `0x44B140(0x4AD4FC,&rec)`。"""
+        if e.s32(0x30) & 1:
+            x = 0x280 - x
+            y = 0x1E0 - y
+        self.spawn(self._p4_q("ui4fc"), 0x5100000A, x, y, 0)
 
     def _p4_dbg(self) -> None:
         import os
