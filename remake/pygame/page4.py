@@ -3505,6 +3505,24 @@ def _beh_4112F0(self, e) -> bool:
     return e.g32(0x18) != 0 and (w20_s >= 0 or x >= -0x18)
 
 
+def _beh_41D910(self, e) -> bool:
+    """`0x41D910`（thunk 0x4015A5）：**脱离加速**——t=++[0x1C]；t==0xF0 → [0x20]=−1
+    （起转）；否则 [0x20]≠0 且 t>0x1E → [0x20]−−（衰减）；
+    dx = [0x20]>>1（sar 1）；x −= dx、node.dst.x −= dx；
+    return x < 0x298 且 HP≠0（x 滑出右缘即灭）。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0xF0:
+        e.d32(0x20, -1 & 0xFFFFFFFF)
+    elif e.s32(0x20) != 0 and t > 0x1E:
+        e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+    dx = e.s32(0x20) >> 1                           # sar 1
+    e.d32(0x04, (e.s32(0x04) - dx) & 0xFFFFFFFF)
+    if e.node is not None:                          # 0x41D946 [node+0x14] −= dx
+        e.node.dst = (e.node.dst[0] - dx, e.node.dst[1])
+    return e.s32(0x04) < 0x298 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5011,6 +5029,7 @@ P4_BEH: dict[int, object] = {
     0x41A220: _beh_41A220,                          # 0x28 减速下坠纵摆
     0x40EDB0: _beh_40EDB0, 0x40EF60: _beh_40EF60, 0x40F0F0: _beh_40F0F0,   # 0x23 残骸链
     0x4113E0: _beh_4113E0, 0x4112F0: _beh_4112F0,   # 0x24 折返斜升 / 入场摆动
+    0x41D910: _beh_41D910,                          # 0x29 脱离加速
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
