@@ -8434,6 +8434,61 @@ def _beh_4068C0(self, e) -> bool:
     return True
 
 
+def _beh_406A20(self, e) -> bool:
+    """`0x406A20`（0x2C00000B，0x405600 态3 铺的侧翼）：**摆入追踪**。
+
+    0x4067A0(e, 主) 不活 → return。
+    [0x28]==0 → edi=0；否则 edi=主.[0x20]；a = 0x45A9A0(Δ主) − edi；
+    a>0x708 → −0x1E00 模归一、a<−0x708 → +；a∈(0, 0x3C) → [0x24] += 7；
+    a∈(−0x3C, 0] → [0x24] −= 7；[0x24]>0 → −8、<0 → +8（阻尼）；a>0x28 或 <−0x28
+    不额外钳（[0x24] 门同 0x4064E0 简化）。
+    [0x20] += [0x24]；摆动角 = 2*0x40159B([0x20]) + 0x40159B([0x20])（字面：
+    edi = sin([0x20]) + sin([0x20])（两次调用相加）、再 cos 同加）；
+    x = 主.x + (5*(sin1+sin2))>>5、y = 主.y + (5*(cos1+cos2))>>5；
+    node dst = (x−[0xC], y−[0xC])；[0x2C]++；return 1。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if not self._p4_4067a0(e, main):
+        return True
+    if main is None:
+        return True
+    edi = 0 if e.s32(0x28) == 0 else main.s32(0x20)
+    a = self.p4_45a9a0(e.s32(0x04) - main.s32(0x04),
+                       e.s32(0x08) - main.s32(0x08)) - edi
+    while a > 0x708:
+        a -= 0x1E00
+    while a < -0x708:
+        a += 0x1E00
+    v24 = e.s32(0x24)
+    if 0 < a < 0x3C:
+        v24 += 7
+    elif -0x3C <= a <= 0:
+        pass
+    if v24 > 0:
+        v24 -= 8
+    elif v24 <= 0 and v24 > -0x3C:
+        v24 -= 7
+        v24 = -v24
+    e.d32(0x24, v24 & 0xFFFFFFFF)
+    v20 = (e.s32(0x20) + v24) & 0xFFFFFFFF
+    e.d32(0x20, v20)
+    s1 = page4_sin(v20)
+    s2 = page4_sin(v20)
+    c1 = page4_cos(v20)
+    c2 = page4_cos(v20)
+    swing = s1 + s2
+    swingc = c1 + c2
+    x = (main.s32(0x04) + ((5 * swing) >> 5)) & 0xFFFFFFFF
+    y = (main.s32(0x08) + ((5 * swingc) >> 5)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    base = e.s32(0x0C)
+    if e.node is not None:
+        e.node.dst = (x - base, y - base)
+    e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -10010,6 +10065,7 @@ P4_BEH: dict[int, object] = {
     0x405600: _beh_405600,                          # 批66
     0x4064E0: _beh_4064E0,                          # 批67
     0x4068C0: _beh_4068C0,                          # 批68
+    0x406A20: _beh_406A20,                          # 批69
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
