@@ -8356,6 +8356,84 @@ def _beh_4064E0(self, e) -> bool:
     return True
 
 
+def _p4_4067a0(self, e, leader) -> bool:
+    """`0x4067A0`（thunk 0x4015D7）：**编队体存活/受击助手** —— leader 死或
+    HP==0 时：本 HP==0 → 不在屏则 0x2C00000D @(x,y) 入 0x4AD43C；node.dst.y += 0xC0、
+    node.rect.r += 0xC0（飞出）；HP!=0 → 0x430640 在屏门；不在屏 →
+    0x41000014 @(x,y) prm 0x10+(rand&3) 入 0x4AD4CC、return 0。"""
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if leader is None or leader.m[0x34] == 0 or e.g32(0x18) == 0:
+        if e.g32(0x18) == 0:
+            if not self.p4_430640(e):
+                self._p4_ent43c(0x2C00000D, x, y)
+            if e.node is not None:
+                e.node.dst = (e.node.dst[0], e.node.dst[1] + 0xC0)
+                e.node.rect = (e.node.rect[0], e.node.rect[1],
+                               e.node.rect[2] + 0xC0, e.node.rect[3])
+        return True
+    if not self.p4_430640(e):
+        self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y,
+                   0x10 + (self.p4_rand() & 3))
+        return False
+    return True
+
+
+def _beh_4068C0(self, e) -> bool:
+    """`0x4068C0`（0x2C00000A，母舰编队小体）：**跟随链 + 位置历史滑窗**。
+
+    0x4067A0(e, [0x1C] 句柄) 不活 → return。
+    [0x30]（打包位）== (主.y<<0x10)|(主.x&0xFFFF) → 已对齐，跳历史；
+    否则：历史滑窗 word[0x20..0x30] 逐级后移（[0x22]←[0x20]、[0x24]←[0x22]…），
+    byte[0x20]=主.[0x20]（低字节符号步进 → x += s8[0x20]、y += s8[0x21]）；
+    跟随差 word[0x30] ← 主位；x/y 差钳 ±0x7F → [0x2C]/[0x2D]、[0x32] 累积；
+    [0xC]==0x18 → [0x28]=word[0x2C]（步进到位）。
+    node dst = (x−[0xC], y−[0xC])；return 1。"""
+    links = getattr(self, "p4_links", {})
+    leader = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if not self._p4_4067a0(e, leader):
+        return True
+    if leader is None:
+        return True
+    pack = ((leader.s32(0x08) & 0xFFFF) << 0x10) | (leader.s32(0x04) & 0xFFFF)
+    if e.g32(0x30) != pack:
+        # 历史滑窗（word[0x20..0x30] 逐级后移）
+        for off in (0x2A, 0x28, 0x26, 0x24, 0x22):
+            e.d16(off + 2 - 0x02, e.g16(off))          # [off+2] = [off]
+        e.d16(0x22, e.g16(0x20))
+        sx = leader.g16(0x20) & 0xFF
+        sy = leader.g16(0x22) & 0xFF
+        sx = sx - 0x100 if sx & 0x80 else sx
+        sy = sy - 0x100 if sy & 0x80 else sy
+        e.d32(0x04, (e.s32(0x04) + sx) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x08) + sy) & 0xFFFFFFFF)
+        e.d16(0x20, leader.g16(0x24))
+        e.d16(0x24, leader.g16(0x26))
+        e.d16(0x26, leader.g16(0x28))
+        e.d16(0x28, leader.g16(0x2A))
+        e.d16(0x2A, leader.g16(0x2C))
+        e.d16(0x30, (leader.s32(0x04) - e.s32(0x04)) & 0xFFFF)
+        dx = leader.s32(0x04) - e.s32(0x04)
+        dy = leader.s32(0x08) - e.s32(0x08)
+        dx = max(-0x80, min(0x7F, dx))
+        dy = max(-0x80, min(0x7F, dy))
+        w30 = e.g16(0x30)
+        w30 = (w30 + dx) & 0xFFFF
+        e.d16(0x30, w30)
+        w32 = (e.g16(0x32) + dy) & 0xFFFF
+        e.d16(0x32, w32)
+        e.m[0x2C] = dx & 0xFF
+        e.m[0x2D] = dy & 0xFF
+        if e.s32(0x0C) == 0x18:
+            e.d16(0x28, e.g16(0x2C))
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    base = e.s32(0x0C)
+    if e.node is not None:
+        e.node.dst = (x - base, y - base)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -9931,6 +10009,7 @@ P4_BEH: dict[int, object] = {
     0x405510: _beh_405510,                          # 批65
     0x405600: _beh_405600,                          # 批66
     0x4064E0: _beh_4064E0,                          # 批67
+    0x4068C0: _beh_4068C0,                          # 批68
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
