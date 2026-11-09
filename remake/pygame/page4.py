@@ -7527,6 +7527,79 @@ def _beh_40F880(self, e) -> bool:
     return True
 
 
+def _beh_4114C0(self, e) -> bool:
+    """`0x4114C0`（0x24000009）：t=++[0x1C]；t==0xA 且 [0x20]≠0 →
+    0x24000009 @(80*(v−1)+0x50? 字面 ((v−1)&7+2)*80, −0x18) prm=−0x18 入 0x4AD43C、
+    [0x10]=1；x += t>>3、y −= t>>4；node dst=(x−0x18,y−0x18)；
+    return y < 0x1F8 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0xA and e.s32(0x20) != 0:
+        v = e.s32(0x20)
+        xx = (((v - 1) & 7) + 2) * 80
+        self._p4_ent43c(0x24000009, xx, -0x18)
+        e.m[0x10] = 1
+    x = (e.s32(0x04) + (t >> 3)) & 0xFFFFFFFF
+    y = (e.s32(0x08) - (t >> 4)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return y < 0x1F8 and e.g32(0x18) != 0
+
+
+def _beh_411790(self, e) -> bool:
+    """`0x411790`（0x2400000C）：t=[0x1C]−−；t==0 → [0x10]=1、[0x24]≠0 时
+    铺 0x2400000C @(rand%0xF0+0x1F8, rand%0x1E0+0x140) prm=[0x24]−1 入 0x4AD43C；
+    [0x20]≠0 → +1 else −1；[0x20] += [0x2C]?…（neg/sbb → ([0x20]==0)?−1:0）；
+    x −= 4；y −= [0x20]>>1（无符号语义 y += (~[0x20]>>?)）—— 字面：
+    ecx = ([0x20]==0) ? −1 : 0；eax = [0x20] + ecx；[0x20] = eax；y −= eax>>1；
+    node dst=(x−0x18,y−0x18)；return HP≠0 且 x>−0x18（尾未全读，按 0x411847 后
+    标准 cmp jge -0x18 处理）。"""
+    t = (e.s32(0x1C) - 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0:
+        e.m[0x10] = 1
+        if e.s32(0x24) != 0:
+            rx = self.p4_rand() % 0xF0 + 0x1F8
+            ry = self.p4_rand() % 0x1E0 + 0x140
+            self._p4_ent43c(0x2400000C, rx, ry, e.s32(0x24) - 1)
+    v = e.s32(0x20)
+    v = (v + (-1 if v == 0 else 0)) & 0xFFFFFFFF
+    e.d32(0x20, v)
+    x = (e.s32(0x04) - 4) & 0xFFFFFFFF
+    y = (e.s32(0x08) - (v >> 1)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return e.g32(0x18) != 0 and x > -0x18
+
+
+def _beh_411A00(self, e) -> bool:
+    """`0x411A00`（0x2400000F）：t=++[0x1C]；(t&0x38)==0 → 0x43B070(e,
+    [0x58]−(t&7)<<8)（表速阶梯）；x<[0x56CC8C] → [0x28]++、y>[0x56CC90] →
+    [0x2C]−−（追踪门）；[0x20]+=[0x28]、[0x24]+=[0x2C]；x=[0x20]>>3、y=[0x24]>>3；
+    node dst=(x−0x18,y−0x18)；return y>−0x18 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if (t & 0x38) == 0:
+        self.p4_43B070(e, (e.s32(0x58) - ((t & 7) << 8)) & 0xFFFFFFFF)
+    if e.s32(0x04) < self.p4_player_x():
+        e.d32(0x28, (e.s32(0x28) + 1) & 0xFFFFFFFF)
+    if e.s32(0x08) > self.p4_player_y():
+        e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+    x = (e.s32(0x20) - 0x100000000 if e.s32(0x20) & 0x80000000 else e.s32(0x20)) >> 3
+    y = (e.s32(0x24) - 0x100000000 if e.s32(0x24) & 0x80000000 else e.s32(0x24)) >> 3
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return y > -0x18 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -9092,6 +9165,7 @@ P4_BEH: dict[int, object] = {
     0x40FEA0: _beh_40FEA0,                          # 批54
     0x410470: _beh_410470,                          # 批55
     0x4108C0: _beh_4108C0,                          # 批56
+    0x4114C0: _beh_4114C0, 0x411790: _beh_411790, 0x411A00: _beh_411A00,   # 批58
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
