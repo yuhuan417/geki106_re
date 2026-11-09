@@ -6505,6 +6505,128 @@ def _beh_40BB60(self, e) -> bool:
     return self._p4_40b040_tail(e, main, x, y)
 
 
+def _beh_40C590(self, e) -> bool:
+    """`0x40C590`（0x2A000007，0x40A930 编队僚机）：**挂点体十三态**。
+
+    挂点 = [0x1C]+4 → 主；x = 主.x − 0x90、y = 主.y + 0x5A。
+    主掩码（[0x24]>>0x12&0x1FF）≠0：同 0x40B040 门（node.active、
+    [主 0x24]−=0x40000、[0x10]=掩码<0x3C）。掩码==0：主态 4→sin(45t−0xDC) 摆、
+    0xE→t∈{0x3C,0x67,0x91} 发 0x32000010；主.[0x20]−1 十三态表 0x40CC88：
+      0：(t&0x3F)==0 → 0x3100001B @(x,y) 入 49C
+      1：(t&7)==0 → 0x2A000005 @(x+rand%0x50, y+rand%0xC) 入 43C
+      3：(t%0xC)==0xB → 0x43B610(e, x±0x27F, y, −0x400)（镜像朝机）
+      4：(t%0x50)<0x36 且 (t&3)==3 → 8 向扇形（表 {0x62,0x64,0x5C,0x53,0x47,
+         0x38,0x26,0x14} 镜像 ±，spd −0x200 双发）
+      7：(t&1)==0 → ang=(0x1E−t)*30 反向：0x43B290(e, −sin, −cos, −0xE00)
+      9：(t&3)==0 → 0x43B070(e, 同 9 式)
+      10：t==0x78 → 0x3100001B + 0xC 偏移表 ×7 架（镜像朝机）入 49C
+      11：t==0x78 → 速度 = 6×单位向自机；t>0x78 且 (t&3)==0 → 三连 0x43B290
+         （(vx,vy)/(2vx−vy,2vy−vx)/(2vy−vx,vx−2vy) −0x380）
+      12：(t&0x1F)==0 → 环形 0x43B290 ×4（0x708 步 −0x64）+ 对向
+    收尾同 0x40B040（node dst=(x−0x32,y−0x2C)、主 HP 门、死亡三件）。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get((e.s32(0x1C) + 4) & 0x7FFFFFFF)
+    if main is None:
+        return False
+    x = (main.s32(0x04) - 0x90) & 0xFFFFFFFF
+    y = (main.s32(0x08) + 0x5A) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    mask = (main.g32(0x24) >> 0x12) & 0x1FF
+    if mask != 0:
+        nd = e.node
+        if nd is not None:
+            nd.active = 1 if (mask < 0xF0 and (mask & 1)) else 0
+        dec = 0 if (main.s32(0x1C) >= 0 and mask == 1 and main.s32(0x20) < 7) else 0x40000
+        main.d32(0x24, (main.g32(0x24) - dec) & 0xFFFFFFFF)
+        e.m[0x10] = 1 if mask < 0x3C else 0
+    else:
+        if main.s32(0x1C) < 0:
+            return self._p4_40b040_tail(e, main, x, y)
+        mt = main.s32(0x20)
+        if mt == 4:
+            a = (45 * main.s32(0x1C) - 0xDC) & 0xFFFFFFFF
+            s_ = page4_sin(a)
+            e.d32(0x08, (main.s32(0x08) + ((s_ >> 4) - s_)) & 0xFFFFFFFF)
+        elif mt == 0xE:
+            t1 = main.s32(0x1C)
+            if t1 in (0x3C, 0x67, 0x91):
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+        sub = (main.s32(0x20) - 1) if main.s32(0x28) == 0 else -1
+        if 0 <= sub <= 0xC:
+            t = main.s32(0x1C)
+            if sub == 0:
+                if (t & 0x3F) == 0:
+                    self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
+            elif sub == 1:
+                if (t & 7) == 0:
+                    self._p4_ent43c(0x2A000005, x + (self.p4_rand() % 0x50),
+                                    y + (self.p4_rand() % 0xC))
+            elif sub == 3:
+                q, r = divmod(t, 0xC)
+                if r == 0xB:
+                    dx = self.p4_player_x() - x
+                    vx = 0x27F if dx >= 0 else -0x27F
+                    self.p4_43B610(e, x + vx, y, -0x400 & 0xFFFFFFFF)
+            elif sub == 4:
+                q, r = divmod(t, 0x50)
+                if r < 0x36 and (t & 3) == 3:
+                    for k in range(8):
+                        v = (0x62, 0x64, 0x5C, 0x53, 0x47, 0x38, 0x26, 0x14)[k]
+                        if x < self.p4_player_x():
+                            v = -v
+                        self.p4_43B290(e, -v, v, -0x200 & 0xFFFFFFFF)
+                        self.p4_43B290(e, -v, -v, -0x200 & 0xFFFFFFFF)
+            elif sub == 7:
+                if (t & 1) == 0:
+                    ang = ((0x1E - t) * 30) & 0xFFFFFFFF
+                    c = page4_cos(ang)
+                    s_ = page4_sin(ang)
+                    self.p4_43B290(e, -s_, -c, -0xE00 & 0xFFFFFFFF)
+            elif sub == 9:
+                if (t & 3) == 0:
+                    spd = 0x600 if (t & 0xFC) > 0x14 else ((t >> 2) + 1) << 8
+                    self.p4_43B070(e, spd & 0xFFFFFFFF)
+            elif sub == 10:
+                if t == 0x78:
+                    self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
+                    offs = (-5, 0xC, 0, 12, 12, 12, 12, 12, 12, 12, 0, 12, 0xC)
+                    for i in range(7):
+                        dx = offs[i]
+                        dy = offs[i + 1] if i + 1 < len(offs) else 0xC
+                        if y >= self.p4_player_y():
+                            dy = -dy
+                        if x >= self.p4_player_x():
+                            dx = -dx
+                        self.spawn(self._p4_q("ui49c"), 0x3100001B,
+                                   x, y, (dx, dy))
+            elif sub == 11:
+                if t == 0x78:
+                    dx = self.p4_player_x() - x
+                    dy = self.p4_player_y() - y
+                    inv = self.p4_45aa80(dx, dy)
+                    e.d32(0x20, (((inv * dx) * 6) >> 12) & 0xFFFFFFFF)
+                    e.d32(0x24, (((inv * dy) * 6) >> 12) & 0xFFFFFFFF)
+                if t > 0x78 and (t & 3) == 0:
+                    vx = e.s32(0x20)
+                    vy = e.s32(0x24)
+                    self.p4_43B290(e, vx, vy, -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, 2 * vx - vy, 2 * vy - vx,
+                                   -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, 2 * vy - vx, vx - 2 * vy,
+                                   -0x380 & 0xFFFFFFFF)
+            elif sub == 12:
+                if (t & 0x1F) == 0:
+                    a = 0x708
+                    for _ in range(4):
+                        c = page4_cos(a)
+                        s_ = page4_sin(a)
+                        self.p4_43B290(e, c, s_ >> 2, 0x1C0)
+                        self.p4_43B290(e, -(s_ >> 2), -c, 0x1C0)
+                        a -= 0x64
+    return self._p4_40b040_tail(e, main, x, y)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8058,6 +8180,7 @@ P4_BEH: dict[int, object] = {
     0x40B040: _beh_40B040,                          # 批42
     0x40CE90: _beh_40CE90,                          # 批43
     0x40BB60: _beh_40BB60,                          # 批44
+    0x40C590: _beh_40C590,                          # 批45
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
