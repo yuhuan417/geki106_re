@@ -8569,6 +8569,41 @@ def _beh_406D30(self, e) -> bool:
     return self.p4_430640(e) and e.g32(0x18) != 0
 
 
+def _beh_406F60(self, e) -> bool:
+    """`0x406F60`（0x2C000011，0x4070E0 挂主小机）：**角向追踪**。
+
+    [0x28]（角速度）≥0x80 → −= 0x20；a = 0x45A9A0(Δ自机)；
+    [0x20] += sin(a)*[0x28]>>8、[0x24] += cos(a)*[0x28]>>8；
+    x = [0x20]>>8、y = [0x24]>>8；node dst=(x−0x48, y−0x48)；
+    HP==0 或 主死 → 主.[0x28] &= 0xFFFFFFFE、0x41000014 @(x,y) prm 0x10 入 0x4AD4CC、
+    return 0；else return 1。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    v28 = e.s32(0x28)
+    if v28 >= 0x80:
+        e.d32(0x28, (v28 - 0x20) & 0xFFFFFFFF)
+        v28 -= 0x20
+    a = self.p4_45a9a0(self.p4_player_x() - e.s32(0x04),
+                       self.p4_player_y() - e.s32(0x08))
+    e.d32(0x20, (e.s32(0x20) + ((page4_sin(a) * v28) >> 8)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + ((page4_cos(a) * v28) >> 8)) & 0xFFFFFFFF)
+    a20 = e.s32(0x20)
+    a24 = e.s32(0x24)
+    x = (a20 - 0x100000000 if a20 & 0x80000000 else a20) >> 8
+    y = (a24 - 0x100000000 if a24 & 0x80000000 else a24) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x48, y - 0x48)
+    dead = main is None or main.m[0x34] == 0
+    if e.g32(0x18) == 0 or dead:
+        if main is not None:
+            main.d32(0x28, main.g32(0x28) & 0xFFFFFFFE)
+        self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y, 0x10)
+        return False
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -10148,6 +10183,7 @@ P4_BEH: dict[int, object] = {
     0x406A20: _beh_406A20,                          # 批69
     0x406BD0: _beh_406BD0,                          # 批70
     0x406D30: _beh_406D30,                          # 批71
+    0x406F60: _beh_406F60,                          # 批72
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
