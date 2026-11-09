@@ -5035,6 +5035,46 @@ def _beh_41A480(self, e) -> bool:
     return True
 
 
+def _beh_41BDA0(self, e) -> bool:
+    """`0x41BDA0`（0x28000016）：**绕长机卫星**。
+
+    每帧 [0x18]=−1（无敌标记）；leader = [0x20]（句柄）；
+    leader[0x28]≠5 → [0x1C]++（公转角）；ang = 17t；
+    x = leader.x + (3*cos(17t)>>3)、y = leader.y + (3*sin(17t)>>3)；
+    leader.type==0x28000017 → [0x20] = leader[0x2C]（链式跟随）。
+    leader[0x28]==5 且 leader[0x24]==0x78 → SE 0xE + 10× 0x31000010
+    @(x, y+0xC*i) i=0..0x78 步 0xC 入 0x4AD49C、return 0；
+    leader 死（byte[+0x34]）→ 0x41000001@(x,y) 入 0x4AD4CC、return 0；
+    node dst=(x−0x18,y−0x18)；return 1。"""
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    links = getattr(self, "p4_links", {})
+    h = e.s32(0x20)
+    leader = links.get(h & 0x7FFFFFFF) if h else None
+    if leader is None:
+        return True
+    if leader.s32(0x28) != 5:
+        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    ang = (17 * e.s32(0x1C)) & 0xFFFFFFFF
+    x = leader.s32(0x04) + ((3 * page4_cos(ang)) >> 3)
+    y = leader.s32(0x08) + ((3 * page4_sin(ang)) >> 3)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if leader.s32(0x14) == 0x28000017:
+        e.d32(0x20, leader.g32(0x2C) & 0xFFFFFFFF)
+    leader = links.get(e.s32(0x20) & 0x7FFFFFFF) or leader
+    if leader.s32(0x28) == 5 and leader.s32(0x24) == 0x78:
+        self.p4_se_pan(0xE, (x - 0x140) << 4)
+        for i in range(0, 0x78 + 1, 0xC):
+            self.spawn(self._p4_q("ui49c"), 0x31000010, x, y + i, 0)
+        return False
+    if leader.m[0x34] != 0:
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        return False
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6571,6 +6611,7 @@ P4_BEH: dict[int, object] = {
     0x419C60: _beh_419C60, 0x419D50: _beh_419D50,   # 批25
     0x419F80: _beh_419F80, 0x41A300: _beh_41A300,   # 批26
     0x41A480: _beh_41A480,                          # 批27
+    0x41BDA0: _beh_41BDA0,                          # 批28
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
