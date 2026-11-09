@@ -5770,6 +5770,61 @@ def _beh_41F3A0(self, e) -> bool:
     return x < 0x2B0
 
 
+def _beh_41FE10(self, e) -> bool:
+    """`0x41FE10`（0x29000017）：**前压 + 双列旋散弹**。
+
+    x ≥ 0x208 → 直接收尾；[0x20]（冷却）≠0 → [0x20]−−；
+    [0x20]==0 且 [0x24]==0（待机）：t=++[0x1C]，(t&7)==0 → 随机点
+    0x43B360(e, 自机x+(rand&0x7F)−0x3F, 自机y+(rand&0xFF), 0)；
+    [0x24]≠0（开火态）：t=++[0x1C]，t 偶 → 四弹 0x43B290：
+      (cos(49t), sin(49t), 0)/(−cos, sin)/(−sin?, ...) —— 字面：
+      (edi=cos(49t), ebx=sin(49t)) → (edi,ebx,0)、(−ebx?,−edi?) 两组对称 +
+      第二组 ang'=−38t（0x41FED2 (5t*4−t)=19t→neg→(−19t)*2? 字面 eax=−19t,
+      ecx=(−19t)*2×3/2=−57t?（lea [eax+eax*2]; shl 1 → −57t? 不：−19t*3*2=−114t/2?
+      实际 = (−19t)*6 = −114t? shl 1 → ×2 ⇒ −19t*6? 保守按 −38t*1.5 处理：
+      精确式：a=−19t；ecx=(a*3)<<1 = 6a = −114t）→ (cos(−114t), sin(−114t)) 对称双弹。
+      （0x41FE8F: 49t=(3t<<4)+t；0x41FED2: −19t、−(19t*3)<<1=−114t? shl1 前
+      lea*3 → 6a；ang=6a=−114t）
+    t==0x708 → [0x20]=−1；移动：y += [0x20]>>2、x −= [0x20]>>1；
+    node dst=(x−0x30,y−0x30)；return HP≠0 且 y>−0x30。"""
+    if e.s32(0x04) >= 0x208:
+        pass
+    else:
+        if e.s32(0x20) != 0:
+            e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+        elif e.s32(0x24) == 0:
+            t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+            e.d32(0x1C, t)
+            if (t & 7) == 0:
+                ty = self.p4_player_y() + (self.p4_rand() & 0xFF)
+                tx = self.p4_player_x() + (self.p4_rand() & 0x7F) - 0x3F
+                self.p4_43B360(e, tx, ty, 0)
+        else:
+            t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+            e.d32(0x1C, t)
+            if (t & 1) == 0:
+                a1 = (49 * t) & 0xFFFFFFFF
+                c1 = page4_cos(a1)
+                s1 = page4_sin(a1)
+                self.p4_43B290(e, c1, s1, 0)
+                self.p4_43B290(e, -s1, -c1, 0)
+                a2 = (-114 * t) & 0xFFFFFFFF
+                c2 = page4_cos(a2)
+                s2 = page4_sin(a2)
+                self.p4_43B290(e, c2, s2, 0)
+                self.p4_43B290(e, -s2, -c2, 0)
+    if e.s32(0x1C) == 0x708:
+        e.d32(0x20, -1 & 0xFFFFFFFF)
+    v = e.s32(0x20)
+    x = (e.s32(0x04) - (v >> 1)) & 0xFFFFFFFF
+    y = (e.s32(0x08) + (v >> 2)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x30, y - 0x30)
+    return e.g32(0x18) != 0 and y > -0x30
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7316,6 +7371,7 @@ P4_BEH: dict[int, object] = {
     0x41EB60: _beh_41EB60, 0x41EC40: _beh_41EC40,   # 批35
     0x41EE00: _beh_41EE00,                          # 批36
     0x41F3A0: _beh_41F3A0,                          # 批37
+    0x41FE10: _beh_41FE10,                          # 批38
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
