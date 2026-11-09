@@ -7398,6 +7398,135 @@ def _beh_4108C0(self, e) -> bool:
     return x < 0x298 and e.g32(0x18) != 0
 
 
+def _beh_40F880(self, e) -> bool:
+    """`0x40F880`（thunk 0x4017EE；0x23000015 **中 boss 十三态**）。
+
+    word[0x2C]/word[0x2E] = 双向漂移速度（x>0x188 → −1 else +1；y>0xF0 → −1 else +1）。
+    态 = [0x1C]+1（>0xD 跳表外）：
+      0/1：word[0x2C]=−0x40；word[0x20]（态计时）==0 → 0x23000016 @(x−0x18? y)
+        ×2（prm rand&0x100 / −0x24）入 0x4AD43C；x==0x168 → 态=2+(x≥0?0xB:0)…
+        字面：word[0x2C]=0xFFD00000（高 16 位=态包）、态 = ((x sign)? 0xB : 1)+1
+      2：word[0x20]==0xF0 → 态=3
+      3：word[0x20]==0x16A → 态=4
+      4：word[0x20]<0 → 跳；==0 → 0x23000018 @(−0x18,−0x18) 入 0x4AD43C、
+        [0x30]=word[0x2C]；word[0x20] 分段 {<0x5A:0xFFE00000、<0xB4:0x400020、
+        <0x10E:0xFFE0FFE0}；态==3 → 态=4；否则 word[0x22]++、
+        态 = (word[0x22]−6<0 ? 0xC : 0xB+1?)（and 0xFD/add 0xC → <6?0xC:0xB+1=0xC?）
+        —— 字面：ax=word[0x22]−6；CF → and 0xFD → 0xFD/0；+0xC → 0x9/0xC
+      5：word[0x20]==0x50 → 态=6
+      6：word[0x20]==0xF0 → word[0x22]++、态 = (word[0x22]−3<0 ? 0x9 : 0x8)
+        （and 0xF9/add 8 → <3?0x9:0x8）
+      7：word[0x20]==0x78 → 0x4015BE(0x4AD4CC, x, y, 0x40) 大爆、return 0；
+        否则 0x401C08 ×2（word[0x20]、0）入 0x4AD4CC
+      8：word[0x20]==0x5A → 态=10
+      9：word[0x20]==0x16A → return 0；word[0x20]>0x78 → word[0x2C]=0x78−word[0x20]
+    态≠7 且 <7：word[0x20] = −(rand&0x3F)（随机负延迟）；态≥7 → word[0x20]=0；
+    态==7 → word[0x20]++。
+    HP==0 且 态≠7 → 态=7、word[0x20]=0、HP=−1、[0x10]=0。
+    x = ([0x24]+word[0x2C]+8)>>4、y = ([0x28]+word[0x2E]+8)>>4（8.4 定点）；
+    node dst=(x−0x48, y−0x48)；return 1。"""
+    x0 = e.s32(0x04)
+    y0 = e.s32(0x08)
+    w2c = e.g16(0x2C)
+    w2e = e.g16(0x2E)
+    if x0 > 0x188:
+        e.d16(0x2C, (w2c - 1) & 0xFFFF)
+    else:
+        e.d16(0x2C, (w2c + 1) & 0xFFFF)
+    if y0 > 0xF0:
+        e.d16(0x2E, (w2e - 1) & 0xFFFF)
+    else:
+        e.d16(0x2E, (w2e + 1) & 0xFFFF)
+    st = e.s32(0x1C)
+    st_old = st
+    wt = e.g16(0x20)
+    if st + 1 <= 0xD:
+        sub = st + 1
+        if sub in (1, 2):
+            e.d16(0x2C, -0x40 & 0xFFFF)
+            if wt == 0:
+                r = self.p4_rand() & 0x100
+                self._p4_ent43c(0x23000016, -0x18, -0x18)
+                self._p4_ent43c(0x23000016, -0x18, -0x18)
+            if x0 == 0x168:
+                e.d32(0x2C, 0xFFD00000)
+                e.d32(0x1C, 1 + (0xB if x0 >= 0 else 0) - 0xB + 2 - 2) \
+                    if False else None
+                e.d32(0x1C, 2 if sub == 1 else st)
+        elif sub == 3:
+            if wt == 0xF0:
+                e.d32(0x1C, 3)
+        elif sub == 4:
+            if wt == 0x16A:
+                e.d32(0x1C, 4)
+        elif sub == 5:
+            if wt < 0:
+                pass
+            elif wt == 0:
+                self._p4_ent43c(0x23000018, -0x18, -0x18)
+                e.d32(0x30, e.g32(0x2C) & 0xFFFFFFFF)
+            if wt < 0x5A:
+                e.d32(0x2C, 0xFFE00000)
+            elif wt < 0xB4:
+                e.d32(0x2C, 0x400020)
+            elif wt < 0x10E:
+                e.d32(0x2C, 0xFFE0FFE0)
+            if st == 3:
+                e.d32(0x1C, 4)
+            else:
+                w22 = (e.g16(0x22) + 1) & 0xFFFF
+                e.d16(0x22, w22)
+                e.d32(0x1C, 0xC if (w22 - 6) < 0 else 0x9)
+        elif sub == 6:
+            if wt == 0x50:
+                e.d32(0x1C, 5)
+        elif sub == 7:
+            if wt == 0xF0:
+                w22 = (e.g16(0x22) + 1) & 0xFFFF
+                e.d16(0x22, w22)
+                e.d32(0x1C, 0x9 if (w22 - 3) < 0 else 0x8)
+        elif sub == 8:
+            if wt == 0x78:
+                self.spawn(self._p4_q("ui4cc"), 0x23000019, x0, y0, 0x40)
+                return False
+            self.spawn(self._p4_q("ui4cc"), 0x23000019, x0, wt, 0x48)
+            self.spawn(self._p4_q("ui4cc"), 0x23000019, x0, wt, 0)
+        elif sub == 9:
+            if wt == 0x5A:
+                e.d32(0x1C, 9)
+        elif sub == 10:
+            if wt == 0x16A:
+                return False
+            if wt > 0x78:
+                e.d16(0x2C, (0x78 - wt) & 0xFFFF)
+    if st_old != 7 and st_old < 7:
+        e.d16(0x20, (-(self.p4_rand() & 0x3F)) & 0xFFFF)
+    elif st_old >= 7:
+        e.d16(0x20, 0)
+    if st_old == 7:
+        e.d16(0x20, (wt + 1) & 0xFFFF)
+    if e.g32(0x18) == 0 and st_old != 7:
+        e.d32(0x1C, 7)
+        e.d32(0x20, 0)
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+        e.m[0x10] = 0
+    w2c = e.g16(0x2C)
+    w2e = e.g16(0x2E)
+    w2cs = w2c - 0x10000 if w2c & 0x8000 else w2c
+    w2es = w2e - 0x10000 if w2e & 0x8000 else w2e
+    a24 = (e.s32(0x24) + w2cs) & 0xFFFFFFFF
+    a28 = (e.s32(0x28) + w2es) & 0xFFFFFFFF
+    e.d32(0x24, a24)
+    e.d32(0x28, a28)
+    x = ((a24 + 8) >> 4) & 0xFFFFFFFF
+    y = ((a28 + 8) >> 4) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x48, y - 0x48)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8963,6 +9092,7 @@ P4_BEH: dict[int, object] = {
     0x40FEA0: _beh_40FEA0,                          # 批54
     0x410470: _beh_410470,                          # 批55
     0x4108C0: _beh_4108C0,                          # 批56
+    0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
