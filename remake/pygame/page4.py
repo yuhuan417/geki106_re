@@ -8021,6 +8021,56 @@ def _p4_4130d0_tail(self, e, main, d: int) -> bool:
     return e.g32(0x18) != 0
 
 
+def _p4_45ac70(self, tgt: list, cur: list, lim: int) -> bool:
+    """`0x45AC70`（thunk 0x40105A）：**定角步进追踪** —— ang=0x45A9A0(Δ)；
+    *cur += (sin(ang)*lim + 0x80)>>8、*tgt += (cos(ang)*lim + 0x80)>>8
+    （[tgt]==0 且 [cur]==0 → return 0）。"""
+    if tgt[0] == 0 and cur[0] == 0:
+        return False
+    a = self.p4_45a9a0(tgt[0], cur[0])
+    s_ = page4_sin(a)
+    c = page4_cos(a)
+    cur[0] = (cur[0] + ((s_ * lim + 0x80) >> 8)) & 0xFFFFFFFF
+    tgt[0] = (tgt[0] + ((c * lim + 0x80) >> 8)) & 0xFFFFFFFF
+    return True
+
+
+def _beh_4053A0(self, e) -> bool:
+    """`0x4053A0`（0x2C000005，0x4047E0 三连铺出的光珠）：**追踪光珠**。
+
+    0x45AC70(&{dy}, &{dx}, 0x40)：x/y 8.8 累积向自机 0x40 步进；
+    再 0x45AC70(&[0x20], &[0x1C], 0x600)（自身位移分量同法）；
+    [0x28] += [0x20]、[0x24] += [0x1C]；x=[0x24]>>8、y=[0x28]>>8；
+    node dst=(x−0x18,y−0x18)；word[0x56CCA8]&3==0 → 0x4D000001 @(x,y) 入 0x4AD4CC
+    （拖尾）；0x4305F0(e,0x18)；return 在屏 且 HP≠0。"""
+    px, py = self.p4_player_x(), self.p4_player_y()
+    dx = px - e.s32(0x04)
+    dy = py - e.s32(0x08)
+    cur = [dx]
+    tgt = [dy]
+    if self._p4_45ac70(tgt, cur, 0x40):
+        e.d32(0x1C, (e.s32(0x1C) + cur[0]) & 0xFFFFFFFF)
+        e.d32(0x20, (e.s32(0x20) + tgt[0]) & 0xFFFFFFFF)
+    cur2 = [e.s32(0x1C)]
+    tgt2 = [e.s32(0x20)]
+    self._p4_45ac70(tgt2, cur2, 0x600)
+    e.d32(0x1C, cur2[0] & 0xFFFFFFFF)
+    e.d32(0x20, tgt2[0] & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    a28 = e.s32(0x28)
+    a24 = e.s32(0x24)
+    x = (a24 - 0x100000000 if a24 & 0x80000000 else a24) >> 8
+    y = (a28 - 0x100000000 if a28 & 0x80000000 else a28) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if (self.p4_frame_no() & 3) == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x4D000001, x, y, 0)
+    return self.p4_4305f0(e, 0x18) and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -9592,6 +9642,7 @@ P4_BEH: dict[int, object] = {
     0x416CF0: _beh_416CF0,                          # 批61
     0x412B60: _beh_412B60,                          # 批62
     0x4130D0: _beh_4130D0,                          # 批63
+    0x4053A0: _beh_4053A0,                          # 批64
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
