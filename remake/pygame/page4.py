@@ -5075,6 +5075,34 @@ def _beh_41BDA0(self, e) -> bool:
     return True
 
 
+def _beh_41BF60(self, e) -> bool:
+    """`0x41BF60`（0x28000018）：**两段冲刺弹**。
+
+    [0x28] += [0x20]、[0x2C] += [0x24]；x = [0x28]>>3、y = [0x2C]>>3；
+    [0x1C]−−==0（段切换）→ 速度 = 64×单位向自机（0x45AA80*Δ>>6）；
+    node dst=(x−0x18,y−0x18)；0x430640(e) 在屏判据；
+    return 在屏 且 HP≠0。"""
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x24)) & 0xFFFFFFFF)
+    a28 = e.s32(0x28)
+    a2c = e.s32(0x2C)
+    x = (a28 - 0x100000000 if a28 & 0x80000000 else a28) >> 3
+    y = (a2c - 0x100000000 if a2c & 0x80000000 else a2c) >> 3
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    t = (e.s32(0x1C) - 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0:
+        dx = self.p4_player_x() - x
+        dy = self.p4_player_y() - y
+        inv = self.p4_45aa80(dx, dy)
+        e.d32(0x20, ((inv * dx) >> 6) & 0xFFFFFFFF)
+        e.d32(0x24, ((inv * dy) >> 6) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return self.p4_430640(e) and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6612,6 +6640,7 @@ P4_BEH: dict[int, object] = {
     0x419F80: _beh_419F80, 0x41A300: _beh_41A300,   # 批26
     0x41A480: _beh_41A480,                          # 批27
     0x41BDA0: _beh_41BDA0,                          # 批28
+    0x41BF60: _beh_41BF60,                          # 批29
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
