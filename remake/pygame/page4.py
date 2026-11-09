@@ -5916,6 +5916,111 @@ def _beh_41F860(self, e) -> bool:
     return True
 
 
+def _beh_41F010(self, e) -> bool:
+    """`0x41F010`（thunk 0x4021C6；0x2900000E）：**七态机（0x41F2C4）**。
+
+    态 = [0x1C]&0xF（>6 跳过）：
+      0：x>0x15E → [0x1C]=1（进入态 1）
+      1：[0x28]−−；偶帧 [0x2C] += ([0x30]≥0 ? −1 : +1)（纵向收敛）；
+         [0x28]==−0x20 → [0x1C]=2；(t&7)==0 → 门 = (t&8 ? +0x60 : −0x60)+…
+         （and 0xC0/add −0x60 → (t&8)? +0x60 : −0x60）→ 0x43B360(e, 自机x,
+         自机y−门, 0)
+      2：[0x28]+=2；[0x2C] += ([0x30]≥0 ? −1 : +1)；[0x2C]==0 → [0x1C]=3
+      3：[0x1C] = t+0x10；==0x803 → [0x1C]=4、[0x28]=0x20；t>0x400 且 (t&0x70)==0
+         → 0x43B610(e, 自机x, 自机y+[0x58]+0x180, 0x500)
+      4：[0x28]−−；[0x28]<0 → [0x2C] += ([0x28]<0 ? +3 : −3)；[0x2C]==0 →
+         [0x1C]=5、[0x28]=0
+      5：[0x1C]=t+0x10；==0x805 → [0x1C]=6、[0x28]=−0x40；t≤0x405 且 (t&0xF)==5 →
+         弹幕块：v=[0x30]；奇偶分支定 (±0x10−8, ±8) 偏移 + ang=~t>>9&1；
+         0x430400(&rec, x, y, 0x31000015, &{dy?, dx?}) 入 0x4AD49C
+      6：[0x28]+=2；[0x2C] += ([0x30]<0 ? +1 : −1)
+    尾：[0x24]+=[0x2C]、[0x20]+=[0x28]；x=[0x20]>>3、y=[0x24]>>3；
+    node dst=(x−0x30,y−0x30)；return HP≠0 且 x<0x2B0。"""
+    st = e.s32(0x1C) & 0xF
+    t = e.s32(0x1C)
+    if st <= 6:
+        if st == 0:
+            if e.s32(0x04) > 0x15E:
+                e.d32(0x1C, 1)
+        elif st == 1:
+            v = (e.s32(0x28) - 1) & 0xFFFFFFFF
+            e.d32(0x28, v)
+            v_s = v - 0x100000000 if v & 0x80000000 else v
+            if (v & 1) == 0:
+                c30 = e.s32(0x30)
+                e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 >= 0 else 1)) & 0xFFFFFFFF)
+            if v_s == -0x20:
+                e.d32(0x1C, 2)
+            if (v & 7) == 0:
+                gate = 0x60 if (v & 8) else -0x60
+                self.p4_43B360(e, self.p4_player_x(),
+                               self.p4_player_y() - gate, 0)
+        elif st == 2:
+            e.d32(0x28, (e.s32(0x28) + 2) & 0xFFFFFFFF)
+            c30 = e.s32(0x30)
+            e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 >= 0 else 1)) & 0xFFFFFFFF)
+            if e.s32(0x2C) == 0:
+                e.d32(0x1C, 3)
+        elif st == 3:
+            nt = (t + 0x10) & 0xFFFFFFFF
+            e.d32(0x1C, nt)
+            if nt == 0x803:
+                e.d32(0x1C, 4)
+                e.d32(0x28, 0x20)
+            nt = e.s32(0x1C)
+            if nt > 0x400 and (nt & 0x70) == 0:
+                self.p4_43B610(e, self.p4_player_x(),
+                               self.p4_player_y() + e.s32(0x58) + 0x180, 0x500)
+        elif st == 4:
+            v = (e.s32(0x28) - 1) & 0xFFFFFFFF
+            e.d32(0x28, v)
+            v_s = v - 0x100000000 if v & 0x80000000 else v
+            c30 = e.s32(0x30)
+            if v_s < 0:
+                e.d32(0x2C, (e.s32(0x2C) + 3) & 0xFFFFFFFF)
+            else:
+                e.d32(0x2C, (e.s32(0x2C) - 3) & 0xFFFFFFFF)
+            if e.s32(0x2C) == 0:
+                e.d32(0x1C, 5)
+                e.d32(0x28, 0)
+        elif st == 5:
+            nt = (t + 0x10) & 0xFFFFFFFF
+            e.d32(0x1C, nt)
+            if nt == 0x805:
+                e.d32(0x1C, 6)
+                e.d32(0x28, -0x40 & 0xFFFFFFFF)
+            nt = e.s32(0x1C)
+            if nt <= 0x405 and (nt & 0xF) == 5:
+                c30 = e.s32(0x30)
+                if c30 != 0:
+                    odd = (nt & 0x200) != 0
+                    dy = (0x10 - 8) if odd else (-8)
+                    dx = (-8) if odd else (0x10 - 8)
+                    ax = ~nt & 0xFFFFFFFF
+                else:
+                    dy = (0x10 - 8) if (nt & 0x200) else (-8)
+                    dx = dy
+                    ax = nt
+                abit = (ax >> 9) & 1
+                self.spawn(self._p4_q("ui49c"), 0x31000015,
+                           e.s32(0x04), e.s32(0x08), (dx, dy, abit))
+        elif st == 6:
+            e.d32(0x28, (e.s32(0x28) + 2) & 0xFFFFFFFF)
+            c30 = e.s32(0x30)
+            e.d32(0x2C, (e.s32(0x2C) + (1 if c30 < 0 else -1)) & 0xFFFFFFFF)
+    s24 = (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF
+    e.d32(0x24, s24)
+    s20 = (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF
+    e.d32(0x20, s20)
+    x = (s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 3
+    y = (s24 - 0x100000000 if s24 & 0x80000000 else s24) >> 3
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x30, y - 0x30)
+    return e.g32(0x18) != 0 and x < 0x2B0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7464,6 +7569,7 @@ P4_BEH: dict[int, object] = {
     0x41F3A0: _beh_41F3A0,                          # 批37
     0x41FE10: _beh_41FE10,                          # 批38
     0x41F860: _beh_41F860,                          # 批39
+    0x41F010: _beh_41F010,                          # 批40
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
