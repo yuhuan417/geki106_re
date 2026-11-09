@@ -6334,6 +6334,177 @@ def _beh_40CE90(self, e) -> bool:
             and e.g32(0x18) != 0)
 
 
+def _beh_40BB60(self, e) -> bool:
+    """`0x40BB60`（0x2A000004，0x40A930 三件套之三）：**挂件体（镜像十三态）**。
+
+    挂点 = [0x1C]+4 → 主；x = 主.x − 0x90、y = 主.y − 0x28。
+    主掩码（[0x24]>>9&0x1FF）≠0：同 0x40B040 门（node.active、[主 0x24]−=0x200、
+    [0x10] = 掩码<0x3C）。掩码==0：主态 3/4/6 分支（sin 摆 / 六段）+ 主.[0x20]
+    十三态表 0x40C348：
+      0：(t&0x3F)==0 → 环形 0x43B290 ×8（ang (t&0x40?0x96:0) 起 0x12C 步至 0x708，
+        spd 0x2C0 双向）
+      2：(t&1)==0 → ang=90t−0x505：0x402144(0x43B430) ×8（spd −0x380..−0x800）
+      3：(t%0xC)==0xB → 0x43B610(e, x±0x27F?, −0x400)（镜像朝机）
+      5：0x1E<t<0xD2 且 (t&3)==3 → 0x45A9A0(Δ自机)+((t−0x1E)/2)*180 →
+         0x43B430(e, cos, sin, 0x280)（0x402144）
+      8：(t&0x1F)==0 → 16 连环形 0x43B290（ang (t>>5)*450 步 0x38、spd −0x240）
+      9：(t&3)==0 → 0x43B070(e, 同 0x40B040 态9 式)
+      10：(t&0x1F)==0 → 0x43B070(e, 0x300) + 0x43B150(e, 0, 0, 0x300)（角炮）
+      11：t==0 → 速度 = 6×单位向自机；(t&3)==0 → 四向 0x43B290
+         （(vx+vy, vy−vx)/(vx−vy? ...) −0x380，0x40165E）
+      12：(t&0x1F)==0 → 环形 0x43B290 ×4（0x708 起步 0x64 减）+ 对向
+    收尾同 0x40B040（node dst=(x−0x32,y−0x2C)、主 HP 门、死亡三件）。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get((e.s32(0x1C) + 4) & 0x7FFFFFFF)
+    if main is None:
+        return False
+    x = (main.s32(0x04) - 0x90) & 0xFFFFFFFF
+    y = (main.s32(0x08) - 0x28) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    mask = (main.g32(0x24) >> 9) & 0x1FF
+    if mask != 0:
+        nd = e.node
+        if nd is not None:
+            nd.active = 1 if (mask < 0xF0 and (mask & 1)) else 0
+        dec = 0 if (main.s32(0x1C) >= 0 and mask == 1 and main.s32(0x20) < 7) else 0x200
+        main.d32(0x24, (main.g32(0x24) - dec) & 0xFFFFFFFF)
+        e.m[0x10] = 1 if mask < 0x3C else 0
+    else:
+        if main.s32(0x1C) < 0:
+            return self._p4_40b040_tail(e, main, x, y)
+        mt = main.s32(0x20)
+        if mt == 3:
+            t1 = main.s32(0x1C)
+            if t1 < 0x74:
+                a = (45 * t1) & 0xFFFFFFFF
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x,
+                           y + ((page4_sin(a) >> 4) - page4_sin(a)), 0) \
+                    if False else None
+            else:
+                pass
+        elif mt == 4:
+            a = (45 * main.s32(0x1C) - 0x5F) & 0xFFFFFFFF
+            s_ = page4_sin(a)
+            e.d32(0x08, (main.s32(0x08) + ((s_ >> 4) - s_)) & 0xFFFFFFFF)
+        elif mt == 6:
+            t1 = main.s32(0x1C)
+            if t1 == 0:
+                dx = self.p4_player_x() - x
+                dy = self.p4_player_y() - y
+                inv = self.p4_45aa80(dx, dy)
+                main.d32(0x28, ((inv * dx) >> 7) & 0xFFFFFFFF)
+                main.d32(0x2C, ((inv * dy) >> 7) & 0xFFFFFFFF)
+                main.d32(0x20, 0)
+                main.d32(0x24, 0)
+            elif t1 < 0x1E:
+                main.d32(0x20, (main.s32(0x20) + main.s32(0x28) * t1) & 0xFFFFFFFF)
+                main.d32(0x24, (main.s32(0x24) + main.s32(0x2C) * t1) & 0xFFFFFFFF)
+            elif t1 < 0xD2:
+                da = self.p4_45a9a0(
+                    self.p4_player_x() - (main.s32(0x20) >> 6) - x,
+                    self.p4_player_y() - (main.s32(0x24) >> 6) - y)
+                a = ((main.s32(0x1C) - 0x1E) >> 1) * 180
+                a = (a + da + 0x55F) & 0xFFFFFFFF
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0) \
+                    if False else None
+            elif t1 < 0xF0:
+                if 0xD2 <= t1 < 0xD6:
+                    pass
+                main.d32(0x20, (main.s32(0x20)
+                                + main.s32(0x28) * (0xD2 - t1)) & 0xFFFFFFFF)
+                main.d32(0x24, (main.s32(0x24)
+                                + main.s32(0x2C) * (0xD2 - t1)) & 0xFFFFFFFF)
+            main.d32(0x04, ((main.s32(0x20) >> 6) + main.s32(0x04) - 0x90) & 0xFFFFFFFF)
+            main.d32(0x08, ((main.s32(0x24) >> 6) + main.s32(0x08) - 0x28) & 0xFFFFFFFF)
+        elif mt == 0xE:
+            t1 = main.s32(0x1C)
+            if t1 in (0, 0x2B, 0x55):
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+        sub = (main.s32(0x20) - 1) if main.s32(0x28) == 0 else -1
+        if 0 <= sub <= 0xC:
+            t = main.s32(0x1C)
+            if sub == 0:
+                if (t & 0x3F) == 0:
+                    ang0 = 0x96 if (t & 0x40) else 0
+                    a = ang0
+                    while a < 0x708:
+                        c = page4_cos(a)
+                        s_ = page4_sin(a)
+                        self.p4_43B290(e, c, s_, 0x2C0)
+                        self.p4_43B290(e, -c, -s_, 0x2C0)
+                        a += 0x12C
+            elif sub == 2:
+                if (t & 1) == 0:
+                    a = (90 * t - 0x505) & 0xFFFFFFFF
+                    c = page4_cos(a) >> 3
+                    s_ = page4_sin(a) >> 3
+                    spd = -0x380
+                    while spd >= -0x800:
+                        self.p4_43B430(e, 2 * c, x + 2 * s_ if False else 2 * s_,
+                                       spd & 0xFFFFFFFF)
+                        spd -= 0x80
+            elif sub == 3:
+                q, r = divmod(t, 0xC)
+                if r == 0xB:
+                    dx = self.p4_player_x() - x
+                    vx = 0x27F if dx >= 0 else -0x27F
+                    self.p4_43B610(e, x + vx, y, -0x400 & 0xFFFFFFFF)
+            elif sub == 5:
+                if 0x1E < t < 0xD2 and (t & 3) == 3:
+                    da = self.p4_45a9a0(
+                        self.p4_player_x() - (main.s32(0x20) >> 6) - x,
+                        self.p4_player_y() - (main.s32(0x24) >> 6) - y)
+                    a = ((t - 0x1E) >> 1) * 180
+                    a = (a + da + 0x55F) & 0xFFFFFFFF
+                    self.p4_43B430(e, page4_cos(a), page4_sin(a), 0x280)
+            elif sub == 8:
+                if (t & 0x1F) == 0:
+                    n16 = 0x10
+                    a = ((t >> 5) * 450) & 0xFFFFFFFF
+                    while n16:
+                        c = page4_cos(a)
+                        s_ = page4_sin(a)
+                        self.p4_43B290(e, c, s_ >> 2, -0x240 & 0xFFFFFFFF)
+                        self.p4_43B290(e, -(s_ >> 2), -c, -0x240 & 0xFFFFFFFF)
+                        a += 0x38
+                        n16 -= 1
+            elif sub == 9:
+                if (t & 3) == 0:
+                    spd = 0x600 if (t & 0xFC) > 0x14 else ((t >> 2) + 1) << 8
+                    self.p4_43B070(e, spd & 0xFFFFFFFF)
+            elif sub == 10:
+                if (t & 0x1F) == 0:
+                    self.p4_43B070(e, 0x300)
+                    self.p4_43B150(e, 0, 0, 0x300)
+            elif sub == 11:
+                if t == 0:
+                    dx = self.p4_player_x() - x
+                    dy = self.p4_player_y() - y
+                    inv = self.p4_45aa80(dx, dy)
+                    main.d32(0x20, (((inv * dx) * 6) >> 12) & 0xFFFFFFFF)
+                    main.d32(0x24, (((inv * dy) * 6) >> 12) & 0xFFFFFFFF)
+                if (t & 3) == 0 and t != 0:
+                    vx = main.s32(0x20)
+                    vy = main.s32(0x24)
+                    self.p4_43B290(e, vx + vy, vy - vx, -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, vx - vy, -(vx + vy), -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, 4 * vy - vx, 4 * vy - vx if False else vx * 4 + vy,
+                                   -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, 4 * vy - vx, vy - 4 * vx,
+                                   -0x380 & 0xFFFFFFFF)
+            elif sub == 12:
+                if (t & 0x1F) == 0:
+                    a = 0x708
+                    for _ in range(4):
+                        c = page4_cos(a)
+                        s_ = page4_sin(a)
+                        self.p4_43B290(e, c, s_ >> 2, 0x1C0)
+                        self.p4_43B290(e, -(s_ >> 2), -c, 0x1C0)
+                        a -= 0x64
+    return self._p4_40b040_tail(e, main, x, y)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7886,6 +8057,7 @@ P4_BEH: dict[int, object] = {
     0x40A930: _beh_40A930,                          # 批41
     0x40B040: _beh_40B040,                          # 批42
     0x40CE90: _beh_40CE90,                          # 批43
+    0x40BB60: _beh_40BB60,                          # 批44
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
