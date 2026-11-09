@@ -378,6 +378,37 @@ ENT23_BEH_THUNK = {
     0x401677: 0x415410, 0x4011D6: 0x415480, 0x401578: 0x4156D0, 0x401906: 0x4158A0,
     0x40124E: 0x415980, 0x401EA6: 0x415A90, 0x4022D4: 0x415BB0, 0x401CD0: 0x415CE0,
     0x401E9C: 0x415D70, 0x4015F0: 0x415E60, 0x4021CB: 0x414D60,
+    # 0x27 族（0x415EF0 ctor）
+    0x401E7E: 0x4164B0, 0x401DB1: 0x4165A0, 0x402239: 0x416680, 0x401C71: 0x416770,
+    0x401348: 0x416860, 0x401BEF: 0x416940, 0x402356: 0x416A50, 0x402414: 0x416B20,
+    0x4010CD: 0x416BE0, 0x4014BF: 0x416CF0, 0x401A78: 0x416FA0, 0x401E0B: 0x417160,
+    0x4016CC: 0x417280, 0x402117: 0x417410, 0x4014F6: 0x4175C0, 0x4013A7: 0x4185C0,
+    0x4021E4: 0x418C30,
+    # 0x28 族（0x418CB0 ctor）
+    0x40164A: 0x4194A0, 0x401433: 0x419540, 0x4019F6: 0x419610, 0x4022E8: 0x4196E0,
+    0x401B8B: 0x4197B0, 0x40248C: 0x419850, 0x40254A: 0x419910, 0x4019F1: 0x419A30,
+    0x4021C1: 0x419C60, 0x401B3B: 0x419D50, 0x401CE4: 0x419E30, 0x402018: 0x419EC0,
+    0x401523: 0x419F80, 0x401E92: 0x41A090, 0x4013AC: 0x41A180, 0x4024B9: 0x41A220,
+    0x4018BB: 0x419B70, 0x4010AA: 0x41A300, 0x4018F2: 0x41A480, 0x401230: 0x41AE20,
+    0x4012B7: 0x41BDA0, 0x401B18: 0x41BF60,
+    # 0x29 族（0x41C040 ctor）
+    0x402121: 0x41CF70, 0x40125D: 0x41D080, 0x401758: 0x41D330, 0x4015A5: 0x41D910,
+    0x40134D: 0x41D990, 0x401D7F: 0x41DCE0, 0x4018A7: 0x41E7B0, 0x40211C: 0x41E960,
+    0x4011EF: 0x41EB60, 0x4021C6: 0x41F010, 0x4019D8: 0x41EC40, 0x401EFB: 0x41EE00,
+    0x4010BE: 0x41F3A0, 0x4023A1: 0x41F610, 0x4017E9: 0x41F700, 0x4018CF: 0x41F780,
+    0x401398: 0x41F860, 0x40217B: 0x41FE10, 0x4013C5: 0x4200C0, 0x401CCB: 0x421FE0,
+    0x401384: 0x4220A0, 0x40140B: 0x422170, 0x40209F: 0x4225E0, 0x401474: 0x422830,
+    0x401F6E: 0x422950, 0x401A82: 0x422A90, 0x40166D: 0x422D40,
+    # 0x2A 族（0x40A410 ctor）
+    0x4018C5: 0x40A930, 0x401E60: 0x40B040, 0x401ED8: 0x40BB60, 0x401B22: 0x40C590,
+    0x4011BD: 0x40CE90, 0x401E29: 0x40D030,
+    # 0x2C 族（0x403AA0 ctor）
+    0x401B9F: 0x4047E0, 0x401712: 0x404D00, 0x401E33: 0x404FA0, 0x401A55: 0x4051A0,
+    0x40101E: 0x4053A0, 0x401EE7: 0x405510, 0x40136B: 0x405600, 0x4015DC: 0x4064E0,
+    0x401A14: 0x4068C0, 0x401AA0: 0x406A20, 0x4010C8: 0x406BD0, 0x401D66: 0x406D30,
+    0x40158C: 0x407350, 0x40103C: 0x406F60, 0x402167: 0x4070E0, 0x4015E6: 0x407180,
+    # 0x2D 族（0x408150 ctor）
+    0x401EBF: 0x408540, 0x4017DA: 0x4098E0, 0x401690: 0x409C20, 0x4014AB: 0x40A020,
 }
 
 
@@ -2292,6 +2323,116 @@ def _beh_410F20(self, e) -> bool:
     return e.s32(4) >= -0x18 and e.g32(0x18) != 0
 
 
+def _beh_4121C0(self, e) -> bool:
+    """`0x4121C0`（0x25000001 ×66）：四阶段——t<0x18 弹跳动画；t∈[0x18,0xB0) 8.8 定速
+    直线（[0x20]+=[0x28];[0x24]+=[0x2C];>>2 定屏，byte[0x10]=1）；t==0xB0 开火；
+    t∈[0xB0,0xC8) 反向弹跳；t≥0xC8 自灭。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < 0x18:
+        if (t & 3) == 3 and e.node is not None:
+            e.node.rect = (e.node.rect[0] - 0x30, e.node.rect[1],
+                           e.node.rect[2] - 0x30, e.node.rect[3])
+        return e.g32(0x18) != 0
+    if t < 0xB0:
+        e.m[0x10] = 1
+        e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+        e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+        x2, y2 = e.s32(0x20), e.s32(0x24)
+        e.d32(8, (y2 >> 2) & 0xFFFFFFFF)
+        e.d32(4, (x2 >> 2) & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.dst = ((x2 >> 2) - 0x18, (y2 >> 2) - 0x18)
+        return e.g32(0x18) != 0
+    if t == 0xB0:
+        self.p4_43B070(e, 0)                                    # 0x40213F 开火
+        return e.g32(0x18) != 0
+    if t < 0xC8:
+        if (t & 3) == 3 and e.node is not None:
+            e.node.rect = (e.node.rect[0] + 0x30, e.node.rect[1],
+                           e.node.rect[2] + 0x30, e.node.rect[3])
+        return e.g32(0x18) != 0
+    return False                                                 # t ≥ 0xC8 自灭
+
+
+def _beh_4122D0(self, e) -> bool:
+    """`0x4122D0`（0x25000002 ×52）：与 0x4121C0 同构，t==0x18 开火 + byte[0x10]=1。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < 0x18:
+        if (t & 3) == 3 and e.node is not None:
+            e.node.rect = (e.node.rect[0] - 0x30, e.node.rect[1],
+                           e.node.rect[2] - 0x30, e.node.rect[3])
+        return e.g32(0x18) != 0
+    if t == 0x18:
+        e.m[0x10] = 1
+        self.p4_43B070(e, 0)
+        return e.g32(0x18) != 0
+    if t < 0xB0:
+        e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+        e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+        x2, y2 = e.s32(0x20), e.s32(0x24)
+        e.d32(8, (y2 >> 2) & 0xFFFFFFFF)
+        e.d32(4, (x2 >> 2) & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.dst = ((x2 >> 2) - 0x18, (y2 >> 2) - 0x18)
+        return e.g32(0x18) != 0
+    if t < 0xC8:
+        if (t & 3) == 3 and e.node is not None:
+            e.node.rect = (e.node.rect[0] + 0x30, e.node.rect[1],
+                           e.node.rect[2] + 0x30, e.node.rect[3])
+        return e.g32(0x18) != 0
+    return False
+
+
+def _beh_416860(self, e) -> bool:
+    """`0x416860`（0x27000005 ×57）：匀速左移 + 正弦纵摆 + x≤−0x18 碰撞开 +
+    x==0x1D8 && 锁定 → 开火；渐进减速[0x20]+=[0x24]（cmpgate y≥F0）；尾调 0x416440。"""
+    e.d32(4, (e.s32(4) + e.s32(0x1C)) & 0xFFFFFFFF)
+    vy = 2 if e.s32(8) >= 0xF0 else -2                           # 0x416878 setge/dec/and 2/dec
+    vy = -vy if vy == 2 else 2                                    # dec edx → 0 or −1 → and 2 → 0/2 → dec → −1/1
+    vy = -vy  # 再反：原版 add [0x24], edx（edx ∈ {−1,1}）
+    e.d32(0x24, (e.s32(0x24) + (1 if e.s32(8) >= 0xF0 else -1)) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(8, (e.s32(0x20) >> 3) & 0xFFFFFFFF)
+    e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
+    if e.s32(0x1C) == 6 and e.s32(4) == 0x1D8 and e.s32(0x28) != 0:
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    # 0x401F91 → 0x416440 boss spawner 检查（复刻侧由 op2 直接生成，跳过）
+    return e.g32(0x18) != 0 and e.s32(4) < 0x298
+
+
+def _beh_4164B0(self, e) -> bool:
+    """`0x4164B0`（0x27000001 ×51）：亚像素直线（[0x1C]+=[0x24];[0x20]+=[0x28]）+8.3/8.2
+    定点定屏 + 帧动画 + x<0x133 → 开火；尾调 0x416440。"""
+    if e.s32(4) < 0x133:
+        cnt = e.s32(0x2C) + 1
+        e.d32(0x2C, cnt & 0xFFFFFFFF)
+        vy = 2 if cnt > 0x30 else -2                             # 0x4164CB setg/dec/and 2/dec
+        vy = -vy  # 修正：and 2 → 0 or 2; dec → −1 or 1
+        e.d32(0x24, (e.s32(0x24) + (1 if cnt > 0x30 else -1)) & 0xFFFFFFFF)
+        vx = 1 if cnt > 0x18 else -1                             # 0x4164DD setg/dec/and −2/dec
+        e.d32(0x28, (e.s32(0x28) + vx) & 0xFFFFFFFF)
+    sub_x = e.s32(0x1C)
+    sub_y = e.s32(0x20)
+    e.d32(0x1C, (sub_x + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x20, (sub_y + e.s32(0x28)) & 0xFFFFFFFF)
+    sub_x = e.s32(0x1C)
+    sub_y = e.s32(0x20)
+    x = (sub_x + 4) >> 3
+    y = (sub_y + 2) >> 2
+    e.d32(4, x & 0xFFFFFFFF)
+    e.d32(8, y & 0xFFFFFFFF)
+    if x < 0x133 and sub_y == 0:
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    # 0x401F91 → 0x416440
+    return e.g32(0x18) != 0 and e.s32(8) < 0x1F8
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -3781,6 +3922,8 @@ P4_BEH: dict[int, object] = {
     0x416A50: _beh_416A50, 0x416940: _beh_416940,
     0x4127E0: _beh_4127E0,
     0x411470: _beh_411470, 0x410F20: _beh_410F20,
+    0x4121C0: _beh_4121C0, 0x4122D0: _beh_4122D0,
+    0x416860: _beh_416860, 0x4164B0: _beh_4164B0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
