@@ -6150,6 +6150,163 @@ def _p4_40a930_death(self, e, x: int, y: int) -> bool:
     return False
 
 
+def _beh_40B040(self, e) -> bool:
+    """`0x40B040`（0x2A000003，0x40A930 三件套之二）：**挂件体十三态**。
+
+    挂点 = [0x1C]+4 句柄 → 挂主体；x = 主.x − 0x8C、y = 主.y − 0x6E。
+    主.[0x24]&0x1FF（编队掩码）≠0：掩码 <0xF0 且奇 → node.active=1；
+    主.[0x1C]≥0 且 掩码==1 且 主.[0x20]<7 → [主.[0x24]]−=0（保留）；
+    [主.[0x24]]−=1；[0x10] = 掩码<0x3C。
+    掩码==0：主.[0x1C]<0 → 直接收尾；主.[0x20]==4 → y = sin(45t+0x10E)?? 
+    （(5t)*8+0x10E 的 sin>>4 − sin + 主.y）；==0xE → t∈{0x78,0xA3,0xCD} →
+    发 0x32000010 @(x,y) 入 0x4AD49C。
+    主.[0x28]==0 → 态=主.[0x20]−1（>0xC 跳过）；十三态表 0x40B738：
+      0：(t&0x3F)==0 → 0x3100001B @(x,y) 入 49C
+      1：(t&7)==4 → 0x2A000005 @(x+rand%0x50, y+rand%0xC)（0x401997 朝机
+         −0x400 速）当 rand%0xC==0xB
+      3：(t%0x50)==0x36 门 → (t&3)==3 → 8 向扇形 0x43B290（esi 表 {0x62,0x64,
+         0x5C,0x53,0x47,0x38,0x26,0x14} 镜像 ±，spd −0x200）
+      7：(t&1)==0 → ang=(0x1E−t)*30：0x43B290(e, cos(ang), sin(ang), −0xE00)
+      9：(t&3)==0 → 0x43B070(e, (t&0xFC)>0x14 ? 0x600 : ((t>>2)+1)<<8)
+      10：t==0 → 0x3100001B @(x,y) + 0xC dword 偏移表
+         {−5,0xC,0,12,12,12,12,12,12,12,0,12} ×7 架 0x3100001B 入 49C（镜像朝机）
+      11：t==0x3C → 速度 = 6×单位向自机（0x45AA80*Δ*6>>12）；t>0x3C 且 (t&3)==0 →
+         三连 0x43B290（(vx,vy,−0x380)/(2vx−vy,2vy−vx)/(2vy? ...) 旋转三向）
+      12：(t&0x1F)==0 → 环形 0x43B290：esi/edi=cos/sin(0x708)，4 次减 0x64
+         循环：(cos, sin>>2, 0x1C0)/(−sin>>2, −cos, 0x1C0)
+    收尾：node dst=(x−0x32, y−0x2C)；主.[0x20]≥0xD → [主 0x18]=0x186A0；
+    [主 0x18]==0 → 0x61000004 @(x,y,0x48) 入 52C + 0x2A000002 @(0,0,prm=主)
+    入 0x4AD43C + 0x32000007 @(x,y) 入 49C；主.[0x24] = (掩码&0xFFFFFE00)+0x1E0。
+    主.[0x30]==0 → 0x4A000007 @(x,y,prm=主) 入 4CC；return byte[主+0x30]。"""
+    links = getattr(self, "p4_links", {})
+    h = e.s32(0x1C) + 4
+    main = links.get(h & 0x7FFFFFFF)
+    if main is None:
+        return False
+    x = (main.s32(0x04) - 0x8C) & 0xFFFFFFFF
+    y = (main.s32(0x08) - 0x6E) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    mask = main.g32(0x24) & 0x1FF
+    if mask != 0:
+        nd = e.node
+        if nd is not None:
+            nd.active = 1 if (mask < 0xF0 and (mask & 1)) else 0
+        if main.s32(0x1C) >= 0 and mask == 1 and main.s32(0x20) < 7:
+            main.d32(0x24, (main.g32(0x24) - 0) & 0xFFFFFFFF)
+        else:
+            main.d32(0x24, (main.g32(0x24) - 1) & 0xFFFFFFFF)
+        e.m[0x10] = 1 if mask < 0x3C else 0
+    else:
+        if main.s32(0x1C) < 0:
+            return self._p4_40b040_tail(e, main, x, y)
+        mt = main.s32(0x20)
+        if mt == 4:
+            a = (40 * main.s32(0x1C) + 0x10E) & 0xFFFFFFFF
+            s_ = page4_sin(a)
+            e.d32(0x08, (main.s32(0x04) + ((s_ >> 4) - s_)) & 0xFFFFFFFF) if False else None
+            e.d32(0x08, (main.s32(0x08) + ((s_ >> 4) - s_)) & 0xFFFFFFFF)
+        elif mt == 0xE:
+            tt = main.s32(0x1C)
+            if tt in (0x78, 0xA3, 0xCD):
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+        m28 = main.s32(0x28)
+        sub = (main.s32(0x20) - 1) if m28 == 0 else -1
+        if 0 <= sub <= 0xC:
+            t = main.s32(0x1C)
+            if sub == 0:
+                if (t & 0x3F) == 0:
+                    self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
+            elif sub == 1:
+                if (t & 7) == 4:
+                    q, r = divmod(t, 0x50)
+                    if r == 0xB:
+                        self._p4_ent43c(0x2A000005,
+                                        x + (self.p4_rand() % 0x50),
+                                        y + (self.p4_rand() % 0xC))
+                        self.p4_43B610(e, self.p4_player_x(),
+                                       self.p4_player_y(), -0x400 & 0xFFFFFFFF)
+            elif sub == 3:
+                q, r = divmod(t, 0x50)
+                if r < 0x36 and (t & 3) == 3:
+                    for k in range(8):
+                        v = (0x62, 0x64, 0x5C, 0x53, 0x47, 0x38, 0x26, 0x14)[k]
+                        if x < self.p4_player_x():
+                            v = -v
+                        self.p4_43B290(e, -v, v, -0x200 & 0xFFFFFFFF)
+                        self.p4_43B290(e, -v, -v, -0x200 & 0xFFFFFFFF)
+            elif sub == 7:
+                if (t & 1) == 0:
+                    ang = ((0x1E - t) * 30) & 0xFFFFFFFF
+                    c = page4_cos(ang)
+                    s_ = page4_sin(ang)
+                    self.p4_43B290(e, c, s_, -0xE00 & 0xFFFFFFFF)
+                    self.p4_43B290(e, -s_, -c, -0xE00 & 0xFFFFFFFF)
+            elif sub == 9:
+                if (t & 3) == 0:
+                    spd = 0x600 if (t & 0xFC) > 0x14 else ((t >> 2) + 1) << 8
+                    self.p4_43B070(e, spd & 0xFFFFFFFF)
+            elif sub == 10:
+                if t == 0:
+                    self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
+                    offs = (-5, 0xC, 0, 12, 12, 12, 12, 12, 12, 12, 0, 12, 0xC)
+                    for i in range(7):
+                        dx = offs[i]
+                        dy = offs[i + 1] if i + 1 < len(offs) else 0xC
+                        if y >= self.p4_player_y():
+                            dy = -dy
+                        if x >= self.p4_player_x():
+                            dx = -dx
+                        self.spawn(self._p4_q("ui49c"), 0x3100001B,
+                                   x, y, (dx, dy))
+            elif sub == 11:
+                if t == 0x3C:
+                    dx = self.p4_player_x() - x
+                    dy = self.p4_player_y() - y
+                    inv = self.p4_45aa80(dx, dy)
+                    e.d32(0x20, (((inv * dx) * 6) >> 12) & 0xFFFFFFFF)
+                    e.d32(0x24, (((inv * dy) * 6) >> 12) & 0xFFFFFFFF)
+                if t > 0x3C and (t & 3) == 0:
+                    vx = e.s32(0x20)
+                    vy = e.s32(0x24)
+                    self.p4_43B290(e, vx, vy, -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, 2 * vx - vy, 2 * vy - vx,
+                                   -0x380 & 0xFFFFFFFF)
+                    self.p4_43B290(e, 2 * vy - vx, vx - 2 * vy,
+                                   -0x380 & 0xFFFFFFFF)
+            elif sub == 12:
+                if (t & 0x1F) == 0:
+                    a = 0x708
+                    for _ in range(4):
+                        c = page4_cos(a)
+                        s_ = page4_sin(a)
+                        self.p4_43B290(e, c, s_ >> 2, 0x1C0)
+                        self.p4_43B290(e, -(s_ >> 2), -c, 0x1C0)
+                        a -= 0x64
+    return self._p4_40b040_tail(e, main, x, y)
+
+
+def _p4_40b040_tail(self, e, main, x: int, y: int) -> bool:
+    """`0x40B040` 收尾：node dst、主 HP 门、死亡三件。"""
+    if e.node is not None:
+        e.node.dst = (x - 0x32, y - 0x2C)
+    if main.s32(0x20) >= 0xD:
+        main.d32(0x18, 0x186A0)
+    if main.g32(0x18) == 0:
+        self.p4_spawn52c_flash(x, y, 0x61000004, 0x48)
+        c = self._p4_ent43c(0x2A000002, 0, 0)
+        c.d32(0x18, id(main) & 0x7FFFFFFF)
+        getattr(self, "p4_links", {})[id(main) & 0x7FFFFFFF] = main
+        self.spawn(self._p4_q("ui49c"), 0x32000007, x, y, 0)
+        m24 = main.g32(0x24)
+        main.d32(0x28, 0x78)
+        main.d32(0x24, ((m24 & 0xFFFFFE00) + 0x1E0) & 0xFFFFFFFF)
+    if main.g32(0x30) == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x4A000007, x, y,
+                   id(main) & 0x7FFFFFFF)
+    return main.m[0x30] != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7700,6 +7857,7 @@ P4_BEH: dict[int, object] = {
     0x41F860: _beh_41F860,                          # 批39
     0x41F010: _beh_41F010,                          # 批40
     0x40A930: _beh_40A930,                          # 批41
+    0x40B040: _beh_40B040,                          # 批42
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
