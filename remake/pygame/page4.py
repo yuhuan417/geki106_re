@@ -363,7 +363,10 @@ ENT23_BEH_THUNK = {
     0x401C44: 0x40E070, 0x401FF0: 0x40E100, 0x401B1D: 0x40E230, 0x40118B: 0x40E460,
     0x401BD1: 0x40E520, 0x402180: 0x40E790, 0x401528: 0x40E8C0, 0x401181: 0x40EAF0,
     0x4015AA: 0x40E9B0,
-    0x401BA9: 0x40EF60, 0x40138E: 0x40F0F0,   # 0x2300000E/0F 残骸      # 类型 0x23000009 的 thunk（0x43A899 家族之外，经 ctor 表写入）
+    0x401BA9: 0x40EF60, 0x40138E: 0x40F0F0,   # 0x2300000E/0F 残骸
+    0x40210D: 0x40EDB0, 0x4015B4: 0x40F4F0, 0x40231A: 0x40F610, 0x4017EE: 0x40F880,
+    0x401D48: 0x40FEA0, 0x401951: 0x410470, 0x4013BB: 0x40FD10, 0x401B31: 0x4107D0,
+    0x40242D: 0x4108C0,   # 0x23 族剩余 thunk（0x2300000D/12/13/15/16/17/18/19/1A）      # 类型 0x23000009 的 thunk（0x43A899 家族之外，经 ctor 表写入）
     # 0x24 族（0x410A20 ctor，2026-11-06 解析）
     0x4014CE: 0x410E10, 0x401834: 0x410F20, 0x401CEE: 0x411040, 0x401A73: 0x411120,
     0x4021AD: 0x411200, 0x401AB9: 0x4112F0, 0x401163: 0x4113E0, 0x40119A: 0x411470,
@@ -3525,6 +3528,167 @@ def _beh_41D910(self, e) -> bool:
     return e.s32(0x04) < 0x298 and e.g32(0x18) != 0
 
 
+def p4_414010(self, e) -> None:
+    """`0x414010`（thunk 0x401816）：**弹流贴图行滚动**——node.rect.t（[node+8]）
+    为 0x90/0x150/0x210 → 0x45A790(node+4,0,−0x90,0,−0x90)（行回卷），
+    否则 (…,0x30,0,0x30)（下行 0x30）。rect = (l, t+dy, r, b+dh)。"""
+    nd = e.node
+    if nd is None:
+        return
+    t = nd.rect[1]
+    if t in (0x90, 0x150, 0x210):
+        dy = -0x90
+    else:
+        dy = 0x30
+    nd.rect = (nd.rect[0], t + dy, nd.rect[2], nd.rect[3] + dy)
+
+def p4_43B290(self, e, dx: int, dy: int, arg: int) -> None:
+    """`0x43B290`（thunk 0x40165E）：**定向速度弹**——arg=0x43AF90 表速，
+    (dx,dy) 为显式方向：v = (4096/|d|)*d*(spd>>4)>>8；弹型 0x43B020(e)，
+    入 0x4AD49C（0x43B2E5→0x40113B、0x43B2FD 0x430400 后入队）。"""
+    spd = self.p4_43af90(e, arg) >> 4                 # 0x43B2AF sar 4
+    inv = self.p4_45aa80(dx, dy)                      # 0x40231F
+    vx = ((inv * dx) * spd) >> 8
+    vy = ((inv * dy) * spd) >> 8
+    if vx == 0 and vy == 0:
+        return
+    eb = self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
+                    e.s32(0x04), e.s32(0x08), (vx, vy))
+    if eb is not None:
+        eb.raw[0x10] = 1
+        eb.d32(0x14, self.p4_43B020(e) & 0xFFFFFFFF)
+        eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
+        eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
+        eb.d32(0x0C, 0x18)
+        self._p4_q("ui49c").append(eb)
+
+
+def _beh_415410(self, e) -> bool:
+    """`0x415410`（0x2600000D）：左移 4/帧（x −= 4、node.dst.x −= 4）；t=++[0x1C]，
+    (t&7)==7 → 0x414010 弹流行滚动；return x > −0x40 且 HP≠0。"""
+    e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) - 4) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] - 4, e.node.dst[1])
+    if (e.s32(0x1C) & 7) == 7:
+        self.p4_414010(e)
+    return e.s32(0x04) > -0x40 and e.g32(0x18) != 0
+
+
+def _beh_415CE0(self, e) -> bool:
+    """`0x415CE0`（0x26000015）：[0x20] += [0x24]（累计）、x = [0x20]>>6；
+    node dst=(x−0x18, y−0x18)；(t&0x1F)==0x1F → 0x414010 弹流行滚动；
+    return x > −0x18 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    s = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x20, s)
+    e.d32(0x04, ((s - 0x100000000 if s & 0x80000000 else s) >> 6) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    if (t & 0x1F) == 0x1F:
+        self.p4_414010(e)
+    return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
+
+
+def _beh_415E60(self, e) -> bool:
+    """`0x415E60`（0x26000017）：y += [0x20]（node.dst.y 同加）；t=++[0x1C]；
+    (t&3)==3 → 0x414010；(t&0xF)==7 → 0x43B290(e,−1,0,0)（定向左直弹）；
+    0x4305F0(e,0x18) 在屏判据；return 在屏 且 HP≠0。"""
+    dy = e.s32(0x20)
+    e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0], e.node.dst[1] + dy)
+    if (t & 3) == 3:
+        self.p4_414010(e)
+    if (t & 0xF) == 7:
+        self.p4_43B290(e, -1, 0, 0)
+    return self.p4_4305f0(e, 0x18) and e.g32(0x18) != 0
+
+
+def _beh_418C30(self, e) -> bool:
+    """`0x418C30`（0x27000011）：[0x20] −= [0x24]；[0x24] += ([0x24]<0x20)（饱和 0x20）；
+    [0x28] = [0x20]>>5；y = [0x28]、node.dst.y += (新y−旧y)；
+    return HP≠0 且 node.dst.y > −0x60。"""
+    v = (e.s32(0x20) - e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x20, v)
+    gate = e.s32(0x24)
+    gate = (gate + 1) & 0xFFFFFFFF if gate < 0x20 else gate
+    e.d32(0x24, gate)
+    step = (v - 0x100000000 if v & 0x80000000 else v) >> 5
+    e.d32(0x28, step & 0xFFFFFFFF)
+    yold = e.s32(0x08)
+    e.d32(0x08, step & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0], e.node.dst[1] + (step - yold))
+    if e.g32(0x18) == 0:
+        return False
+    return (e.node.dst[1] if e.node else 0) + 0x60 > 0
+
+
+def _beh_41F700(self, e) -> bool:
+    """`0x41F700`（0x29000013）：t=[0x1C]（<0x60 时 ++）；s = [0x20] + t（[0x20] 累计）；
+    y = s>>5、x += 1；node dst=(x−0x30, y−0x30)；return HP≠0 且 y < 0x210。"""
+    if e.s32(0x1C) < 0x60:
+        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    t = e.s32(0x1C)
+    s = (e.s32(0x20) + t) & 0xFFFFFFFF
+    e.d32(0x20, s)
+    y = (s - 0x100000000 if s & 0x80000000 else s) >> 5
+    e.d32(0x08, y & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) + 1) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x30, y - 0x30)
+    return e.g32(0x18) != 0 and y < 0x210
+
+
+def _beh_419E30(self, e) -> bool:
+    """`0x419E30`（0x2800000B）：[0x20] += [0x24]、[0x24]++（先升后坠）；y = [0x20]>>2、
+    x −= 1；0x401BA4(4,0,0x30) 特效；node dst=(x−0x18,y−0x18)；
+    return HP≠0 且 y < 0x1F8 且 [0x24] < 0。"""
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
+    s = e.s32(0x20)
+    e.d32(0x08, ((s - 0x100000000 if s & 0x80000000 else s) >> 2) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(0x08) < 0x1F8 and e.s32(0x24) < 0
+
+
+def _beh_41DCE0(self, e) -> bool:
+    """`0x41DCE0`（0x29000006）：x −= 4；自机y>>1+0xF0 > y 且 y < 0x1B8 → y++；
+    node dst=(x−0x18,y−0x18)；return x > −0x18 且 HP≠0。"""
+    e.d32(0x04, (e.s32(0x04) - 4) & 0xFFFFFFFF)
+    ty = (self.p4_player_y() >> 1) + 0xF0
+    if ty > e.s32(0x08) and e.s32(0x08) < 0x1B8:
+        e.d32(0x08, (e.s32(0x08) + 1) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
+
+
+def _beh_422D40(self, e) -> bool:
+    """`0x422D40`（0x29000021）：HP≠0 时先置 HP=−1（命中即自灭铺垫）；
+    [0x24] += [0x1C]、[0x28] += [0x20]（8.8 定点）；x=[0x24]>>8、y=[0x28]>>8；
+    node dst=(x−0x10, y−0x10)；0x4305F0(e,0x10) 在屏判据；
+    return HP≠0 且 在屏。"""
+    if e.g32(0x18) != 0:
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    ax = e.s32(0x24)
+    ay = e.s32(0x28)
+    e.d32(0x04, ((ax - 0x100000000 if ax & 0x80000000 else ax) >> 8) & 0xFFFFFFFF)
+    e.d32(0x08, ((ay - 0x100000000 if ay & 0x80000000 else ay) >> 8) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x10, e.s32(0x08) - 0x10)
+    return e.g32(0x18) != 0 and self.p4_4305f0(e, 0x10)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5032,6 +5196,9 @@ P4_BEH: dict[int, object] = {
     0x40EDB0: _beh_40EDB0, 0x40EF60: _beh_40EF60, 0x40F0F0: _beh_40F0F0,   # 0x23 残骸链
     0x4113E0: _beh_4113E0, 0x4112F0: _beh_4112F0,   # 0x24 折返斜升 / 入场摆动
     0x41D910: _beh_41D910,                          # 0x29 脱离加速
+    0x415410: _beh_415410, 0x415CE0: _beh_415CE0, 0x415E60: _beh_415E60,   # 0x26 批1
+    0x418C30: _beh_418C30, 0x41F700: _beh_41F700, 0x419E30: _beh_419E30,   # 批1
+    0x41DCE0: _beh_41DCE0, 0x422D40: _beh_422D40,   # 批1
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
