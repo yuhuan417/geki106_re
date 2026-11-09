@@ -6307,6 +6307,33 @@ def _p4_40b040_tail(self, e, main, x: int, y: int) -> bool:
     return main.m[0x30] != 0
 
 
+def _beh_40CE90(self, e) -> bool:
+    """`0x40CE90`（0x2A000005，0x40B040 态1 铺出的小机）：**斜落小体**。
+
+    0x45A790(node+4, ±0x30, 0, ±0x30, 0)（(t&4)?+0x30:0x30−0xA0=−0x70？字面
+    and 0xA0/add 0x30 → (t&4)? 0x30+0x30 : 0x30−0xA0）→ rect 横移（帧动画）；
+    [0x28] += [0x20]、[0x2C] += [0x24]；x=[0x28]>>4、y=[0x2C]>>4；t=[0x1C]++；
+    node dst=(x−0x18,y−0x18)；return −0x18<x<0x298 且 −0x18<y<0x1F8 且 HP≠0。"""
+    t = e.s32(0x1C)
+    dy = (0x30 + 0x30) if (t & 4) else (0x30 - 0xA0)
+    nd = e.node
+    if nd is not None:                              # 0x45A790(node+4, dy,0, dy,0)
+        nd.rect = (nd.rect[0] + dy, nd.rect[1], nd.rect[2] + dy, nd.rect[3])
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x24)) & 0xFFFFFFFF)
+    a28 = e.s32(0x28)
+    a2c = e.s32(0x2C)
+    x = (a28 - 0x100000000 if a28 & 0x80000000 else a28) >> 4
+    y = (a2c - 0x100000000 if a2c & 0x80000000 else a2c) >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return (-0x18 < x < 0x298 and -0x18 < y < 0x1F8
+            and e.g32(0x18) != 0)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7858,6 +7885,7 @@ P4_BEH: dict[int, object] = {
     0x41F010: _beh_41F010,                          # 批40
     0x40A930: _beh_40A930,                          # 批41
     0x40B040: _beh_40B040,                          # 批42
+    0x40CE90: _beh_40CE90,                          # 批43
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
