@@ -2601,6 +2601,96 @@ def _beh_416680(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(4) > -0x18
 
 
+def _beh_41F610(self, e) -> bool:
+    """`0x41F610`（0x29000012 ×44）：纵摆右移 + x > 0x1E0 → y += ±2（sin 门）；
+    x < −0x18 或 HP=0 → **生成 0x29000013（关7 boss）并自灭**。"""
+    osc = e.s32(0x20)
+    if osc != 0 and e.s32(0x1C) > 0x1E0:
+        e.d32(0x20, (osc + (2 if osc >= 0 else -2)) & 0xFFFFFFFF)
+    e.d32(0x1C, (e.s32(0x1C) + abs(osc)) & 0xFFFFFFFF)
+    e.d32(8, (e.s32(8) + osc) & 0xFFFFFFFF)
+    e.d32(4, (e.s32(4) - 2) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x30, e.s32(8) - 0x30)
+    if e.g32(0x18) == 0:                                # HP=0 → 生成 boss 并自灭
+        self._p4_ent43c(0x29000013, e.s32(4), e.s32(8))
+        return False
+    return e.s32(4) > -0x30
+
+
+def _beh_4123E0(self, e) -> bool:
+    """`0x4123E0`（0x25000003 ×32）：三阶段跳跳——t<0x100 下落（[0x20]−− 到 −0x10
+    → [0x2C]≠0 时开火）；t∈[0x100,0x118) 弹跳动画（t%4==3 → node 外扩 ±0x30）；
+    t≥0x118 → byte[0x10]=1 + [0x20]=0x30（起步速度）；8.8 定点正弦（[0x1C] 角速度、
+    [0x24]/[0x28] 累积 → >>2 定屏）；x=[0x24]>>2 < −0x30 出屏或 HP=0 → 灭。"""
+    spd = e.s32(0x20)
+    t = e.s32(0x1C)
+    if spd < 0x100:
+        spd = (spd - 1) & 0xFFFFFFFF
+        spd_s = spd - 0x100000000 if spd & 0x80000000 else spd
+        e.d32(0x20, spd)
+        if spd_s == -0x10:
+            if e.s32(0x2C) != 0:
+                self.p4_43B070(e, 0)
+    elif spd < 0x118:
+        spd = (spd + 1) & 0xFFFFFFFF
+        e.d32(0x20, spd)
+        if (spd & 3) == 3 and e.node is not None:
+            e.node.rect = (e.node.rect[0] - 0x30, e.node.rect[1],
+                           e.node.rect[2] - 0x30, e.node.rect[3])
+    else:
+        e.m[0x10] = 1
+        e.d32(0x20, 0x30)
+    ang = e.s32(0x1C)
+    c = page4_cos(ang)
+    s_ = page4_sin(ang)
+    e.d32(0x24, (e.s32(0x24) + ((c * spd + 0x7F) >> 8)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + ((s_ * spd + 0x7F) >> 8)) & 0xFFFFFFFF)
+    e.d32(8, (e.s32(0x28) >> 2) & 0xFFFFFFFF)
+    e.d32(4, (e.s32(0x24) >> 2) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = ((e.s32(0x24) >> 2) - 0x18, (e.s32(0x28) >> 2) - 0x18)
+    if spd_s if 'spd_s' in dir() else spd <= -0x30:
+        return False
+    x, y = e.s32(4), e.s32(8)
+    on_screen = (-0x18 < x < 0x280 + 0x18 and -0x18 < y < 0x1E0 + 0x18)
+    return on_screen and e.g32(0x18) != 0
+
+
+def _beh_419850(self, e) -> bool:
+    """`0x419850`（0x28000006 ×27）：右移 + x < −0x78 → [0x28]=3 加速；node dst 同步；
+    0x401BA4(0x40,4,0x30) 特效；x==[0x24] → 0x43B070(e,0) 开火；x≥0x298 或 HP=0 → 灭。"""
+    if e.s32(4) < -0x78:
+        e.d32(0x28, 3)
+    e.d32(4, (e.s32(4) + e.s32(0x28)) & 0xFFFFFFFF)
+    e.d32(8, e.s32(0x20) & 0xFFFFFFFF)
+    e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if e.s32(0x24) != 0 and e.s32(0x24) == e.s32(4):
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(4) < 0x298
+
+
+def _beh_4116C0(self, e) -> bool:
+    """`0x4116C0`（0x2400000B ×22）：左移 −2 + 正弦开火（x∈[0x60,0x208] 时
+    每 [0x1C]*180 角度帧调 0x40165E 开火，[0x1C]++）；x < −0x18 或 HP=0 → 灭。"""
+    x = e.s32(4)
+    if (0x60 <= x < 0x208 and (x & 3) == 0) or (0x180 <= x < 0x208 and (x & 7) == 0):
+        ang = e.s32(0x1C) * 180                          # [0x1C]*180 → sin/cos 角
+        s_ = page4_sin(ang)
+        c = page4_cos(ang)
+        # 0x40165E(esi, sin, cos) = 0x415650：朝向开火
+        self.p4_43B070(e, 0)
+        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    e.d32(4, (x - 2) & 0xFFFFFFFF)
+    if e.node is not None:
+        nd = e.node
+        nd.dst = (nd.dst[0] - 2, nd.dst[1])
+    return e.s32(4) > -0x18 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -4096,6 +4186,8 @@ P4_BEH: dict[int, object] = {
     0x412680: _beh_412680,
     0x412950: _beh_412950, 0x4165A0: _beh_4165A0,
     0x416680: _beh_416680,
+    0x41F610: _beh_41F610, 0x4123E0: _beh_4123E0,
+    0x419850: _beh_419850, 0x4116C0: _beh_4116C0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
