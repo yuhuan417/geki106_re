@@ -7280,6 +7280,83 @@ def _beh_40FEA0(self, e) -> bool:
     return False
 
 
+def _beh_410470(self, e) -> bool:
+    """`0x410470`（thunk 0x401951；0x23000017）：**自旋僚机（摆入轨道）**。
+
+    [0x20] 低 16 位 = 摆相位 t；word[0x24] = 帧数（0x6E/0x136 门）；
+    word[0x26] = 摆幅（+4 至 (3t+3)<<3 封顶、t≥0x136 或 [0x2C]≥0x10 后 −8 衰减）；
+    [0x28] = 目标角（==0x82..0x168 段：无父 → ±4 折返、有父 → 向主.[0x28] 收敛）；
+    HP==−1 穿门 → [0x2C]++（受击计数）；有父 → 主.[0x2C] += [0x2C]、[0x2C]=0、
+    [0x30] = 主.[0x30]（打包位拷贝）；无父 → [0x30] = (主y<<0x10)|(主x&0xFFFF)。
+    x = cos(10*角)*摆幅>>8 + word[0x30] 低 16 位；y = sin(10*角)*摆幅>>8
+    （[0x20] 高 16 位非 0 则取反）+ word[0x32]；node dst=(x−0x18,y−0x18)。
+    主死 → 0x41000001 + 0x41000004 ×4 @(x,y) 入 0x4AD4CC、return 0；
+    否则 word[0x24]++；return t+帧 < 0x168。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None:
+        return False
+    t = e.s32(0x20) & 0xFFFF
+    if main.g16(0x24) == 0 and t < 0xF:
+        self._p4_ent43c(0x23000017, main.s32(0x04), main.s32(0x08))
+    if main.g16(0x24) < 0x6E:
+        w26 = main.g16(0x26)
+        if (w26 - 0x10000 if w26 & 0x8000 else w26) < ((3 * t + 3) << 3):
+            main.d16(0x26, (w26 + 4) & 0xFFFF)
+    if main.g16(0x24) >= 0x136 or e.s32(0x2C) >= 0x10:
+        w26 = main.g16(0x26)
+        if (w26 - 0x10000 if w26 & 0x8000 else w26) > 0:
+            main.d16(0x26, (w26 - 8) & 0xFFFF)
+    w24 = main.g16(0x24)
+    if 0x82 <= w24 < 0x168:
+        if t == 0:
+            v = main.s32(0x28)
+            v = (v + (4 if w24 >= 0xDC else -4)) & 0xFFFFFFFF
+            main.d32(0x28, v)
+        else:
+            v = main.s32(0x28)
+            main.d32(0x28, (v + ((main.s32(0x28) - v + 2) >> 2)) & 0xFFFFFFFF)
+    if e.g32(0x18) != -1:
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+        e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+    if t != 0:
+        main.d32(0x2C, (main.s32(0x2C) + e.s32(0x2C)) & 0xFFFFFFFF)
+        e.d32(0x2C, 0)
+        if main.s32(0x2C) >= 0x10:
+            e.d32(0x2C, 0x10)
+        e.d32(0x30, main.g32(0x30) & 0xFFFFFFFF)
+    else:
+        px = main.s32(0x04) & 0xFFFF
+        py = main.s32(0x08) & 0xFFFF
+        e.d32(0x30, ((py << 0x10) | px) & 0xFFFFFFFF)
+    ang = (10 * e.s32(0x28)) & 0xFFFFFFFF
+    c = page4_cos(ang)
+    s_ = page4_sin(ang)
+    amp = main.g16(0x26)
+    amp_s = amp - 0x10000 if amp & 0x8000 else amp
+    w30 = e.g32(0x30)
+    bx = w30 & 0xFFFF
+    by = (w30 >> 0x10) & 0xFFFF
+    x = (((c * amp_s) >> 8) + bx) & 0xFFFFFFFF
+    y = (((s_ * amp_s) >> 8) + by) & 0xFFFFFFFF
+    if e.s32(0x20) & 0xFFFF0000:
+        y = (-(((s_ * amp_s) >> 8)) + by) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if main.m[0x34] == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        for _ in range(4):
+            jx = (self.p4_rand() & 0x1F) - 0xF
+            jy = (self.p4_rand() & 0x1F) - 0xF
+            self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                       x + jx, y + jy, (jx, jy))
+        return False
+    main.d16(0x24, (main.g16(0x24) + 1) & 0xFFFF)
+    return (w24 + t) < 0x168
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8843,6 +8920,7 @@ P4_BEH: dict[int, object] = {
     0x40F610: _beh_40F610,                          # 批52
     0x40FD10: _beh_40FD10,                          # 批53
     0x40FEA0: _beh_40FEA0,                          # 批54
+    0x410470: _beh_410470,                          # 批55
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
