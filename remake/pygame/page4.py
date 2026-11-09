@@ -2506,6 +2506,101 @@ def _beh_412680(self, e) -> bool:
     return on_screen and e.g32(0x18) != 0
 
 
+def _beh_412950(self, e) -> bool:
+    """`0x412950`（0x25000007 ×45）：三状态机。
+    state=[0x1C]: 0=左移→x≤0x1E0 转 1；1=纵摆+周期 spawn 0x25000005→t≥0x4B0 转 2；
+    2=右移→x>0x1E0 转 0。x<−0x30 或 HP=0 → 灭。"""
+    st = e.s32(0x1C)
+    if st == 0:
+        e.d32(4, (e.s32(4) - 3) & 0xFFFFFFFF)
+        if e.node is not None:
+            nd = e.node
+            nd.dst = (nd.dst[0] - 3, nd.dst[1])
+        if e.s32(4) <= 0x1E0:
+            e.d32(0x1C, 1)
+            e.d32(0x24, 0x40)
+    elif st == 1:
+        t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+        e.d32(0x20, t)
+        if (t & 0x1F) == 0:                                  # 每 0x20 帧 spawn 子机
+            import random as _r
+            rx = (_r.randrange(0x7FFFFFFF) % 0x190)
+            ry = (_r.randrange(0x7FFFFFFF) % 0xF0) + 0x168
+            self._p4_ent43c(0x25000005, rx, ry)
+        if not (t & 0x3F):                                   # [0x20]&0x3F==0 → 淡入闪光
+            self.spawn_flash(e.s32(4), e.s32(8), -0x100)
+        vy = 2 if e.s32(8) >= 0xF0 else -2
+        e.d32(0x24, (e.s32(0x24) + vy) & 0xFFFFFFFF)
+        e.d32(8, ((e.s32(0x24) + 8) >> 4) & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.dst = (e.s32(4) - 0x30, e.s32(8) - 0x30)
+        if t >= 0x4B0:
+            e.d32(0x1C, 2)
+            e.d32(0x24, 0)
+    elif st == 2:
+        e.d32(4, (e.s32(4) + 3) & 0xFFFFFFFF)
+        if e.node is not None:
+            nd = e.node
+            nd.dst = (nd.dst[0] + 3, nd.dst[1])
+        if e.s32(4) > 0x1E0:
+            e.d32(0x1C, 0)
+            e.d32(0x24, 0x40)
+    return e.g32(0x18) != 0 and e.s32(4) > -0x30
+
+
+def _beh_4165A0(self, e) -> bool:
+    """`0x4165A0`（0x27000002 ×40）：正弦纵摆+渐进右移+y==0x1E0 开火。
+    y∈(0x78,0x168) → [0x1C]++（≤0x28）；[0x20]≠0 → [0x20] += ±2（振荡）；
+    x += [0x1C]>>3；y += [0x20]；y==0x1E0 && [0x24]≠0 → 开火。"""
+    if 0x78 < e.s32(8) <= 0x168:
+        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    osc = e.s32(0x20)
+    if osc != 0:
+        d = 2 if osc >= 0 else -2
+        e.d32(0x20, (osc + d) & 0xFFFFFFFF)
+    e.d32(4, (e.s32(4) + (e.s32(0x1C) >> 3)) & 0xFFFFFFFF)
+    e.d32(8, (e.s32(8) + e.s32(0x20)) & 0xFFFFFFFF)
+    if e.s32(8) == 0x1E0 and e.s32(0x24) != 0:
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(4) < 0x298
+
+
+def _beh_416680(self, e) -> bool:
+    """`0x416680`（0x27000003 ×20）：三态纵振荡+右移+x≤−0x18 自灭。
+    [0x20]==0 → [0x1C]++ 到 0 → [0x20]=1；[0x20]==−1 → [0x1C]−−钳 −0x40；
+    [0x20]>0 → [0x1C]=0x20 时 fire+[0x24]−−、[0x20]=−1；x += ([0x1C]+2)>>2。"""
+    osc = e.s32(0x20)
+    cnt = e.s32(0x1C)
+    if osc == 0:
+        cnt = (cnt + 1) & 0xFFFFFFFF
+        e.d32(0x1C, cnt)
+        if cnt == 0:
+            e.d32(0x20, 1)
+    elif osc == -1:
+        cnt = (cnt - 1) & 0xFFFFFFFF
+        cnt_s = cnt - 0x100000000 if cnt & 0x80000000 else cnt
+        e.d32(0x1C, cnt)
+        if cnt_s < -0x40:
+            e.d32(0x1C, 0xFFFFFFC0)
+    else:
+        if e.s32(0x24) == 0:
+            e.d32(0x1C, 0x20)
+            e.d32(0x20, 0xFFFFFFFF)
+        else:
+            osc = (osc + 1) & 0xFFFFFFFF
+            e.d32(0x20, osc)
+            if (osc & 0x1F) == 0x1F:
+                self.p4_43B070(e, 0)
+                e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+    x = e.s32(4) + ((e.s32(0x1C) + 2) >> 2)
+    e.d32(4, x & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, e.s32(8) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(4) > -0x18
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -3999,6 +4094,8 @@ P4_BEH: dict[int, object] = {
     0x416860: _beh_416860, 0x4164B0: _beh_4164B0,
     0x416B20: _beh_416B20, 0x4118C0: _beh_4118C0,
     0x412680: _beh_412680,
+    0x412950: _beh_412950, 0x4165A0: _beh_4165A0,
+    0x416680: _beh_416680,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
     # 0x42E460 族 8 变体经 p4_call_behaviour 的 getattr 回退
