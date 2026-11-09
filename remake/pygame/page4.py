@@ -4408,6 +4408,92 @@ def _beh_414B50(self, e) -> bool:
     return x > -0x18 and e.g32(0x18) != 0
 
 
+def p4_43B150(self, e, x0: int, y0: int, spdarg: int) -> None:
+    """`0x43B150`（thunk 0x401D6B）：**缺口瞄准弹**——从 (x0,y0) 生成 0x43B020(e)
+    弹型，方向 = 自机−(x0,y0) 再转一刀（new_dx = 2dx+dy、new_dy = 2dy−dx，
+    0x43B1CC 线性组合），速度 = 0x43AF90(e,spdarg)>>4 归一。入 0x4AD49C。"""
+    dx = self.p4_player_x() - x0
+    dy = self.p4_player_y() - y0
+    ndx = dy + 2 * dx                                # 0x43B1CC edi = ecx+2eax
+    ndy = 2 * dy - dx                                # 0x43B1CF ebx = 2ecx−eax
+    spd = self.p4_43af90(e, spdarg) >> 4
+    inv = self.p4_45aa80(ndx, ndy)
+    vx = ((inv * ndx) * spd) >> 8
+    vy = ((inv * ndy) * spd) >> 8
+    if vx == 0 and vy == 0:
+        return
+    typ = self.p4_43B020(e)
+    eb = self.spawn(self._p4_q("ui49c"), typ, x0, y0, (vx, vy))
+    if eb is not None:
+        eb.raw[0x10] = 1
+        eb.d32(0x14, typ & 0xFFFFFFFF)
+        eb.d32(0x04, x0 & 0xFFFFFFFF)
+        eb.d32(0x08, y0 & 0xFFFFFFFF)
+        eb.d32(0x0C, 0x18)
+        self._p4_q("ui49c").append(eb)
+
+
+def _beh_416770(self, e) -> bool:
+    """`0x416770`（0x27000004）：t≠0 时 t++；[0x24] += (y≥[0x28] ? −1 : +1)
+    （向 [0x28] 收敛）、[0x20] += [0x24]、[0x2C]++（==0x2D0 → [0x1C]=1 启动）；
+    y = [0x20]>>4、x += [0x1C]；node dst 同步；
+    ([0x2C]&0x6F)==0x6F → 0x43B070(e,−[0x58]) + 0x43B150(e,0,0,0)（角炮）；
+    0x401F91→0x416440 boss spawner（复刻侧 op2 直生成，跳过）；
+    return x < 0x298 且 HP≠0。"""
+    t = e.s32(0x1C)
+    if t != 0:
+        t = (t + 1) & 0xFFFFFFFF
+        e.d32(0x1C, t)
+    y = e.s32(0x08)
+    v24 = (e.s32(0x24) + (-1 if y >= e.s32(0x28) else 1)) & 0xFFFFFFFF
+    e.d32(0x24, v24)
+    s20 = (e.s32(0x20) + v24) & 0xFFFFFFFF
+    e.d32(0x20, s20)
+    c = (e.s32(0x2C) + 1) & 0xFFFFFFFF
+    e.d32(0x2C, c)
+    if c == 0x2D0:
+        e.d32(0x1C, 1)
+    yy = (s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 4
+    e.d32(0x08, yy & 0xFFFFFFFF)
+    x = (e.s32(0x04) + e.s32(0x1C)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, yy - 0x18)
+    if (c & 0x6F) == 0x6F:
+        self.p4_43B070(e, (-e.s32(0x58)) & 0xFFFFFFFF)
+        self.p4_43B150(e, 0, 0, 0)
+    # 0x401F91 → 0x416440 boss spawner（op2 直生成，跳过）
+    return x < 0x298 and e.g32(0x18) != 0
+
+
+def _beh_417160(self, e) -> bool:
+    """`0x417160`（0x2700000C）：x>0x1E0 且 [0x24]≠0 → [0x24]−−；t=++[0x1C]，
+    t==0x258 → [0x24]=−1；x += [0x24]、y += ([0x28]==0 ? −[0x24] : [0x24])；
+    node dst=(x−0x30,y−0x30)；(t&0x10)==0x10 → [0x20] += ([0x28]≠0 ? +1 : −1)、
+    0x43B290(e, cos(45[0x20]), sin(45[0x20]), 0)；0x401F91→0x416440（跳过）；
+    return HP≠0 且 0x4305F0(e,0x30)。"""
+    if e.s32(0x04) > 0x1E0 and e.s32(0x24) != 0:
+        e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0x258:
+        e.d32(0x24, -1 & 0xFFFFFFFF)
+    v24 = e.s32(0x24)
+    x = (e.s32(0x04) + v24) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    y = (e.s32(0x08) + (-v24 if e.s32(0x28) == 0 else v24)) & 0xFFFFFFFF
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x30, y - 0x30)
+    if (t & 0x10) == 0x10:
+        v20 = (e.s32(0x20) + (1 if e.s32(0x28) != 0 else -1)) & 0xFFFFFFFF
+        e.d32(0x20, v20)
+        ang = (45 * v20) & 0xFFFFFFFF
+        self.p4_43B290(e, page4_cos(ang), page4_sin(ang), 0)
+    # 0x401F91 → 0x416440（跳过）
+    return e.g32(0x18) != 0 and self.p4_4305f0(e, 0x30)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5934,6 +6020,7 @@ P4_BEH: dict[int, object] = {
     0x4145A0: _beh_4145A0,                          # 批15
     0x4148B0: _beh_4148B0,                          # 批16
     0x414B50: _beh_414B50,                          # 批17
+    0x416770: _beh_416770, 0x417160: _beh_417160,   # 批18
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
