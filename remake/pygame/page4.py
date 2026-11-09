@@ -5591,6 +5591,74 @@ def _beh_41E960(self, e) -> bool:
     return v20 > -0x78 and e.g32(0x18) != 0
 
 
+def _beh_41EB60(self, e) -> bool:
+    """`0x41EB60`（0x2900000D，0x41E960 伴生体）：**父影随行**。
+
+    每帧 [0x18]=−1（无敌标记）；父 = [0x1C] 句柄：
+    [0x20] = 父.[0x20]*2、[0x24] = 父.[0x24]*2（镜像倍率）；
+    x = [0x20] − 父.x、y = [0x24] − 父.y（绕父对映点）；node dst=(x−0x18,y−0x18)；
+    父死（byte[+0x34]）→ 存活；否则 0x41000001 @(x,y) 入 0x4AD4CC、return 0。"""
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    h = e.s32(0x1C)
+    parent = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF) if h else None
+    if parent is None:
+        return True
+    v20 = (parent.s32(0x20) * 2) & 0xFFFFFFFF
+    v24 = (parent.s32(0x24) * 2) & 0xFFFFFFFF
+    e.d32(0x20, v20)
+    e.d32(0x24, v24)
+    x = (v20 - parent.s32(0x04)) & 0xFFFFFFFF
+    y = (v24 - parent.s32(0x08)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if parent.m[0x34] != 0:
+        return True
+    self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+    return False
+
+
+def _beh_41EC40(self, e) -> bool:
+    """`0x41EC40`（0x2900000F）：**父链三态（充能→击破→重生门）**。
+
+    父 = [0x1C] 句柄；x = 父.x + cos([0x24]+父.[0x20])*[0x20]>>8、
+    y = 父.y + sin([0x24]+父.[0x20])*[0x20]>>8（绕父公转，[0x20]=半径）。
+    父.[0x28] 态：0 → 父.[0x24] += (−1 − [0x18])（充能计时）；
+    1 → HP≠0 → [0x18]=1；HP==0 → 父.[0x28]=2、[0x10]=0；
+    2 → [0x10]=0；0x41000001 + 0x41000004（抖动 ±rand&0x1F−0xF）@(x,y) 入 0x4AD4CC。
+    node dst=(x−0xC,y−0xC)；return byte[父+0x34]（父活即活）。"""
+    h = e.s32(0x1C)
+    parent = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF) if h else None
+    if parent is None:
+        return False
+    ang = (parent.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF
+    r = e.s32(0x20)
+    x = (parent.s32(0x04) + ((page4_cos(ang) * r) >> 8)) & 0xFFFFFFFF
+    y = (parent.s32(0x08) + ((page4_sin(ang) * r) >> 8)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    pst = parent.s32(0x28)
+    if pst == 0:
+        parent.d32(0x24, (parent.s32(0x24) + (-1 - e.s32(0x18))) & 0xFFFFFFFF)
+    elif pst == 1:
+        if e.g32(0x18) != 0:
+            e.d32(0x18, 1)
+        else:
+            parent.d32(0x28, 2)
+            e.m[0x10] = 0
+    else:                                            # pst >= 2
+        e.m[0x10] = 0
+        jx = (self.p4_rand() & 0x1F) - 0xF
+        jy = (self.p4_rand() & 0x1F) - 0xF
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                   x + jx, y + jy, (jx, jy))
+    if e.node is not None:
+        e.node.dst = (x - 0xC, y - 0xC)
+    return parent.m[0x34] != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7134,6 +7202,7 @@ P4_BEH: dict[int, object] = {
     0x41D330: _beh_41D330,                          # 批32
     0x41D990: _beh_41D990,                          # 批33
     0x41E960: _beh_41E960,                          # 批34
+    0x41EB60: _beh_41EB60, 0x41EC40: _beh_41EC40,   # 批35
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
