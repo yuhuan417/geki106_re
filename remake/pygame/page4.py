@@ -8532,6 +8532,43 @@ def _p4_div3(v: int) -> int:
     return -q if v < 0 else q
 
 
+def _beh_406D30(self, e) -> bool:
+    """`0x406D30`（0x2C00000D）：**下坠旋转伞弹**。
+
+    [0x28] += [0x24]、[0x2C] += [0x24]；x = [0x1C] − ([0x2C]>>8)、
+    y = [0x20] + ([0x2C]>>8)（左下弧线）；node dst=(x−0x30,y−0x30)；
+    [0x30]（寿命）≠0 → −−；==0 → [0x10]=1。
+    HP==0：ang=0x45A9A0(Δ自机)：0x43B290(e, cos(ang±0x15E/±0xC8), sin 同, −0x280/
+    −0x200) 六连扇；rand%0x3F==0 → 0x32000006|rand&1 @(x,y) 入 0x4AD49C；
+    return 0。
+    HP≠0：0x430640 在屏 且 HP≠0 → return 1；否则 return 0。"""
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x24)) & 0xFFFFFFFF)
+    a2c = e.s32(0x2C)
+    off = (a2c - 0x100000000 if a2c & 0x80000000 else a2c) >> 8
+    x = (e.s32(0x1C) - off) & 0xFFFFFFFF
+    y = (e.s32(0x20) + off) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x30, y - 0x30)
+    if e.s32(0x30) != 0:
+        e.d32(0x30, (e.s32(0x30) - 1) & 0xFFFFFFFF)
+    else:
+        e.m[0x10] = 1
+    if e.g32(0x18) == 0:
+        a = self.p4_45a9a0(self.p4_player_x() - x, self.p4_player_y() - y)
+        for da, spd in ((0x15E, -0x280), (-0x15E, -0x280),
+                        (0xC8, -0x200), (-0xC8, -0x200)):
+            ang = (a + da) & 0xFFFFFFFF
+            self.p4_43B290(e, page4_cos(ang), page4_sin(ang), spd & 0xFFFFFFFF)
+        if self.p4_rand() % 0x3F == 0:
+            self.spawn(self._p4_q("ui49c"), 0x32000006 | (self.p4_rand() & 1),
+                       x, y, 0)
+        return False
+    return self.p4_430640(e) and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -10110,6 +10147,7 @@ P4_BEH: dict[int, object] = {
     0x4068C0: _beh_4068C0,                          # 批68
     0x406A20: _beh_406A20,                          # 批69
     0x406BD0: _beh_406BD0,                          # 批70
+    0x406D30: _beh_406D30,                          # 批71
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
