@@ -5710,6 +5710,66 @@ def _beh_41EE00(self, e) -> bool:
     return parent.m[0x34] != 0
 
 
+_P4_41F3A0_SEL = (
+    0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 1, 2, 2, 2, 2)
+
+
+def _beh_41F3A0(self, e) -> bool:
+    """`0x41F3A0`（0x29000011）：**激光扫掠 boss**。
+
+    t=++[0x1C]；t==0x50 → [0x24]=0（停）；t==0x300 → [0x24]=3（右移）；x += [0x24]。
+    0x80≤t<0x300 且 (t&0x7F)≤0x68：帧表 0x41F51C——
+      case0（(t&0x7F)∈{0,0x10,0x20,0x30,0x40}）：0x45A790(node+4, −0x10−v20, 0,
+        −v20, 0)（src 左扫）+ v20 += 0x10；
+      case1（=0x64）：0x31000017 @(x,y) 入 0x4AD49C + 0x45A790(node+4, v20, 0,
+        v20−0x10, 0) + v20 −= 0x10；
+      case2（0x65..0x68）：0x45A790(node+4, v20, 0, v20−0x10, 0) + v20 −= 0x10。
+    node dst=(x−0x30,y−0x30)；HP==0 → 0x61000004 @(x,y,0x30) 入 52C、return 0；
+    return x < 0x2B0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0x50:
+        e.d32(0x24, 0)
+    elif t == 0x300:
+        e.d32(0x24, 3)
+    x = (e.s32(0x04) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    if 0x80 <= t < 0x300:
+        i = t & 0x7F
+        if i <= 0x68:
+            sel = _P4_41F3A0_SEL[i]
+            v20 = e.s32(0x20)
+            nd = e.node
+            if sel == 0:
+                if nd is not None:
+                    nd.rect = (nd.rect[0] - 0x10 - v20, nd.rect[1],
+                               nd.rect[2] - v20, nd.rect[3])
+                e.d32(0x20, (v20 + 0x10) & 0xFFFFFFFF)
+            elif sel == 1:
+                self.spawn(self._p4_q("ui49c"), 0x31000017, x, e.s32(0x08), 0)
+                if nd is not None:
+                    nd.rect = (nd.rect[0] + v20, nd.rect[1],
+                               nd.rect[2] + v20 - 0x10, nd.rect[3])
+                e.d32(0x20, (v20 - 0x10) & 0xFFFFFFFF)
+            elif sel == 2:
+                if nd is not None:
+                    nd.rect = (nd.rect[0] + v20, nd.rect[1],
+                               nd.rect[2] + v20 - 0x10, nd.rect[3])
+                e.d32(0x20, (v20 - 0x10) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x30, e.s32(0x08) - 0x30)
+    if e.g32(0x18) == 0:
+        self.p4_spawn52c_flash(x, e.s32(0x08), 0x61000004, 0x30)
+        return False
+    return x < 0x2B0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7255,6 +7315,7 @@ P4_BEH: dict[int, object] = {
     0x41E960: _beh_41E960,                          # 批34
     0x41EB60: _beh_41EB60, 0x41EC40: _beh_41EC40,   # 批35
     0x41EE00: _beh_41EE00,                          # 批36
+    0x41F3A0: _beh_41F3A0,                          # 批37
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
