@@ -4660,6 +4660,72 @@ def _beh_4196E0(self, e) -> bool:
     return e.g32(0x18) != 0 and e.s32(0x2C) != 0
 
 
+def _beh_419910(self, e) -> bool:
+    """`0x419910`（0x28000007）：**锁定 12 帧后反向突进**。
+
+    [0x20] −= [0x28]、[0x24] += [0x28]、[0x28]≠0 → [0x28]−−；
+    y=[0x24]>>4、x=[0x20]>>4；0x401BA4(8,0,0x30) 特效；
+    [0x28]==0 且 [0x1C]==0：[0x30]≠0 → 0x43B360(e, word[0x2C], word[0x2E], 0)
+    （对锁定点开火）；否则 word[0x2C]=自机x、word[0x2E]=自机y（锁定）；
+    ++[0x30]==0xC → [0x28]=−1（突进启动）；node dst=(x−0x18,y−0x18)；
+    return HP≠0 且（[0x28]>0 或 x<0x298）。"""
+    e.d32(0x20, (e.s32(0x20) - e.s32(0x28)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x28)) & 0xFFFFFFFF)
+    if e.s32(0x28) != 0:
+        e.d32(0x28, (e.s32(0x28) - 1) & 0xFFFFFFFF)
+    y = (e.s32(0x24) - 0x100000000 if e.s32(0x24) & 0x80000000 else e.s32(0x24)) >> 4
+    x = (e.s32(0x20) - 0x100000000 if e.s32(0x20) & 0x80000000 else e.s32(0x20)) >> 4
+    e.d32(0x08, y & 0xFFFFFFFF)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if e.s32(0x28) == 0 and e.s32(0x1C) == 0:
+        if e.s32(0x30) != 0:
+            w2c = e.g16(0x2C)
+            w2e = e.g16(0x2E)
+            self.p4_43B360(e, w2c - 0x10000 if w2c & 0x8000 else w2c,
+                           w2e - 0x10000 if w2e & 0x8000 else w2e, 0)
+        else:
+            e.d16(0x2C, self.p4_player_x() & 0xFFFF)
+            e.d16(0x2E, self.p4_player_y() & 0xFFFF)
+        c = (e.s32(0x30) + 1) & 0xFFFFFFFF
+        e.d32(0x30, c)
+        if c == 0xC:
+            e.d32(0x28, -1 & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return e.g32(0x18) != 0 and (e.s32(0x28) > 0 or x < 0x298)
+
+
+def _beh_419B70(self, e) -> bool:
+    """`0x419B70`（0x28000011）：[0x20] += [0x24]；x>0xA0 → x −= 3、
+    [0x24]≠0 → [0x24] += ([0x24]≥0 ? −1 : +1)；x≤0xA0 → x −= 2、
+    [0x24]≠0 → ([0x24]≥0 ? +1 : −1)、==0 → [0x24] += (y≥0xF0 ? −1 : +1)；
+    y = [0x20]>>4；0x401BA4(8,0,0x30) 特效；node dst=(x−0x18,y−0x18)；
+    return HP≠0 且 x>−0x18。"""
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
+    x = e.s32(0x04)
+    v = e.s32(0x24)
+    if x > 0xA0:
+        x -= 3
+        if v != 0:
+            v = (v + (-1 if v >= 0 else 1)) & 0xFFFFFFFF
+    else:
+        x -= 2
+        if v != 0:
+            v = (v + (1 if v >= 0 else -1)) & 0xFFFFFFFF
+        else:
+            v = (v + (-1 if e.s32(0x08) >= 0xF0 else 1)) & 0xFFFFFFFF
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x24, v)
+    s20 = e.s32(0x20)
+    y = (s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 4
+    e.d32(0x08, y & 0xFFFFFFFF)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return e.g32(0x18) != 0 and x > -0x18
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6191,6 +6257,7 @@ P4_BEH: dict[int, object] = {
     0x417410: _beh_417410,                          # 批20
     0x4175C0: _beh_4175C0,                          # 批21
     0x419610: _beh_419610, 0x4196E0: _beh_4196E0,   # 批22
+    0x419910: _beh_419910, 0x419B70: _beh_419B70,   # 批23
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
