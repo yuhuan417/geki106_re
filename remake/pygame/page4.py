@@ -6021,6 +6021,135 @@ def _beh_41F010(self, e) -> bool:
     return e.g32(0x18) != 0 and x < 0x2B0
 
 
+_P4_40A930_LIMITS = (0x168, 0x168, 0x168, 0, 0x78, 0x12C, 0xF0, 0xFFFF,
+                     0x69, 0x1C2, 0xB4, 0xF0, 0x12C, 0x12C, 0x21C, 0xB4, 0xFFFF)
+
+
+def _beh_40A930(self, e) -> bool:
+    """`0x40A930`（0x2A000002，**关7 boss 本体**）。
+
+    态0：发 0x2A000002/03/04 三件 @(x,y) 入 0x4AD43C、[0x24]=1、
+      [0x30]=((x&0x7FF)|(y<<0x10))<<5（16.5 定点）。
+    态7：[0x1C]==0x26DF → 态8、[0x18]=0x27100。
+    态0x10：0x45AFC0(0x56CCB8,0x10)==0 且 [0x20]==0x12C → 态++。
+    态1..6：[0x20] ≥ 表值 → 态 += (态≤6 ? +1 : −5)。
+    公共：[0x1C]++；态切换 → [0x20] = (态≤0xD ? −0x78 : 0)；同态 →
+      [0x20]==−1 ? 三行掩码检查（[0x28]=27 架 3×9 位存活掩码，行空 → [0x20]=0）
+      : [0x20]++；[0x2C]≠0 → [0x2C]−−。
+    态0xE：[0x18]=min([0x18],0x26160)；0x1D4C0<[0x18]<0x26160 → 0x61000004
+      @(x,y,0x10) 入 52C + 0x32000009 @(x,y) 入 49C、[0x18]=0x1D4C0。
+    态0xF：0x401E1F(0x56CCB8, 0x20)。
+    态0x10：0x402400(0x56CCB8,0x20)；[0x20]&1 或 0x40208B(0x56CCB8,0x10)==0 →
+      跳过；否则双发 0x10FF0053 @(自机x, 自机y+[0x20]>>1 / [0x20]>>3+4) 入 0x4AD46C。
+    态0x11：[0x20]==0 且 0x40221B(0x4AD40C)!=0 → 0x61000005(0,0xFFFFFF01,−4) 入 52C；
+      x < −0xF0 → 死亡路径。
+    移动：态==0x11 → word[0x30] −= [0x20]<<6；否则 word[0x30] +=
+      (自机x>>2 − x + 0x1E0)>>3；word[0x32] += (自机y>>1 − y + 0x78)>>3；
+      x=word[0x30]>>5、y=word[0x32]>>5；node dst=(x−0xA0, y−0x60)。
+    HP>0x9C40 → return 1；否则 0x4A000006 @(x,y) 入 4CC + 0x401E1F(0x56CCB8,0x40)
+      + 0x401AE1(0x4CD4A0,0xF4240)、return 0。"""
+    st = e.s32(0x24)
+    st_old = st
+    t = e.s32(0x1C)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if st == 0:
+        self._p4_ent43c(0x2A000002, x, y)
+        self._p4_ent43c(0x2A000003, x, y)
+        self._p4_ent43c(0x2A000004, x, y)
+        e.d32(0x24, 1)
+        st = 1
+        e.d32(0x30, (((x & 0x7FF) | ((y & 0xFFFF) << 0x10)) << 5) & 0xFFFFFFFF)
+    elif st == 7:
+        if t == 0x26DF:
+            e.d32(0x24, 8)
+            st = 8
+        e.d32(0x18, 0x27100)
+    elif st == 0x10:
+        if (self.keys.field(0x10) & 3) == 0 and e.s32(0x20) == 0x12C:
+            e.d32(0x24, 0x11)
+            st = 0x11
+    elif 1 <= st <= 6:
+        if e.s32(0x20) >= _P4_40A930_LIMITS[st]:
+            e.d32(0x24, (st + (1 if st <= 6 else -5)) & 0xFFFFFFFF)
+            st = e.s32(0x24)
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if st != st_old:
+        e.d32(0x20, -0x78 if st <= 0xD else 0)
+    else:
+        v20 = e.s32(0x20)
+        if v20 == -1:
+            m = e.g32(0x28)
+            if st % 3 == 0:
+                if (m & 0x1FF) == 0 or ((m & 0x3FE00) == 0):
+                    e.d32(0x20, 0)
+            elif st % 3 == 1:
+                if (m & 0x1FF) == 0 or (m & 0x7FC0000) == 0:
+                    e.d32(0x20, 0)
+            else:
+                if (m & 0x3FE00) == 0:
+                    e.d32(0x20, 0)
+        else:
+            e.d32(0x20, (v20 + 1) & 0xFFFFFFFF)
+    if e.s32(0x2C) != 0:
+        e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
+    v20 = e.s32(0x20)
+    if st == 0xE:
+        hp = e.g32(0x18)
+        if hp > 0x26160:
+            e.d32(0x18, 0x26160)
+        hp = e.g32(0x18)
+        if 0x1D4C0 < hp < 0x26160:
+            self.p4_spawn52c_flash(x, y, 0x61000004, 0x10)
+            self.spawn(self._p4_q("ui49c"), 0x32000009, x, y, 0)
+            e.d32(0x18, 0x1D4C0)
+    elif st == 0xF:
+        pass                                              # 0x401E1F(0x56CCB8,0x20)
+    elif st == 0x10:
+        pass                                              # 0x402400(0x56CCB8,0x20)
+        if not (v20 & 1) and (self.keys.field(0x10) & 3) != 0:
+            sy = self.p4_player_y()
+            sx = self.p4_player_x()
+            self.spawn(self._p4_q("ui46c"), 0x10FF0053, sx, sy + (v20 >> 1), 0)
+            self.spawn(self._p4_q("ui46c"), 0x10FF0053, sx, sy + (v20 >> 3) + 4, 0)
+    elif st == 0x11:
+        if v20 == 0 and getattr(self, "actorq", None):
+            self.p4_spawn52c_flash(0, 0xFFFFFF01, 0x61000005, -4)
+        if x < -0xF0:
+            return self._p4_40a930_death(e, x, y)
+    # 移动
+    w30 = e.g16(0x30)
+    w32 = e.g16(0x32)
+    if st == 0x11:
+        w30 = (w30 - ((v20 << 6) & 0xFFFF)) & 0xFFFF
+    else:
+        d = ((self.p4_player_x() >> 2) - x + 0x1E0) >> 3
+        w30 = (w30 + (d & 0xFFFF)) & 0xFFFF
+    d2 = ((self.p4_player_y() >> 1) - y + 0x78) >> 3
+    w32 = (w32 + (d2 & 0xFFFF)) & 0xFFFF
+    e.d16(0x30, w30)
+    e.d16(0x32, w32)
+    w30s = w30 - 0x10000 if w30 & 0x8000 else w30
+    w32s = w32 - 0x10000 if w32 & 0x8000 else w32
+    x = w30s >> 5
+    y = w32s >> 5
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0xA0, y - 0x60)
+    if e.g32(0x18) > 0x9C40:
+        return True
+    return self._p4_40a930_death(e, x, y)
+
+
+def _p4_40a930_death(self, e, x: int, y: int) -> bool:
+    """`0x40A930` 死亡段：0x4A000006 入 4CC、清位、全局件。"""
+    self.spawn(self._p4_q("ui4cc"), 0x4A000006, x, y, 0)
+    self.p4_other.setdefault("4cd4a0", []).append(0xF4240)
+    return False
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7570,6 +7699,7 @@ P4_BEH: dict[int, object] = {
     0x41FE10: _beh_41FE10,                          # 批38
     0x41F860: _beh_41F860,                          # 批39
     0x41F010: _beh_41F010,                          # 批40
+    0x40A930: _beh_40A930,                          # 批41
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
