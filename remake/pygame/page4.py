@@ -4260,6 +4260,74 @@ def _beh_414FB0(self, e) -> bool:
     return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
 
 
+def _beh_4145A0(self, e) -> bool:
+    """`0x4145A0`（0x26000005）：**圆周飞行长机 + 链体门**。
+
+    [0x20]++（t）；[0x1C]==0 且 (t&7)==0 且 [0x28]≠0 → 发 0x26000005 @
+    (0x2A8,0xF0) 入 0x4AD43C、[0x28]−−。
+    x = 0x1E0 + (25*cos(11t)>>5) − t/2；y = 0xF0 + (25*sin(23t)>>5)
+    （0x40159B=cos/0x401A50=sin；11t=(t+t*4)*2、23t=(t*3)<<3−t）。
+    无链 且 (t&0x7F)==0：朝机十字六连（spd −0x380..−0x80 步 0x100：
+    0x43B070(e,spd) + 0x43B290(e, dx−dy, dx+dy, spd) + 0x43B290(e, dy−dx, dx+dy, spd)）。
+    (t&7)==0 → 0x414010。HP：≠−1 → [0x18]=−1；旧链体≠0 → [链体+0x24]−−、
+    ==0 → 自身 [0x24]−−。
+    链体≠0：byte[链体+0x34] 置位 → 存活路径；否则发 0x41000001 入 ui4cc +
+    2× 0x41000004（坐标 ±rand%0x1F−0xF 抖动）并 return 0。
+    链体==0：[0x24]>0 → 存活；否则 0x401AE1(0x4CD4A0, 0x7530) 全局件 + return 0。
+    存活路径：node dst 同步；有链 return x>−0x18；无链 return t<0x44C。"""
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)
+    h_old = e.s32(0x1C)
+    if h_old == 0 and (t & 7) == 0 and e.s32(0x28) != 0:
+        self._p4_ent43c(0x26000005, 0x2A8, 0xF0)
+        e.d32(0x28, (e.s32(0x28) - 1) & 0xFFFFFFFF)
+    c = page4_cos(11 * t)
+    s_ = page4_sin(23 * t)
+    x = 0x1E0 + ((25 * c) >> 5) - (t >> 1)
+    y = 0xF0 + ((25 * s_) >> 5)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    linked = getattr(self, "p4_links", {}).get(h_old & 0x7FFFFFFF) if h_old else None
+    if h_old == 0 and (t & 0x7F) == 0:
+        dx = self.p4_player_x() - x
+        dy = self.p4_player_y() - y
+        a = dx - dy
+        b = dx + dy
+        c2 = dy - dx
+        spd = -0x380
+        while spd <= -0x80:
+            self.p4_43B070(e, spd & 0xFFFFFFFF)
+            self.p4_43B290(e, a, b, spd & 0xFFFFFFFF)
+            self.p4_43B290(e, c2, b, spd & 0xFFFFFFFF)
+            spd += 0x100
+    if (t & 7) == 0:
+        self.p4_414010(e)
+    if e.g32(0x18) != -1:                           # 0x4146BC
+        if linked is not None:
+            linked.d32(0x24, (linked.s32(0x24) - 1) & 0xFFFFFFFF)
+        else:
+            e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    if linked is not None:
+        if linked.m[0x34] != 0:                     # 0x4147C4 存活路径
+            if e.node is not None:
+                e.node.dst = (x - 0x18, y - 0x18)
+            return x > -0x18
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+        for _ in range(2):                          # 0x41477B esi=2
+            jx = (self.p4_rand() & 0x1F) - 0xF
+            jy = (self.p4_rand() & 0x1F) - 0xF
+            self.spawn(self._p4_q("ui4cc"), 0x41000004, x + jx, y + jy, (jx, jy))
+        return False
+    if e.s32(0x24) > 0:                             # 0x4146D4
+        if e.node is not None:
+            e.node.dst = (x - 0x18, y - 0x18)
+        return t < 0x44C
+    # 0x401AE1(0x4CD4A0, 0x7530)：全局长特效件（0x7530=30000）
+    self.p4_other.setdefault("4cd4a0", []).append(0x7530)
+    return False
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5783,6 +5851,7 @@ P4_BEH: dict[int, object] = {
     0x414170: _beh_414170,                          # 批12
     0x414460: _beh_414460,                          # 批13
     0x414FB0: _beh_414FB0,                          # 批14
+    0x4145A0: _beh_4145A0,                          # 批15
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
