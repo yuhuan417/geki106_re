@@ -5495,6 +5495,50 @@ def _beh_41D330(self, e) -> bool:
     return True
 
 
+def _beh_41D990(self, e) -> bool:
+    """`0x41D990`（thunk 0x40134D；0x29000005）：**帧表入场演出体**。
+
+    帧门 t=[0x1C]&0xFF ≤ 0xA0，事件表 0x41DB88/0x41DB70：
+      0x00 → 0x49000006 @(x,y) 双发入 0x4AD4CC（prm 0 / 1），[0x20]=[0x24]=0
+      0x30 → [0x10]=1、node.active=1
+      0x50 → 0x31000015 @(x,y) prm 0xC 入 0x4AD49C（[esp+0x1C]=(y<0xF0) 残留）
+      0x70 → node.active=0；0x49000007 @(x,y) 双发入 0x4AD4CC（prm 0 / 1）
+      0xA0 → [0x10]=0、[0x20]=−1、[0x24]=(y≥0xF0 ? +3 : −3)（脱离起转）
+    尾：t++、x += [0x20]、y += [0x24]（0x45A6B0 node dst 同步）；
+    t < 0x2A0 且 HP≠0 → 存活。"""
+    t = e.s32(0x1C) & 0xFF
+    if t <= 0xA0:
+        if t == 0x00:
+            self.spawn(self._p4_q("ui4cc"), 0x49000006, e.s32(0x04), e.s32(0x08), 0)
+            self.spawn(self._p4_q("ui4cc"), 0x49000006, e.s32(0x04), e.s32(0x08), 1)
+            e.d32(0x20, 0)
+            e.d32(0x24, 0)
+        elif t == 0x30:
+            e.m[0x10] = 1
+            if e.node is not None:
+                e.node.active = 1
+        elif t == 0x50:
+            self.spawn(self._p4_q("ui49c"), 0x31000015, e.s32(0x04), e.s32(0x08), 0xC)
+        elif t == 0x70:
+            if e.node is not None:
+                e.node.active = 0
+            self.spawn(self._p4_q("ui4cc"), 0x49000007, e.s32(0x04), e.s32(0x08), 0)
+            self.spawn(self._p4_q("ui4cc"), 0x49000007, e.s32(0x04), e.s32(0x08), 1)
+        elif t == 0xA0:
+            e.m[0x10] = 0
+            e.d32(0x20, -1 & 0xFFFFFFFF)
+            e.d32(0x24, (3 if e.s32(0x08) >= 0xF0 else -3) & 0xFFFFFFFF)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    vx = e.s32(0x20)
+    vy = e.s32(0x24)
+    e.d32(0x04, (e.s32(0x04) + vx) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + vy) & 0xFFFFFFFF)
+    if e.node is not None:                          # 0x45A6B0(node+0x14, vx, vy)
+        e.node.dst = (e.node.dst[0] + vx, e.node.dst[1] + vy)
+    return t < 0x2A0 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7036,6 +7080,7 @@ P4_BEH: dict[int, object] = {
     0x41AE20: _beh_41AE20,                          # 批30
     0x41D080: _beh_41D080,                          # 批31
     0x41D330: _beh_41D330,                          # 批32
+    0x41D990: _beh_41D990,                          # 批33
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
