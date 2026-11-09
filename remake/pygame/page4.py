@@ -7190,6 +7190,96 @@ def _beh_40FD10(self, e) -> bool:
     return t2 < 0xF5
 
 
+def _beh_40FEA0(self, e) -> bool:
+    """`0x40FEA0`（thunk 0x401D48；0x23000016）：**挂主僚机（十二态）**。
+
+    主 = [0x1C] 句柄；t2=主.word[0x20]（主态机）；态 = 主.[0x1C]−1（>0xB 跳）：
+      0：t2≥0 且 (t2&0x1F)==0 → 0x43B360(e, 自机x, 自机y+([0x24]<0 ? +0x30 : −0x30)
+         ⊕ ~(t2)>>5&1, 0x300)
+      1：t2==0 且 [0x24]<0 → 0x23000017 @(x,y) 入 0x4AD43C（[0x28]=0）
+      3：t2≥0x28 且 (t2&3)==0 → 0x43B070(e, (t2−0xA0)<<4)
+      4：t2==0 且 [0x24]>0 → 0x23000017 @(x,y,prm={主,0x10000}) 入 0x4AD43C
+      5：[0x24]<0：(t2&0x3F)==0x30 → 0x23000019 @(x,y,−0x48) 入 43C；
+         [0x24]>0：(t2&0x3F)==0x10 → 0x23000019 @(x,y,0x48)
+      6：0x41000001 + 0x41000004 ×5（±rand&0x1F−0xF）@(x,y) 入 0x4AD4CC、return 0
+      8：t2≥0 且 (t2&0xF)==0 → 0x43B360(e, 自机x+(rand&0x3F)−0x20,
+         自机y+(rand&0x3F)−0x20, 0)（0x401E56）
+      9/11：t2==0 → 0x23000017 @(x,y,prm={主,( [0x24]≥0 ? 0x10000 : 0)}) 入 43C
+      10：[0x24]<0：(t2&0xF)==4 → 0x23000019 @(x,y,−0x48)；[0x24]>0：
+         (t2&0xF)==0xB → 0x23000019 @(x,y,0x48)
+    x = 主.x + [0x20]、y = 主.y + [0x24]；node dst=(x−0x18,y−0x18)；
+    [0x2C]==0 → HP=−1；主死 或 HP==0 → return 0；else 1。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None:
+        return False
+    t2 = main.g16(0x20)
+    t2s = t2 - 0x10000 if t2 & 0x8000 else t2
+    st = main.s32(0x1C) - 1
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if st <= 0xB:
+        if st == 0:
+            if t2s >= 0 and (t2 & 0x1F) == 0:
+                sy = self.p4_player_y() + ((0x30 if e.s32(0x24) < 0 else -0x30)
+                                           ^ ((~t2 >> 5) & 1) * 0x30)
+                self.p4_43B360(e, self.p4_player_x(), sy, 0x300)
+        elif st == 1:
+            if t2s == 0 and e.s32(0x24) < 0:
+                e.d32(0x28, 0)
+                self._p4_ent43c(0x23000017, x, y)
+        elif st == 3:
+            if t2s >= 0x28 and (t2 & 3) == 0:
+                self.p4_43B070(e, ((t2s - 0xA0) << 4) & 0xFFFFFFFF)
+        elif st == 4:
+            if t2s == 0 and e.s32(0x24) > 0:
+                e.d32(0x28, 0)
+                c = self._p4_ent43c(0x23000017, x, y)
+                c.d32(0x18, (id(main) & 0x7FFFFFFF))
+                c.d32(0x1C, 0x10000)
+        elif st in (5, 10):
+            v24 = e.s32(0x24)
+            if v24 < 0:
+                if (t2 & (0x3F if st == 5 else 0xF)) == (0x30 if st == 5 else 4):
+                    self._p4_ent43c(0x23000019, x, y)
+                    e.d32(0x24, -0x48 & 0xFFFFFFFF) if False else None
+            elif v24 > 0:
+                if (t2 & (0x3F if st == 5 else 0xF)) == (0x10 if st == 5 else 0xB):
+                    self._p4_ent43c(0x23000019, x, y)
+            # 0x23000019 的 prm=±0x48 由 ctor 键控（此处仅铺件）
+        elif st == 6:
+            self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+            for _ in range(5):
+                jx = (self.p4_rand() & 0x1F) - 0xF
+                jy = (self.p4_rand() & 0x1F) - 0xF
+                self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                           x + jx, y + jy, (jx, jy))
+            return False
+        elif st == 8:
+            if t2s >= 0 and (t2 & 0xF) == 0:
+                self.p4_43B360(e, self.p4_player_x() + (self.p4_rand() & 0x3F) - 0x20,
+                               self.p4_player_y() + (self.p4_rand() & 0x3F) - 0x20, 0)
+        elif st in (9, 11):
+            if t2s == 0:
+                e.d32(0x28, 0)
+                c = self._p4_ent43c(0x23000017, x, y)
+                c.d32(0x18, id(main) & 0x7FFFFFFF)
+                c.d32(0x1C, 0x10000 if e.s32(0x24) >= 0 else 0)
+    v20 = e.s32(0x20)
+    v24 = e.s32(0x24)
+    x = (main.s32(0x04) + v20) & 0xFFFFFFFF
+    y = (main.s32(0x08) + v24) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if e.s32(0x2C) == 0:
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main.m[0x34] != 0 and e.g32(0x18) != 0:
+        return True
+    return False
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8752,6 +8842,7 @@ P4_BEH: dict[int, object] = {
     0x40F4F0: _beh_40F4F0,                          # 批51
     0x40F610: _beh_40F610,                          # 批52
     0x40FD10: _beh_40FD10,                          # 批53
+    0x40FEA0: _beh_40FEA0,                          # 批54
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
