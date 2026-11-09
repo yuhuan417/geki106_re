@@ -5393,6 +5393,108 @@ def _beh_41D080(self, e) -> bool:
     return False
 
 
+_P4_41D330_ROW_A = (0x30, 0x00, 0x47, 0x17)
+_P4_41D330_ROW_B = (0x30, 0x18, 0x47, 0x2F)
+
+
+def _p4_41d330_row(e) -> None:
+    """0x45A750 双行贴图切换（node.rect.t==0 → B 行，否则 A 行）。"""
+    nd = e.node
+    if nd is None:
+        return
+    nd.rect = _P4_41D330_ROW_B if nd.rect[1] == 0 else _P4_41D330_ROW_A
+
+
+def _beh_41D330(self, e) -> bool:
+    """`0x41D330`（0x29000003，0x41D080 六翼僚机）：**父链协同**。
+
+    有父（[0x1C] 句柄）：x = 父.x + [0x20]、y = 父.y + [0x24]（相对位跟随）；
+    子态 = 父.[0x24]−1（父弹数 1..4），timer = 父.[0x28]：
+      态0：(timer&0x1B)==0x1B → 0x43B360(e, 自机x+2dx, 自机y+2dy, 0x340)
+      态1：timer==0 → [0x28]=自机x、[0x2C]=自机y（锁定）；timer<0x40 → 行切换；
+        (timer&3)==3 → 0x43B360(e, 锁x+dx, 锁y+dy, −0x400)
+      态2：timer<0x40 → 行切换；timer==0x40 → 行切换；
+        (timer>>2)+timer==0x5A → 0x43B610(e, 自机x, 自机y, −0x500)
+      态3：timer==0 → 行切换 + [0x28]=0x18、[0x2C]=0x14；
+        timer==0x60 → 3×3 网格 0x43B290(e, by, bx, −0x300)（bx,by ∈ −2..2 步 2）；
+        timer==[0x28] 且 <0x60 → 行切换 + [0x28] += [0x2C]、[0x2C]>4 → [0x2C]−=4
+    父死或 HP==0 → [0x1C]=[0x20]=0、[0x10]=0（断链下坠）。
+    无父：t2=++[0x20]；(t2&3)==0 → 爆散 0x41000004（t2&4 ? 抖动 ±(rand&0x1F−0xF)
+    对 : (±(rand&0x1F−0xF), rand&0xF−0x18)）入 0x4AD4CC；
+    x −= [0x20]>>2、y += [0x20]>>2；node dst=(x−0xC,y−0xC)；
+    return 不是(无父 且 y≥0x210)。"""
+    h = e.s32(0x1C)
+    links = getattr(self, "p4_links", {})
+    parent = links.get(h & 0x7FFFFFFF) if h else None
+    dx = e.s32(0x20)
+    dy = e.s32(0x24)
+    if parent is not None and h:
+        x = (parent.s32(0x04) + dx) & 0xFFFFFFFF
+        y = (parent.s32(0x08) + dy) & 0xFFFFFFFF
+        e.d32(0x04, x)
+        e.d32(0x08, y)
+        sub = parent.s32(0x24) - 1
+        tm = parent.s32(0x28)
+        if sub == 0:
+            if (tm & 0x1B) == 0x1B:
+                self.p4_43B360(e, self.p4_player_x() + 2 * dx,
+                               self.p4_player_y() + 2 * dy, 0x340)
+        elif sub == 1:
+            if tm == 0:
+                e.d32(0x28, self.p4_player_x() & 0xFFFFFFFF)
+                e.d32(0x2C, self.p4_player_y() & 0xFFFFFFFF)
+            if tm < 0x40:
+                _p4_41d330_row(e)
+            if (tm & 3) == 3 and tm >= 0:
+                lx = e.s32(0x28)
+                ly = e.s32(0x2C)
+                self.p4_43B360(e, lx + dx, ly + dy, -0x400 & 0xFFFFFFFF)
+        elif sub == 2:
+            if tm < 0x40 or tm == 0x40:
+                _p4_41d330_row(e)
+            if (tm >> 2) + tm == 0x5A:
+                self.p4_43B610(e, self.p4_player_x(), self.p4_player_y(),
+                               -0x500 & 0xFFFFFFFF)
+        elif sub == 3:
+            if tm == 0:
+                _p4_41d330_row(e)
+                e.d32(0x28, 0x18)
+                e.d32(0x2C, 0x14)
+            if tm == 0x60:
+                for by in (-2, 0, 2):
+                    for bx in (-2, 0, 2):
+                        self.p4_43B290(e, by, bx, -0x300 & 0xFFFFFFFF)
+            if tm == e.s32(0x28) and tm < 0x60 and tm != 0x60:
+                _p4_41d330_row(e)
+                e.d32(0x28, (e.s32(0x28) + e.s32(0x2C)) & 0xFFFFFFFF)
+                if e.s32(0x2C) > 4:
+                    e.d32(0x2C, (e.s32(0x2C) - 4) & 0xFFFFFFFF)
+        if parent.m[0x34] != 0 or e.g32(0x18) == 0:
+            e.d32(0x1C, 0)
+            e.d32(0x20, 0)
+            e.m[0x10] = 0
+    else:
+        t2 = (e.s32(0x20) + 1) & 0xFFFFFFFF
+        e.d32(0x20, t2)
+        if (t2 & 3) == 0:
+            if t2 & 4:
+                jx = (self.p4_rand() & 0x1F) - 0xF
+                jy = (self.p4_rand() & 0x1F) - 0xF
+            else:
+                jx = (self.p4_rand() & 0x1F) - 0xF
+                jy = (self.p4_rand() & 0xF) - 0x18
+            self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                       e.s32(0x04) + jx, e.s32(0x08) + jy, (jx, jy))
+        t2v = e.s32(0x20)
+        e.d32(0x04, (e.s32(0x04) - (t2v >> 2)) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x08) + (t2v >> 2)) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0xC, e.s32(0x08) - 0xC)
+    if h == 0 and e.s32(0x08) >= 0x210:
+        return False
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6933,6 +7035,7 @@ P4_BEH: dict[int, object] = {
     0x41BF60: _beh_41BF60,                          # 批29
     0x41AE20: _beh_41AE20,                          # 批30
     0x41D080: _beh_41D080,                          # 批31
+    0x41D330: _beh_41D330,                          # 批32
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
