@@ -3832,6 +3832,37 @@ def _beh_414D60(self, e) -> bool:
             and e.g32(0x18) != 0)
 
 
+def _beh_4107D0(self, e) -> bool:
+    """`0x4107D0`（thunk 0x401B31；0x23000019）：[0x1C]+=[0x24]、[0x20]+=[0x28]；
+    [0x24]≥0 → [0x24]−=4、[0x28] += ([0x28]≥0 ? −3 : +3)；
+    否则 [0x24]>−0x50 → [0x24]−−，且 y<自机y → [0x28] += ([0x28]≥0 ? +4 : +2)、
+    y≥自机y → [0x28] −= ([0x28]≤0 ? +4 : +2)（纵向追踪）；
+    x=[0x1C]>>4、y=[0x20]>>4；node dst=(x−0x18,y−0x18)；
+    return x > −0x18 且 HP≠0。"""
+    e.d32(0x1C, (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+    v24 = e.s32(0x24)
+    v28 = e.s32(0x28)
+    if v24 >= 0:
+        e.d32(0x24, (v24 - 4) & 0xFFFFFFFF)
+        e.d32(0x28, (v28 + (-3 if v28 >= 0 else 3)) & 0xFFFFFFFF)
+    else:
+        if v24 > -0x50:
+            e.d32(0x24, (v24 - 1) & 0xFFFFFFFF)
+        if e.s32(0x08) < self.p4_player_y():
+            e.d32(0x28, (v28 + (4 if v28 >= 0 else 2)) & 0xFFFFFFFF)
+        else:
+            e.d32(0x28, (v28 - (4 if v28 <= 0 else 2)) & 0xFFFFFFFF)
+    x = (e.s32(0x1C) - 0x100000000 if e.s32(0x1C) & 0x80000000 else e.s32(0x1C)) >> 4
+    s20 = e.s32(0x20)
+    y = (s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return x > -0x18 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5344,6 +5375,7 @@ P4_BEH: dict[int, object] = {
     0x41DCE0: _beh_41DCE0, 0x422D40: _beh_422D40,   # 批1
     0x4070E0: _beh_4070E0, 0x4197B0: _beh_4197B0, 0x41A180: _beh_41A180, 0x413930: _beh_413930,   # 批2
     0x414380: _beh_414380, 0x414D60: _beh_414D60,   # 批3
+    0x4107D0: _beh_4107D0,                          # 批4
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
