@@ -4574,6 +4574,45 @@ def _beh_417410(self, e) -> bool:
     return e.g32(0x18) != 0 and self.p4_4305f0(e, 0x30)
 
 
+def _beh_4175C0(self, e) -> bool:
+    """`0x4175C0`（0x2700000F）：**受创爆发 boss**。
+
+    y<0xF0 且 x<0x190 → [0x28]−−；0xF0<y<0x15E → [0x28]≠0 ? [0x28]++ :
+    ([0x24]>−0x30 → [0x24]−−)；
+    [0x1C]+=[0x24]、[0x20]+=[0x28]（8.4 定点）；x=[0x1C]>>4、y=[0x20]>>4。
+    0<HP<0xFA0（unsigned jae 门）→ 爆发：0x61000004@(x,y,0x78) 入 0x4AD52C、
+    0x32000004@(x,y−0x3C)/0x32000004@(x,y+0x3C)/0x32000005@(x,y) 入 0x4AD49C，
+    return 0。否则 node dst=(x−0x78,y−0x78)；
+    return HP≠0 且 x>−0x78 且 y>−0x78。"""
+    y0 = e.s32(0x08)
+    x0 = e.s32(0x04)
+    if y0 < 0xF0 and x0 < 0x190:
+        e.d32(0x28, (e.s32(0x28) - 1) & 0xFFFFFFFF)
+    if 0xF0 < y0 < 0x15E:
+        if e.s32(0x28) != 0:
+            e.d32(0x28, (e.s32(0x28) + 1) & 0xFFFFFFFF)
+        elif e.s32(0x24) > -0x30:
+            e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+    a1c = (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x1C, a1c)
+    a20 = (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF
+    e.d32(0x20, a20)
+    x = (a1c - 0x100000000 if a1c & 0x80000000 else a1c) >> 4
+    y = (a20 - 0x100000000 if a20 & 0x80000000 else a20) >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    hp = e.g32(0x18)
+    if hp != 0 and hp < 0xFA0:
+        self.p4_spawn52c_flash(x, y, 0x61000004, 0x78)
+        self.spawn(self._p4_q("ui49c"), 0x32000004, x, y - 0x3C, 0)
+        self.spawn(self._p4_q("ui49c"), 0x32000004, x, y + 0x3C, 0)
+        self.spawn(self._p4_q("ui49c"), 0x32000005, x, y, 0)
+        return False
+    if e.node is not None:
+        e.node.dst = (x - 0x78, y - 0x78)
+    return hp != 0 and x > -0x78 and y > -0x78
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6103,6 +6142,7 @@ P4_BEH: dict[int, object] = {
     0x416770: _beh_416770, 0x417160: _beh_417160,   # 批18
     0x417280: _beh_417280,                          # 批19
     0x417410: _beh_417410,                          # 批20
+    0x4175C0: _beh_4175C0,                          # 批21
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
