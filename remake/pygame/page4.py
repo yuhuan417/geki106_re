@@ -3455,6 +3455,56 @@ def _beh_40F0F0(self, e) -> bool:
     return self.p4_4305f0(e, 0x18) and e.g32(0x18) != 0
 
 
+def _beh_4113E0(self, e) -> bool:
+    """`0x4113E0`：**折返斜升**——t=++[0x1C]；[0x20] += (t&0x40 ? −1 : +1)
+    （锯齿步进，0x40 位翻转折返）；x += [0x20]>>1（sar 1）、y −= 2；
+    `0x45A6B0(node+0x14, [0x20]>>1, −2)`（dst 同步）；return y > −0x18 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    step = -1 if (t & 0x40) else 1                  # 0x4113EC 两分支同语义
+    acc = (e.s32(0x20) + step) & 0xFFFFFFFF
+    e.d32(0x20, acc)
+    acc_s = acc - 0x100000000 if acc & 0x80000000 else acc
+    e.d32(0x04, (e.s32(0x04) + (acc_s >> 1)) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) - 2) & 0xFFFFFFFF)
+    if e.node is not None:                          # 0x45A6B0(node+0x14, >>1, −2)
+        e.node.dst = (e.node.dst[0] + (acc_s >> 1), e.node.dst[1] - 2)
+    return e.s32(0x08) > -0x18 and e.g32(0x18) != 0
+
+
+def _beh_4112F0(self, e) -> bool:
+    """`0x4112F0`：**入场摆动（8.8 双通道）**——word[0x20] −= 2（16 位）；
+    (word[0x20]&0x1F8)==0 且 [0x1C]≠0 → 0x43B070(e,0)（每 64 帧开火）；
+    [0x28]≠0 → word[0x24] += ([0x28]≤0 ? +1 : −1)；[0x2C]≠0 → word[0x26] 同式；
+    [0x28] += (int16)word[0x24]、[0x2C] += (int16)word[0x26]；
+    x = [0x28]>>1 + (int16)word[0x20]、y = ([0x2C]+2)>>2 + (int16)word[0x22]；
+    node dst=(x−0x18,y−0x18)；return HP≠0 且 (word[0x20]≥0 或 x≥−0x18)。"""
+    w20 = (e.g16(0x20) - 2) & 0xFFFF
+    e.d16(0x20, w20)
+    w20_s = w20 - 0x10000 if w20 & 0x8000 else w20
+    if (w20 & 0x1F8) == 0 and e.s32(0x1C) != 0:
+        self.p4_43B070(e, 0)
+    if e.s32(0x28) != 0:
+        w24 = (e.g16(0x24) + (1 if e.s32(0x28) <= 0 else -1)) & 0xFFFF
+        e.d16(0x24, w24)
+    if e.s32(0x2C) != 0:
+        w26 = (e.g16(0x26) + (1 if e.s32(0x2C) <= 0 else -1)) & 0xFFFF
+        e.d16(0x26, w26)
+    p28 = e.s32(0x28) + (w24 - 0x10000 if w24 & 0x8000 else w24)
+    p2c = e.s32(0x2C) + (w26 - 0x10000 if w26 & 0x8000 else w26)
+    e.d32(0x28, p28 & 0xFFFFFFFF)
+    e.d32(0x2C, p2c & 0xFFFFFFFF)
+    w22 = e.g16(0x22)
+    w22_s = w22 - 0x10000 if w22 & 0x8000 else w22
+    x = (p28 >> 1) + w20_s
+    y = ((p2c + 2) >> 2) + w22_s
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return e.g32(0x18) != 0 and (w20_s >= 0 or x >= -0x18)
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -4960,6 +5010,7 @@ P4_BEH: dict[int, object] = {
     0x4194A0: _beh_4194A0, 0x419540: _beh_419540,   # 0x28 定高左退 / 抛物线跳跳
     0x41A220: _beh_41A220,                          # 0x28 减速下坠纵摆
     0x40EDB0: _beh_40EDB0, 0x40EF60: _beh_40EF60, 0x40F0F0: _beh_40F0F0,   # 0x23 残骸链
+    0x4113E0: _beh_4113E0, 0x4112F0: _beh_4112F0,   # 0x24 折返斜升 / 入场摆动
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
