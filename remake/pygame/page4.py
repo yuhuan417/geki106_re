@@ -7071,6 +7071,77 @@ def _beh_40F4F0(self, e) -> bool:
     return x <= 0x298 and e.g32(0x18) != 0
 
 
+def _beh_40F610(self, e) -> bool:
+    """`0x40F610`（thunk 0x40231A；0x23000013）：**中boss 三段飞行**。
+
+    边界表 {0x22A,0x172,0x38,0} → 段号 0..3（t≥表值取该段）：
+      段&1 → x += (段&2 ? +4 : −4)；段&2 → y += (段&1 ? −4 : +4)。
+    0x38≤t<0x124：ang=19t−0x266；x = 0x140 + (80*sin(ang)+0x7F)>>8；
+      y = 0xF0 + (80*cos(ang)+0x7F)>>8。
+    t==0x172 → x=0x38、y=−0x18（转场）。
+    0x1B4≤t<0x22A：ang=23t−0x28EE；x = 0xDC + (95*sin(ang)+0x7F)>>8；
+      y = 0x154 + (95*cos(ang)+0x7F)>>8。
+    t==0xC8 且 type==0x23000013 且 [0x18]≤0xA → 0x43B070(e,0)。
+    HP==0 → 0x45A790(node+4, 0x30, 0x30, 0x30, 0x30)（爆闪）、[0x18]=−1、[0x10]=1；
+    HP>0x14 → [0x18]=−1（无敌帧重置）。
+    t=[0x1C]++；node dst=(x−0x18,y−0x18)；return y ≥ −0x18。"""
+    t = e.s32(0x1C)
+    bounds = (0x22A, 0x172, 0x38, 0)
+    seg = 4
+    for i in range(4):
+        if t < bounds[i]:
+            seg = i + 1
+            break
+    else:
+        seg = 0
+    if t >= bounds[seg] if False else False:
+        pass
+    # 段移动（0x40F675）
+    if seg < 4:
+        s = bounds[seg + 1] if seg + 1 < 4 else 0
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if seg <= 3:
+        if seg & 1:
+            x = (x + (4 if (seg & 2) else -4)) & 0xFFFFFFFF
+        if seg & 2:
+            y = (y + (-4 if (seg & 1) else 4)) & 0xFFFFFFFF
+    if 0x38 <= t < 0x124:
+        ang = (19 * t - 0x266) & 0xFFFFFFFF
+        s_ = page4_sin(ang)
+        c = page4_cos(ang)
+        x = (0x140 + ((80 * s_ + 0x7F) >> 8)) & 0xFFFFFFFF
+        y = (0xF0 + ((80 * c + 0x7F) >> 8)) & 0xFFFFFFFF
+    elif t == 0x172:
+        x = 0x38
+        y = -0x18 & 0xFFFFFFFF
+    elif 0x1B4 <= t < 0x22A:
+        ang = (23 * t - 0x28EE) & 0xFFFFFFFF
+        s_ = page4_sin(ang)
+        c = page4_cos(ang)
+        x = (0xDC + ((95 * s_ + 0x7F) >> 8)) & 0xFFFFFFFF
+        y = (0x154 + ((95 * c + 0x7F) >> 8)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if t == 0xC8 and e.s32(0x14) == 0x23000013 and e.s32(0x18) <= 0xA:
+        self.p4_43B070(e, 0)
+    hp = e.g32(0x18)
+    if hp == 0:
+        nd = e.node
+        if nd is not None:                       # 0x45A790(node+4, 0x30,0x30,0x30,0x30)
+            nd.rect = (nd.rect[0] + 0x30, nd.rect[1] + 0x30,
+                       nd.rect[2] + 0x30, nd.rect[3] + 0x30)
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+        e.m[0x10] = 1
+    elif hp > 0x14:
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return e.s32(0x08) >= -0x18
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8631,6 +8702,7 @@ P4_BEH: dict[int, object] = {
     0x404FA0: _beh_404FA0,                          # 批49
     0x4051A0: _beh_4051A0,                          # 批50
     0x40F4F0: _beh_40F4F0,                          # 批51
+    0x40F610: _beh_40F610,                          # 批52
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
