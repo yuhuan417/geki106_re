@@ -7142,6 +7142,54 @@ def _beh_40F610(self, e) -> bool:
     return e.s32(0x08) >= -0x18
 
 
+def _beh_40FD10(self, e) -> bool:
+    """`0x40FD10`（thunk 0x4013BB；0x23000018）：**挂主僚机（三段特效）**。
+
+    主 = [0x1C] 句柄；t2=[0x28]：
+      <0x30 → [0x20]−−；0x30..0x3F：(t2&3)==0 → rect 行 −0x30；
+      0x5B..0xA9：t2 奇 → (t2&0xF)−8：0x43B290(e, −0x2C, dx, 0)；
+      0xB5..0xC4：(t2&3)==0 → rect 行 +0x30；≥0xC5 且 <0xF5 → [0x20]++。
+    x = 主.x + [0x20]、y = 主.y + [0x24]；node dst=(x−0x18,y−0x18)。
+    主态==7 或 HP==0 → 0x41000014 @(x,y) prm 0xC 入 0x4AD4CC、return 0；
+    否则 t2++；return t2 < 0xF5。"""
+    links = getattr(self, "p4_links", {})
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None:
+        return False
+    t2 = e.s32(0x28)
+    if t2 < 0x30:
+        e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+    elif t2 < 0x40:
+        if (t2 & 3) == 0:
+            nd = e.node
+            if nd is not None:
+                nd.rect = (nd.rect[0], nd.rect[1] - 0x30,
+                           nd.rect[2], nd.rect[3] - 0x30)
+    elif 0x5B <= t2 < 0xAA:
+        if (t2 & 1):
+            self.p4_43B290(e, -0x2C, (t2 & 0xF) - 8, 0)
+    elif 0xB5 <= t2 < 0xC5:
+        if (t2 & 3) == 0:
+            nd = e.node
+            if nd is not None:
+                nd.rect = (nd.rect[0], nd.rect[1] + 0x30,
+                           nd.rect[2], nd.rect[3] + 0x30)
+    elif 0xC5 <= t2 < 0xF5:
+        e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    x = (main.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF
+    y = (main.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if main.s32(0x28) == 7 or e.g32(0x18) == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y, 0xC)
+        return False
+    t2 = (t2 + 1) & 0xFFFFFFFF
+    e.d32(0x28, t2)
+    return t2 < 0xF5
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8703,6 +8751,7 @@ P4_BEH: dict[int, object] = {
     0x4051A0: _beh_4051A0,                          # 批50
     0x40F4F0: _beh_40F4F0,                          # 批51
     0x40F610: _beh_40F610,                          # 批52
+    0x40FD10: _beh_40FD10,                          # 批53
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
