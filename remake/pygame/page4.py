@@ -4726,6 +4726,42 @@ def _beh_419B70(self, e) -> bool:
     return e.g32(0x18) != 0 and x > -0x18
 
 
+def _beh_419A30(self, e) -> bool:
+    """`0x419A30`（0x28000008）：**护卫伴随 + 掩护开火**。
+
+    [0x24] += [0x28]（纵摆累积）、y = [0x24]>>4；
+    [0x28] += ([0x20] ≥ y ? +1 : −1)（setge; dec; and 0xFFFFFFFE; inc）；
+    x −= 1；0x401BA4(0x10,1,0x30) 特效。
+    [0x2C]（伴随句柄）==0 → 发 0x28000008 @ (x+0x60, y+0xC0) 入 0x4AD43C、
+    [0x2C]=新体指针（复刻存句柄）；
+    [0x2C]==−1 → (x&0x1F)==0 → 0x43B070(e,0)；
+    否则链体死（byte[+0x34]）→ [0x2C]=−1。
+    node dst=(x−0x18,y−0x18)；return HP≠0 且 x>−0x18。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x28)) & 0xFFFFFFFF)
+    v = e.s32(0x28)
+    v = (v + (1 if e.s32(0x20) >= e.s32(0x08) else -1)) & 0xFFFFFFFF
+    e.d32(0x28, v)
+    e.d32(0x08, ((e.s32(0x24) - 0x100000000 if e.s32(0x24) & 0x80000000
+                  else e.s32(0x24)) >> 4) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    h = e.s32(0x2C)
+    if h == 0:
+        c = self._p4_ent43c(0x28000008, e.s32(0x04) + 0x60, e.s32(0x08) + 0xC0)
+        e.d32(0x2C, (id(c) & 0x7FFFFFFF))
+        getattr(self, "p4_links", {})[id(c) & 0x7FFFFFFF] = c
+    elif h == -1:
+        if (e.s32(0x04) & 0x1F) == 0:
+            self.p4_43B070(e, 0)
+    else:
+        linked = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF)
+        if linked is None or linked.m[0x34] != 0:
+            e.d32(0x2C, -1 & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6258,6 +6294,7 @@ P4_BEH: dict[int, object] = {
     0x4175C0: _beh_4175C0,                          # 批21
     0x419610: _beh_419610, 0x4196E0: _beh_4196E0,   # 批22
     0x419910: _beh_419910, 0x419B70: _beh_419B70,   # 批23
+    0x419A30: _beh_419A30,                          # 批24
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
