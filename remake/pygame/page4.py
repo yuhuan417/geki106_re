@@ -8116,6 +8116,184 @@ def _beh_405510(self, e) -> bool:
     return e.g32(0x18) != 0
 
 
+def _beh_405600(self, e) -> bool:
+    """`0x405600`（0x2C000008，**关8 关底母舰六态** 0x40612D 后公共尾）。
+
+    态0：铺 0x1E 架 0x2C00000A @(0x780302)（镜像递减）入 0x4AD43C；
+      t<0xB4 → x=0x2E4−45t、y=0x78；t==0x78 → 0x5100000A @(0x18,0x190) 入 4FC；
+      0xB4≤t<0x258 → y=0x190；t≥0x258 → 态1。
+    态1：t<0x3C → x=0x208+sin(45t)*(0x6E−t)>>7、y=0x140+cos(45t)*(0x64−t)>>7；
+      0x3C..0x6D → x=0x208+sin(45t)*90>>7、y=0xA0+sin(40(t+0x28))*90>>7；
+      0x1A4≤t<0x2BC → x−=6、y+=6；t∈{0x96,0xD2,0x10E,0x14A} → 双发 0x2C000009
+      @(0x7802BC,0x834)/(0x16802BC,0x5DC) 入 0x4AD43C；t==0x2BC → 态2。
+    态2：铺 0xA 架 0x2C00000A @(0x235027B)；t<0x28 → x=0x27B−t、y=0x235−t；
+      0x28..0x259 → 椭圆（cos(40t−0xFA)…）+ (t&3)==0 → 0x43B610(2x−0x1E0, 2y−0xF0,
+      −0x800)；0x25A..0x2ED → x+=6、y−=6；t==0x2B2 且 [0x28]==2 → 0x5100000A
+      @(0x268,0x168) 入 4FC；t==0x2EE → 态3。
+    态3：铺 6 架 0x2C00000B @(0x7802BC)；t<0x1E → x=0x190+(0x1E−t)²/3；
+      y += (自机y−y+8)>>4；0x78..0xB3 → 同法吸 y；0xB4..0x329 →（未全读，过渡）；
+      t==0x32A →（态 4 入口）。
+    态4：铺 0x3C 架 0x2C00000A @(0xFF9C0280)；x=0x2B0、y=−0x30、[0x2C]=0xFD002B00；
+      t%0x96==0 且 t≤0x2EE → [0x28]=0x45A9A0(Δ自机)；角步进 word[0x2C/0x2E] +=
+      3*sin/cos([0x28])>>2；x=word[0x2C]>>4、y=word[0x2E]>>4；出界钳
+      {[0x28]: 0xA8C/0/0x384/0x708}；t==0x546 → 态5。
+    态5：铺 0x14 架 0x2C00000A @(0x2402BC)；x=0x2BC、y=0x24；t<0x14 → x−=0xC；
+      0x14..0x9F → y 向 0x54/0x1F4 吸（>>2）；0xA0..0xAF → y 同；≥0xB0 且 <0x32A →
+      x−=8、y+=8（0x4B0 → 态6）。
+    弹幕（0x405F02）：0xF0≤t<0x32A 且 (t&7)==0 → 0x33000020 @(x,y)
+      prm=(40sin(45(t+0xC8))>>0xA+0x200, 40cos(45(t+0xC8))>>0xA+0x200) 入 0x4AD49C
+      + 对映 (−vx,−vy) 同型。
+    态推进：各态终点 [0x1C]++。"""
+    st = e.s32(0x1C)
+    t = e.s32(0x20)
+    if st == 0:
+        if t == 0:
+            for i in range(0x1E):
+                self._p4_ent43c(0x2C00000A, 0x780302, 1 if i == 0 else 0)
+            if e.s32(0x24) == 0:
+                e.d32(0x24, 1)
+        if t < 0xB4:
+            e.d32(0x08, 0x78)
+            e.d32(0x04, (0x2E4 - 45 * t) & 0xFFFFFFFF)
+            if t == 0x78:
+                self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x18, 0x190, 0)
+        elif t < 0x258:
+            e.d32(0x08, 0x190)
+        else:
+            e.d32(0x1C, 1)
+    elif st == 1:
+        if t < 0x3C:
+            a = (45 * t) & 0xFFFFFFFF
+            e.d32(0x04, (0x208 + ((page4_sin(a) * (0x6E - t)) >> 7)) & 0xFFFFFFFF)
+            e.d32(0x08, (0x140 + ((page4_cos(a) * (0x64 - t)) >> 7)) & 0xFFFFFFFF)
+        elif t < 0x6E:
+            a = (45 * t) & 0xFFFFFFFF
+            e.d32(0x04, (0x208 + ((page4_sin(a) * 90) >> 7)) & 0xFFFFFFFF)
+            a2 = (40 * (t + 0x28)) & 0xFFFFFFFF
+            e.d32(0x08, (0xA0 + ((page4_sin(a2) * 90) >> 7)) & 0xFFFFFFFF)
+        elif 0x1A4 <= t < 0x2BC:
+            e.d32(0x04, (e.s32(0x04) - 6) & 0xFFFFFFFF)
+            e.d32(0x08, (e.s32(0x08) + 6) & 0xFFFFFFFF)
+        if t in (0x96, 0xD2, 0x10E, 0x14A):
+            self._p4_ent43c(0x2C000009, 0x7802BC, 0x834)
+            self._p4_ent43c(0x2C000009, 0x16802BC, 0x5DC)
+        if t == 0x2BC:
+            e.d32(0x1C, 2)
+    elif st == 2:
+        if t == 0:
+            for i in range(0xA):
+                self._p4_ent43c(0x2C00000A, 0x235027B, 1 if i == 0 else 0)
+        if t < 0x28:
+            e.d32(0x04, (0x27B - t) & 0xFFFFFFFF)
+            e.d32(0x08, (0x235 - t) & 0xFFFFFFFF)
+        elif t < 0x25A:
+            a = (40 * t - 0xFA) & 0xFFFFFFFF
+            s_ = page4_sin(a)
+            c = page4_cos(a)
+            e.d32(0x04, (0x1E0 + ((s_ * 15) >> 8) * 1) & 0xFFFFFFFF) \
+                if False else (0x1E0 + (((s_ * 15) >> 8))) & 0xFFFFFFFF
+            e.d32(0x08, (0xF0 + ((c * 15) >> 8)) & 0xFFFFFFFF)
+            if t >= 0x80 and (t & 3) == 0:
+                self.p4_43B610(e, 2 * e.s32(0x04) - 0x1E0,
+                               2 * e.s32(0x08) - 0xF0, -0x800 & 0xFFFFFFFF)
+        elif t < 0x2EE:
+            e.d32(0x04, (e.s32(0x04) + 6) & 0xFFFFFFFF)
+            e.d32(0x08, (e.s32(0x08) - 6) & 0xFFFFFFFF)
+        else:
+            e.d32(0x1C, 3)
+        if e.s32(0x28) == 2 and t == 0x2B2:
+            self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x268, 0x168, 0)
+    elif st == 3:
+        if t == 0:
+            for i in range(6):
+                self._p4_ent43c(0x2C00000B, 0x7802BC, 1 if i == 0 else 0)
+        if t < 0x1E:
+            q = (0x1E - t)
+            e.d32(0x04, (0x190 + (q * q) // 3) & 0xFFFFFFFF)
+        yy = e.s32(0x08)
+        e.d32(0x08, (yy + ((self.p4_player_y() - yy + 8) >> 4)) & 0xFFFFFFFF)
+        if t == 0x32A:
+            e.d32(0x1C, 4)
+    elif st == 4:
+        if t == 0:
+            for i in range(0x3C):
+                self._p4_ent43c(0x2C00000A, 0xFF9C0280, 1 if i == 0 else 0)
+            e.d32(0x04, 0x2B0)
+            e.d32(0x08, -0x30 & 0xFFFFFFFF)
+            e.d32(0x2C, 0xFD002B00)
+        if t % 0x96 == 0 and t <= 0x2EE:
+            e.d32(0x28, self.p4_45a9a0(
+                self.p4_player_x() - e.s32(0x04),
+                self.p4_player_y() - e.s32(0x08)) & 0xFFFFFFFF)
+        a = e.s32(0x28)
+        w2c = (e.g16(0x2C) + ((page4_sin(a) * 3) >> 2)) & 0xFFFF
+        w2e = (e.g16(0x2E) + ((page4_cos(a) * 3) >> 2)) & 0xFFFF
+        e.d16(0x2C, w2c)
+        e.d16(0x2E, w2e)
+        x = (w2c - 0x8000 if w2c & 0x8000 else w2c) >> 4
+        y = (w2e - 0x8000 if w2e & 0x8000 else w2e) >> 4
+        e.d32(0x04, x & 0xFFFFFFFF)
+        e.d32(0x08, y & 0xFFFFFFFF)
+        if t % 0x96 > 0xA:
+            if x <= -0x60:
+                e.d32(0x28, 0xA8C)
+            if y <= -0x60:
+                e.d32(0x28, 0)
+            if x >= 0x2E0:
+                e.d32(0x28, 0x384)
+            if y >= 0x240 and x > -0x60:
+                e.d32(0x28, 0x708)
+        if t == 0x546:
+            e.d32(0x1C, 5)
+    elif st == 5:
+        if t == 0:
+            for i in range(0x14):
+                self._p4_ent43c(0x2C00000A, 0x2402BC, 1 if i == 0 else 0)
+            e.d32(0x04, 0x2BC)
+            e.d32(0x08, 0x24)
+        if t < 0x14:
+            e.d32(0x04, (e.s32(0x04) - 0xC) & 0xFFFFFFFF)
+        elif t < 0xA0:
+            xx = e.s32(0x04)
+            if xx < 0x54:
+                e.d32(0x08, (e.s32(0x08) + ((0x54 - xx) >> 2)) & 0xFFFFFFFF)
+            elif xx > 0x22C:
+                e.d32(0x08, (e.s32(0x08) - ((xx - 0x22C) >> 2)) & 0xFFFFFFFF)
+            yy = e.s32(0x08)
+            if yy < 0x54:
+                e.d32(0x04, (xx - ((0x54 - yy) >> 2)) & 0xFFFFFFFF)
+            elif yy > 0x18C:
+                e.d32(0x04, (xx + ((yy - 0x18C) >> 2)) & 0xFFFFFFFF)
+        elif t < 0xAF:
+            xx = e.s32(0x04)
+            if xx < 0x1F4:
+                e.d32(0x08, (e.s32(0x08) + ((0x1F4 - xx) >> 2)) & 0xFFFFFFFF)
+            elif xx > 0x22C:
+                e.d32(0x08, (e.s32(0x08) - ((xx - 0x22C) >> 2)) & 0xFFFFFFFF)
+            yy = e.s32(0x08)
+            if yy < 0x74:
+                e.d32(0x04, (xx - ((0x74 - yy) >> 2)) & 0xFFFFFFFF)
+        elif t < 0x32A:
+            e.d32(0x04, (e.s32(0x04) - 8) & 0xFFFFFFFF)
+            e.d32(0x08, (e.s32(0x08) + 8) & 0xFFFFFFFF)
+            if t == 0x4B0:
+                e.d32(0x1C, 6)
+        else:
+            e.d32(0x1C, 6)
+    t = e.s32(0x20)
+    y = e.s32(0x08)
+    x = e.s32(0x04)
+    if 0xF0 <= t < 0x32A and (t & 7) == 0:
+        a = (45 * (t + 0xC8)) & 0xFFFFFFFF
+        vx = (((page4_sin(a) * 40) >> 0xA) + 0x200) & 0xFFFFFFFF
+        vy = (((page4_cos(a) * 40) >> 0xA) + 0x200) & 0xFFFFFFFF
+        self.spawn(self._p4_q("ui49c"), 0x33000020, x, y, (vx, vy))
+        self.spawn(self._p4_q("ui49c"), 0x33000020, x, y,
+                   ((-vx) & 0xFFFFFFFF, (-vy) & 0xFFFFFFFF))
+    e.d32(0x20, (t + 1) & 0xFFFFFFFF)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -9689,6 +9867,7 @@ P4_BEH: dict[int, object] = {
     0x4130D0: _beh_4130D0,                          # 批63
     0x4053A0: _beh_4053A0,                          # 批64
     0x405510: _beh_405510,                          # 批65
+    0x405600: _beh_405600,                          # 批66
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
