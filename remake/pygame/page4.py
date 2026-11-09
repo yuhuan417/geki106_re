@@ -6977,6 +6977,62 @@ def _beh_404FA0(self, e) -> bool:
     return False
 
 
+def _beh_4051A0(self, e) -> bool:
+    """`0x4051A0`（0x2C000004，0x404FA0 铺出的小件）：**五段时序小机**。
+
+    t2=[0x28]：<0x30 → [0x20]−−；0x30..0x3F：(t2&3)==0 → rect 行 −0x30；
+    0x50..0xC7：(t2&7)==0 → 扇形 0x43B290（esi −0x32..0x32 步 5、
+    (dx,dy,spd)=(−0x64, esi, −0xB00)）；0xC8..0xE7：(t2&3)==0 → rect 行 +0x30；
+    0xE8..0x117 → [0x20]++。
+    尾：x = 主? 无主：x = [0x1C]链+4 → rect[+4]+[0x20]（字面：eax=[0x1C]（句柄→
+    node/rec）；edx=[eax+4]+[0x20] → x；eax=[eax+8]+[0x24] → y）；
+    node dst=(x−0x18,y−0x18)；链体死（byte[+0x34]）或 HP==0 → die；
+    存活 → t2++，return t2 < 0x118。"""
+    links = getattr(self, "p4_links", {})
+    h = e.s32(0x1C)
+    host = links.get(h & 0x7FFFFFFF) if h else None
+    t2 = e.s32(0x28)
+    if host is not None:
+        if t2 < 0x30:
+            e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+        elif t2 < 0x40:
+            if (t2 & 3) == 0:
+                nd = e.node
+                if nd is not None:
+                    nd.rect = (nd.rect[0], nd.rect[1] - 0x30,
+                               nd.rect[2], nd.rect[3] - 0x30)
+        elif 0x50 <= t2 < 0xC8:
+            if (t2 & 7) == 0:
+                esi = -0x32
+                while esi <= 0x32:
+                    self.p4_43B290(e, -0x64, esi, -0xB00 & 0xFFFFFFFF)
+                    esi += 5
+        elif 0xC8 <= t2 < 0xE8:
+            if (t2 & 3) == 0:
+                nd = e.node
+                if nd is not None:
+                    nd.rect = (nd.rect[0], nd.rect[1] + 0x30,
+                               nd.rect[2], nd.rect[3] + 0x30)
+        elif t2 < 0x118:
+            e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+        x = (host.rect[0] if hasattr(host, 'rect') else 0)
+        # 主链体：rec [+4]/[+8] = 位置（0x40524E 读 [eax+4]/[eax+8]）
+        px = getattr(host, 's32', lambda o: 0)(0x04)
+        py = getattr(host, 's32', lambda o: 0)(0x08)
+        x = (px + e.s32(0x20)) & 0xFFFFFFFF
+        y = (py + e.s32(0x24)) & 0xFFFFFFFF
+        e.d32(0x04, x)
+        e.d32(0x08, y)
+        if e.node is not None:
+            e.node.dst = (x - 0x18, y - 0x18)
+        if host.m[0x34] != 0 and e.g32(0x18) != 0:
+            t2 = (t2 + 1) & 0xFFFFFFFF
+            e.d32(0x28, t2)
+            return t2 < 0x118
+        return False
+    return False
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -8535,6 +8591,7 @@ P4_BEH: dict[int, object] = {
     0x4047E0: _beh_4047E0,                          # 批47
     0x404D00: _beh_404D00,                          # 批48
     0x404FA0: _beh_404FA0,                          # 批49
+    0x4051A0: _beh_4051A0,                          # 批50
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
