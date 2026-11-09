@@ -280,6 +280,8 @@ ENT23_INIT = {
     0x23000009: {"beh": 0x4015AA, "imm": {}},
     0x2300000A: {"beh": 0x401181, "imm": {}},
     0x2300000D: {"beh": 0x40210D, "imm": {}},
+    0x2300000E: {"beh": 0x401BA9, "vtup": True, "r1sh": (0x24, 4)},   # 0x40DB72
+    0x2300000F: {"beh": 0x40138E, "vtup": True, "r1sh": (0x24, 4)},   # 0x40DBA4
     0x23000012: {"beh": 0x4015B4, "imm": {}},
     0x23000013: {"beh": 0x40231A, "imm": {}},
     0x23000015: {"beh": 0x4017EE, "imm": {}},
@@ -360,7 +362,8 @@ ENT24_INIT = {
 ENT23_BEH_THUNK = {
     0x401C44: 0x40E070, 0x401FF0: 0x40E100, 0x401B1D: 0x40E230, 0x40118B: 0x40E460,
     0x401BD1: 0x40E520, 0x402180: 0x40E790, 0x401528: 0x40E8C0, 0x401181: 0x40EAF0,
-    0x4015AA: 0x40E9B0,      # 类型 0x23000009 的 thunk（0x43A899 家族之外，经 ctor 表写入）
+    0x4015AA: 0x40E9B0,
+    0x401BA9: 0x40EF60, 0x40138E: 0x40F0F0,   # 0x2300000E/0F 残骸      # 类型 0x23000009 的 thunk（0x43A899 家族之外，经 ctor 表写入）
     # 0x24 族（0x410A20 ctor，2026-11-06 解析）
     0x4014CE: 0x410E10, 0x401834: 0x410F20, 0x401CEE: 0x411040, 0x401A73: 0x411120,
     0x4021AD: 0x411200, 0x401AB9: 0x4112F0, 0x401163: 0x4113E0, 0x40119A: 0x411470,
@@ -679,6 +682,9 @@ class Ent:
             hi = hi - 0x10000 if hi & 0x8000 else hi
             self.d32(o1, lo & 0xFFFFFFFF)
             self.d32(o2, hi & 0xFFFFFFFF)
+        if "vtup" in info and isinstance(d, tuple):    # 0x40DB72/0x40DBA4：rec3=&{vx,vy}
+            self.d32(0x1C, d[0] & 0xFFFFFFFF)          #   [0x1C] = prm[0]
+            self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)   #   [0x20] = prm[1]<<4
         if "deref3" in info:                           # 0x410CC8：[0x20]=*rec3、[0x24]=rec3[1]
             tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
             if tgt is not None:
@@ -3249,6 +3255,206 @@ def _beh_4185C0(self, e) -> bool:
     return e.g32(0x18) != 0
 
 
+def _beh_41CF70(self, e) -> bool:
+    """`0x41CF70`（thunk 0x402121；0x29000001 ×12）：**两段横穿**。
+
+    ```
+    [0x20]==0（待机）：t=++[0x1C]
+        (t&0x7F)==0x7F → [0x24] = (y≥0xF0 ? −1 : +1)（纵向向中线）
+        (t&0xCF)==0xCF → 0x43B070(e,0) 开火
+        t==0x280       → [0x20]=1（启动横移）
+    [0x20]!=0（横移）：x < [0x28] → [0x20]++（加速到 [0x28]）
+    [0x24]!=0 → [0x24] += (y≥0xF0 ? −1 : +1)
+    x += [0x20]; y += [0x24]; 0x45A6B0(node+0x14, [0x20], [0x24])
+    return x < 0x298 且 HP != 0
+    ```"""
+    if e.s32(0x20) == 0:
+        if e.s32(0x24) == 0:
+            t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+            e.d32(0x1C, t)
+            if (t & 0x7F) == 0x7F:
+                e.d32(0x24, (-1 if e.s32(0x08) >= 0xF0 else 1) & 0xFFFFFFFF)
+            if (t & 0xCF) == 0xCF:
+                self.p4_43B070(e, 0)
+            if t == 0x280:
+                e.d32(0x20, 1)
+    else:
+        if e.s32(0x04) < e.s32(0x28):
+            e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    if e.s32(0x24) != 0:
+        e.d32(0x24, (e.s32(0x24) + (-1 if e.s32(0x08) >= 0xF0 else 1)) & 0xFFFFFFFF)
+    vx = e.s32(0x20)
+    vy = e.s32(0x24)
+    e.d32(0x04, (e.s32(0x04) + vx) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + vy) & 0xFFFFFFFF)
+    if e.node is not None:                          # 0x45A6B0(node+0x14, vx, vy)
+        e.node.dst = (e.node.dst[0] + vx, e.node.dst[1] + vy)
+    return e.s32(0x04) < 0x298 and e.g32(0x18) != 0
+
+
+def _beh_41F780(self, e) -> bool:
+    """`0x41F780`（thunk 0x4018CF；0x29000014 ×12）：**回旋镖横穿 + 距离门开火**。
+
+    ```
+    [0x20] != −4 → [0x20] += ([0x20] ≥ −3 ? −1 : +1)   ; 横速衰到 −3（回旋）
+    x += [0x20]
+    |y − 自机y| < 0x90 → t=++[0x1C]
+        门 = (|x − 自机x| ≥ 0xA0) ? 0x1F : 7
+        (t & 门)==0 → 0x43B070(e,0)
+    node dst = (x−0x18, y−0x18)（0x45A690 恒等直存）
+    return HP != 0 且 x > −0x18
+    ```"""
+    if e.s32(0x20) != -4:
+        v = e.s32(0x20)
+        e.d32(0x20, (v + (-1 if v >= -3 else 1)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)
+    ady = abs(e.s32(0x08) - self.p4_player_y())     # 0x41F7B6 cdq/xor/sub
+    if ady < 0x90:
+        t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+        e.d32(0x1C, t)
+        adx = abs(e.s32(0x04) - self.p4_player_x())
+        gate = 0x1F if adx >= 0xA0 else 7           # 0x41F7E5 and 0xFFFFFFE8 / +0x1F
+        if (t & gate) == 0:
+            self.p4_43B070(e, 0)
+    if e.node is not None:                          # 0x41F806→0x45A690 恒等
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
+
+
+def _beh_4194A0(self, e) -> bool:
+    """`0x4194A0`（0x28000001 ×12）：**定高左退**——x −= [0x24]、y = [0x20]（定值）；
+    0x401BA4(0x20,1,0x30) 特效；x==0xF0 且 [0x28]≠0 → 0x43B070(e,0)；
+    node dst=(x−0x18,y−0x18)；return x > −0x18 且 HP≠0。"""
+    e.d32(0x04, (e.s32(0x04) - e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x08, e.s32(0x20) & 0xFFFFFFFF)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if e.s32(0x04) == 0xF0 and e.s32(0x28) != 0:
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
+
+
+def _beh_419540(self, e) -> bool:
+    """`0x419540`：**抛物线跳跳 + 落点折返**——x += [0x28]（定速横移）、
+    [0x20] += [0x24]、[0x24]−−（竖速衰减）、y = [0x20]>>4（8.4 定点）；
+    [0x24]==−0x3C（顶点/谷点）→ [0x28]=−[0x28]（横速反向）、[0x24]=0x3C、[0x2C]−−
+    （折返次数递减，0 即灭）；0x401BA4(0x40,2,0x30) 特效；
+    [0x24]==0 且 [0x28]>0 → 0x43B070(e,0)；node dst 同步；
+    return HP≠0 且 [0x2C]≠0。"""
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x28)) & 0xFFFFFFFF)
+    s = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x20, s)
+    vy = (e.s32(0x24) - 1) & 0xFFFFFFFF
+    e.d32(0x24, vy)
+    vy_s = vy - 0x100000000 if vy & 0x80000000 else vy
+    s_s = s - 0x100000000 if s & 0x80000000 else s
+    e.d32(0x08, (s_s >> 4) & 0xFFFFFFFF)
+    if vy_s == -0x3C:                               # 0x419560 折返
+        e.d32(0x28, (-e.s32(0x28)) & 0xFFFFFFFF)
+        e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
+        e.d32(0x24, 0x3C)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if e.s32(0x24) == 0 and e.s32(0x28) > 0:
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(0x2C) != 0
+
+
+def _beh_41A220(self, e) -> bool:
+    """`0x41A220`（0x28000010 ×12）：**减速下坠 + 纵摆转向**——[0x20]+=[0x28]、
+    [0x24]+=[0x2C]、[0x28]−−（横速衰减到 0 后）；[0x28]<0 时
+    [0x2C] += (y≥0xF0 ? −1 : +1)（纵向向中线）；x=[0x20]>>2、y=[0x24]>>2（8.4 定点）；
+    0x401BA4(0x40,3,0x30) 特效；([0x2C]&0xF)==0xF 且 x>0xA0 → 0x43B070(e,0)；
+    node dst=(x−0x18,y−0x18)；return HP≠0 且 x>−0x18。"""
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+    t = (e.s32(0x28) - 1) & 0xFFFFFFFF
+    e.d32(0x28, t)
+    if t & 0x80000000:                              # jge 不成立 → [0x28] < 0
+        e.d32(0x2C, (e.s32(0x2C) + (-1 if e.s32(0x08) >= 0xF0 else 1)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x20) >> 2) & 0xFFFFFFFF)    # sar 2
+    e.d32(0x08, (e.s32(0x24) >> 2) & 0xFFFFFFFF)
+    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    if (e.s32(0x2C) & 0xF) == 0xF and e.s32(0x04) > 0xA0:
+        self.p4_43B070(e, 0)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
+
+
+def _beh_40EDB0(self, e) -> bool:
+    """`0x40EDB0`（thunk 0x40210D；0x2300000D ×12）：**boss 运载机**。
+
+    HP==0 时一发三连：0x430400(&rec,…,0x2300000E,a3=&{vx,vy}) 三次入 0x4AD43C——
+    (x−0x18, y+0x18) 速 (1,0)、(x−0x18, y−0x18) 速 (1,−2)、(x+0x18, y) 速 (0,−1)
+    （0x45A690 恒等回填栈残留对）。
+    每帧：相位 [0x1C] += [0x20]（频率）、y = 相位>>7（sar 7）、x −= 5；
+    node dst = (x−0x48, y−0x48)；return x > −0x48 且 HP≠0。"""
+    if e.g32(0x18) == 0:                            # 0x40EDBA HP==0 → 死亡放残骸
+        self._p4_ent43c(0x2300000E, e.s32(0x04) - 0x18, e.s32(0x08) + 0x18, (1, 0))
+        self._p4_ent43c(0x2300000E, e.s32(0x04) - 0x18, e.s32(0x08) - 0x18, (1, -2))
+        self._p4_ent43c(0x2300000E, e.s32(0x04) + 0x18, e.s32(0x08), (0, -1))
+    e.d32(0x1C, (e.s32(0x1C) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) - 5) & 0xFFFFFFFF)
+    y = e.s32(0x1C) >> 7                            # sar 7（相位 → 纵坐标）
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x48, y - 0x48)
+    return e.s32(0x04) > -0x48 and e.g32(0x18) != 0
+
+
+def _beh_40EF60(self, e) -> bool:
+    """`0x40EF60`（thunk 0x401BA9；0x2300000E，0x40EDB0 死亡产物）：**二级残骸**。
+
+    HP==0 时一圈四发 0x2300000F（四角 (x±0x18, y±0x18)，速度对取自
+    栈块 {1,−1},{1,0},{2,−2},{2,1}——ebx&1 定 y 偏移、ebx&2 定 x 偏移，
+    0x4023C4(&rec,x±0x18,y±0x18,0x2300000F,prm) 入 0x4AD43C）。
+    每帧：x += [0x1C]（vx）；计数 [0x20] = clamp(+1/+2, ≤0x40)（初值 = vy<<4，
+    负值先上抛后加速下坠）；[0x24] += 计数、y = [0x24]>>4；
+    node dst=(x−0x30, y−0x30)；0x4305F0(e,0x30) 在屏判据；
+    return 在屏 且 HP≠0。"""
+    if e.g32(0x18) == 0:                            # 0x40EF6B
+        prm_blocks = [(1, -1), (1, 0), (2, -2), (2, 1)]
+        for i, prm in enumerate(prm_blocks):
+            xo = 0x18 if (i & 2) else -0x18         # ebx&2 → x 偏移
+            yo = 0x18 if (i & 1) else -0x18         # ebx&1 → y 偏移
+            self._p4_ent43c(0x2300000F, e.s32(0x04) + xo, e.s32(0x08) + yo, prm)
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x1C)) & 0xFFFFFFFF)
+    c = e.s32(0x20)
+    c_s = c - 0x100000000 if c & 0x80000000 else c
+    cnt = c_s + 2 if c_s < 0x40 else 0x40           # 0x40F026 计数钳 0x40
+    e.d32(0x20, cnt & 0xFFFFFFFF)
+    acc = (e.s32(0x24) + cnt) & 0xFFFFFFFF
+    e.d32(0x24, acc)
+    y = ((acc - 0x100000000 if acc & 0x80000000 else acc) >> 4)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x30, y - 0x30)
+    return self.p4_4305f0(e, 0x30) and e.g32(0x18) != 0
+
+
+def _beh_40F0F0(self, e) -> bool:
+    """`0x40F0F0`（thunk 0x40138E；0x2300000F，0x40EF60 死亡产物）：**三级残骸**。
+
+    每帧：x += [0x1C]（vx）；计数 [0x20] = clamp(+1/+2, ≤0x30)（初值 = vy<<4）；
+    [0x24] += 计数、y = [0x24]>>4；node dst=(x−0x18, y−0x18)；
+    0x4305F0(e,0x18) 在屏判据；return 在屏 且 HP≠0。"""
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x1C)) & 0xFFFFFFFF)
+    c = e.s32(0x20)
+    c_s = c - 0x100000000 if c & 0x80000000 else c
+    cnt = c_s + 2 if c_s < 0x30 else 0x30           # 0x40F103 计数钳 0x30
+    e.d32(0x20, cnt & 0xFFFFFFFF)
+    acc = (e.s32(0x24) + cnt) & 0xFFFFFFFF
+    e.d32(0x24, acc)
+    y = ((acc - 0x100000000 if acc & 0x80000000 else acc) >> 4)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, y - 0x18)
+    return self.p4_4305f0(e, 0x18) and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -4750,6 +4956,10 @@ P4_BEH: dict[int, object] = {
     0x411AD0: _beh_411AD0, 0x4115B0: _beh_4115B0,
     0x412510: _beh_412510, 0x419EC0: _beh_419EC0,
     0x41E7B0: _beh_41E7B0, 0x4185C0: _beh_4185C0,   # 0x29 护卫状态机 / 0x27 帧表发射器
+    0x41CF70: _beh_41CF70, 0x41F780: _beh_41F780,   # 0x29 两段横穿 / 0x29 回旋镖
+    0x4194A0: _beh_4194A0, 0x419540: _beh_419540,   # 0x28 定高左退 / 抛物线跳跳
+    0x41A220: _beh_41A220,                          # 0x28 减速下坠纵摆
+    0x40EDB0: _beh_40EDB0, 0x40EF60: _beh_40EF60, 0x40F0F0: _beh_40F0F0,   # 0x23 残骸链
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
