@@ -5539,6 +5539,58 @@ def _beh_41D990(self, e) -> bool:
     return t < 0x2A0 and e.g32(0x18) != 0
 
 
+def _beh_41E960(self, e) -> bool:
+    """`0x41E960`（0x2900000C）：**圆轨护卫 + 角门开火**。
+
+    t=++[0x1C]；t==1 → 发 0x2900000D @(x,y) 入 0x4AD43C（伴生体）；
+    t%0xF0==0 → [0x2C]=0x3C（相位重置）。
+    [0x2C]≠0：[0x2C] += ([0x2C]−0xE10 ≥ 0 ? −0x1B4 : …)（and 0xE4C/add 0xFFFFF1F0
+    → [0x2C]>0xE10 ? [0x2C]−0xE10−0xE10+0x3C? 字面：([0x2C]−0xE10<0 ? −0xE0C−0xE10?
+    ：) —— 化简：([0x2C] − 0xE10 的符号决定) + 0xFFFFF1F0(−0xE10) + [0x2C]；
+    即 [0x2C] = [0x2C] − 0xE10 − (0xE10 若 [0x2C]≥0xE10)。
+    [0x2C]==0：[0x20]−−（x 收缩）；[0x28] = 0x45A9A0([0x20]−自机x, [0x24]−自机y)。
+    x = [0x20] − [0x20]−? ：x = (([0x2C]+[0x28]) 的 cos>>2 − [0x20] + [0x20]+4)>>3 + [0x20]
+    （0x41EA37：edx = ((cos([0x2C]+[0x28])>>2 − [0x20]) + [0x20] + 4) >> 3 + [0x20]）；
+    y = ((sin([0x2C]+[0x28])>>2 − [0x24]) + [0x24] + 4) >> 3 + [0x24]。
+    0x384 ≤ [0x2C] < 0xA8C 且 [0x2C]%0xF0==0 → 0x43B610(e, 2y−[0x24], 2x−[0x20],
+    0x500)（对映点狙击）。
+    node dst=(x−0x18,y−0x18)；return [0x20] > −0x78 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 1:
+        self._p4_ent43c(0x2900000D, e.s32(0x04), e.s32(0x08))
+    if t % 0xF0 == 0:
+        e.d32(0x2C, 0x3C)
+    ph = e.s32(0x2C)
+    if ph != 0:
+        if ph - 0xE10 >= 0:
+            ph = (ph - 0xE10 - 0xE10 + 0x3C) & 0xFFFFFFFF
+        else:
+            ph = (ph - 0xE10 + 0x3C) & 0xFFFFFFFF
+        e.d32(0x2C, ph)
+    else:
+        v20 = (e.s32(0x20) - 1) & 0xFFFFFFFF
+        e.d32(0x20, v20)
+        da = self.p4_45a9a0(v20 - self.p4_player_x(),
+                            e.s32(0x24) - self.p4_player_y())
+        e.d32(0x28, da & 0xFFFFFFFF)
+    ph = e.s32(0x2C)
+    ang = (ph + e.s32(0x28)) & 0xFFFFFFFF
+    v20 = e.s32(0x20)
+    v24 = e.s32(0x24)
+    c = page4_cos(ang)
+    s_ = page4_sin(ang)
+    x = (((((c >> 2) - v20) + v20 + 4) >> 3) + v20) & 0xFFFFFFFF
+    y = (((((s_ >> 2) - v24) + v24 + 4) >> 3) + v24) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if 0x384 <= ph < 0xA8C and ph % 0xF0 == 0:
+        self.p4_43B610(e, 2 * y - v24, 2 * x - v20, 0x500)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return v20 > -0x78 and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -7081,6 +7133,7 @@ P4_BEH: dict[int, object] = {
     0x41D080: _beh_41D080,                          # 批31
     0x41D330: _beh_41D330,                          # 批32
     0x41D990: _beh_41D990,                          # 批33
+    0x41E960: _beh_41E960,                          # 批34
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
