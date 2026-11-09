@@ -5103,6 +5103,226 @@ def _beh_41BF60(self, e) -> bool:
     return self.p4_430640(e) and e.g32(0x18) != 0
 
 
+def _beh_41AE20(self, e) -> bool:
+    """`0x41AE20`（0x28000014，**关6 boss 三形态本体**）。
+
+    每帧：目标收敛 x += (Δx+0x10)>>5、y += (Δy+0x10)>>5（[0x1C]/[0x20] 为目标点）。
+    HP>0x960：[0x48]（部件计数）门 → 0x45AFC0(0x4AB5B0,0xC000)==2/3 且 [0x48]<4 →
+    跳死亡流程；HP −= 20*min([0x48],8)；发 0x28000015 @(x,y) 入 43C；变身
+    [0x14]=0x28000017、[0x40]=0x41BD20、[0xC]=0x18、[0x10]=1；速度 = 256×单位向机
+    → [0x1C]/[0x20]（冲刺目标）；[0x24]=x<<3、[0x28]=y<<3（备用）；HP =
+    (min([0x48],8)<<6)−1；0x45A750(&rec,0x120,0xF0,0x14F,0x11F) 大图 rect 落 node+4；
+    return 1。
+    HP≤0x960：（node.dst.y==0xF0 且 (t&7)==0 → rect 行 +0x30）后进十态机：
+    态0 铺卫星 / 态1 每0x40帧传送目标(x=rand%0x118+0x154, y=rand%0x190+0x28)、
+    t==0 选下态 rand%(5|6)+2（[0x2C] 门控 7/5 重掷）/ 态2 锁机冲刺+双 0x3100000C /
+    态3 传送+0x3100000D / 态4 每0x40帧随机点 / 态5 rand 点+归中间 / 态6 逼近自机+
+    角向弹 / 态7 淡入淡出+0x28000018+随机点开门 / 态8 y 分段横穿+0x31000013 ±0x20 /
+    态9 12× 0x41000004 爆散。HP==0 且态≠9 → 淡出 + [0x28]=9。node dst=(x−0x18,y−0x18)。
+    复刻侧 [0x20]→p4_links 句柄、[0x2C] 保持数值。"""
+    links = getattr(self, "p4_links", {})
+    # 入口目标收敛（0x41AE2C）
+    tx = e.s32(0x1C)
+    ty = e.s32(0x20)
+    dx = tx - e.s32(0x04)
+    dy = ty - e.s32(0x08)
+    if dx != 0 or dy != 0:
+        e.d32(0x04, (e.s32(0x04) + ((dx + 0x10) >> 5)) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x08) + ((dy + 0x10) >> 5)) & 0xFFFFFFFF)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    hp = e.g32(0x18)
+    if hp > 0x960:                                   # 0x41AE71 进场段
+        n48 = e.s32(0x48)
+        if n48 == 0:
+            return _p4_41ae20_dying_common(e, x, y)
+        key = self.keys.field(0xC000) & 3               # 0x45AFC0(0x4AB5B0,0xC000)
+        if key in (2, 3) and n48 < 4:
+            return _p4_41ae20_dying_common(e, x, y)
+        n = 8 if n48 >= 8 else n48
+        e.d32(0x18, (hp - 20 * n) & 0xFFFFFFFF)
+        c = self._p4_ent43c(0x28000015, x, y)
+        e.d32(0x14, 0x28000017)
+        e.d32(0x40, 0x41BD20)                        # 卫星行为 thunk→0x41BD20
+        e.d32(0x0C, 0x18)
+        e.m[0x10] = 1
+        dx2 = self.p4_player_x() - x
+        dy2 = self.p4_player_y() - y
+        inv = self.p4_45aa80(dx2, dy2)
+        e.d32(0x1C, (x + ((inv * dx2) >> 8)) & 0xFFFFFFFF)
+        e.d32(0x20, (y + ((inv * dy2) >> 8)) & 0xFFFFFFFF)
+        e.d32(0x24, (x << 3) & 0xFFFFFFFF)
+        e.d32(0x28, (y << 3) & 0xFFFFFFFF)
+        e.d32(0x2C, ((id(c)) & 0x7FFFFFFF))
+        links[id(c) & 0x7FFFFFFF] = c
+        e.d32(0x18, ((n << 6) - 1) & 0xFFFFFFFF)
+        nd = e.node
+        if nd is not None:
+            nd.rect = (0x120, 0xF0, 0x14F, 0x11F)
+        return True
+    return _p4_41ae20_dying_common(e, x, y)
+
+
+def _p4_41ae20_dying_common(e, x: int, y: int) -> bool:
+    """`0x41AE20` HP≤0x960 段：行闪特效 + 十态机 + 公共尾。"""
+    hp = e.g32(0x18)
+    if hp <= 0x960 and e.node is not None and e.node.dst[1] == 0xF0 \
+            and (e.s32(0x24) & 7) == 0:
+        nd = e.node
+        nd.rect = (nd.rect[0], nd.rect[1] + 0x30, nd.rect[2], nd.rect[3] + 0x30)
+    st = e.s32(0x28)
+    t = e.s32(0x24)
+    if st <= 9:
+        if st == 0:
+            if t == 0:
+                self._p4_ent43c(0x28000016, x, y)
+            elif t == 0x5A:
+                e.m[0x10] = 1
+                e.d32(0x24, -0x1E & 0xFFFFFFFF)
+                e.d32(0x28, 1)
+        elif st == 1:
+            if (t & 0x3F) == 0:
+                e.d32(0x1C, (self.p4_rand() % 0x118 + 0x154) & 0xFFFFFFFF)
+                e.d32(0x20, (self.p4_rand() % 0x190 + 0x28) & 0xFFFFFFFF)
+            if t == 0:
+                gate = e.s32(0x2C)
+                while True:
+                    nxt = self.p4_rand() % (6 if gate else 5) + 2
+                    e.d32(0x28, nxt)
+                    if nxt == 7:
+                        if gate & 0xF:
+                            return _p4_41ae20_tail(e, x, y, t)
+                        continue
+                    if nxt == 5 and (gate & 0xF0):
+                        continue
+                    break
+                return _p4_41ae20_tail(e, x, y, t)
+        elif st == 2:
+            if t == 1:
+                e.d32(0x1C, self.p4_player_x() & 0xFFFFFFFF)
+                e.d32(0x20, self.p4_player_y() & 0xFFFFFFFF)
+            elif t == 0x3C:
+                e.d32(0x1C, 0x260)
+                yy = e.s32(0x20)
+                e.d32(0x20, (yy + (0x1D0 if yy >= 0xF0 else -0x10)) & 0xFFFFFFFF)
+            elif t == 0x14A:
+                e.d32(0x24, -0x3C & 0xFFFFFFFF)
+                e.d32(0x28, 1)
+            if t > 0x96 and (t & 3) == 0:
+                self.p4_se_pan(2, (x - 0x140) << 4)
+                self.spawn(self._p4_q("ui49c"), 0x3100000C, x - 8, y, -1)
+                self.spawn(self._p4_q("ui49c"), 0x3100000C, x - 8, y, 1)
+        elif st == 3:
+            if t in (1, 0x14, 0x28, 0x3C, 0x50):
+                e.d32(0x1C, (self.p4_rand() % 0xA0 + 0x190) & 0xFFFFFFFF)
+                e.d32(0x20, (self.p4_rand() % 0xA0 + 0xA0) & 0xFFFFFFFF)
+            elif t == 0x168:
+                e.d32(0x24, -0x5A & 0xFFFFFFFF)
+                e.d32(0x28, 1)
+            if t > 0x5A and (t & 3) == 0:
+                self.p4_se_pan(2, (x - 0x140) << 4)
+                self.spawn(self._p4_q("ui49c"), 0x3100000D, x - 8, y, 0)
+        elif st == 4:
+            if (t & 0x3F) == 0:
+                e.d32(0x1C, (self.p4_rand() % 0x78 + 0x1E0) & 0xFFFFFFFF)
+                e.d32(0x20, (self.p4_rand() % 0xF0 + 0x78) & 0xFFFFFFFF)
+        elif st == 5:
+            if t == 1:
+                e.d32(0x1C, (self.p4_rand() % 0x50 + 0x1E0) & 0xFFFFFFFF)
+                e.d32(0x20, (self.p4_rand() % 0x50 + 0xC8) & 0xFFFFFFFF)
+                e.d32(0x2C, (e.s32(0x2C) - 0x10) & 0xFFFFFFFF)
+            elif t == 0x168:
+                e.d32(0x24, 0)
+                e.d32(0x28, 8)
+        elif st == 6:
+            if t == 0x3C:
+                e.d32(0x1C, ((x * 3 + self.p4_player_x()) >> 2) & 0xFFFFFFFF)
+                e.d32(0x20, ((y * 3 + self.p4_player_y()) >> 2) & 0xFFFFFFFF)
+            elif t == 0x168:
+                e.d32(0x24, -0x78 & 0xFFFFFFFF)
+                e.d32(0x28, 1)
+            if (t & 3) == 1:
+                da = self.p4_45a9a0(self.p4_player_x() - x, self.p4_player_y() - y)
+                ang = (da + 18 * t) & 0xFFFFFFFF
+                self.p4_43B070(e, 0)
+                self.p4_43B290(e, page4_cos(ang), page4_sin(ang), 0)
+        elif st == 7:
+            if t == 1:
+                self.p4_spawn52c_flash(0, 0x10, 0x61000005, 0xFF)
+                e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
+            elif t == 0x11:
+                self.spawn(self._p4_q("ui49c"), 0x28000018, x, y, 0)
+            elif t == 0x14:
+                self.p4_spawn52c_flash(0, -0x10, 0x61000005, 0xFF)
+            elif 1 <= t <= 0x14:
+                ry = self.p4_rand() % 0x1E0
+                rx = self.p4_rand() % 0x280
+                if abs(rx - self.p4_player_x()) + abs(ry - self.p4_player_y()) > 0xC0:
+                    self._p4_ent43c(0x28000018, rx, ry)
+            elif t == 0x168:
+                e.d32(0x24, -0x78 & 0xFFFFFFFF)
+                e.d32(0x28, 1)
+        elif st == 8:
+            if t == 1:
+                e.d32(0x1C, 0x280)
+                e.d32(0x20, -0x60 & 0xFFFFFFFF)
+            elif t == 0x186:
+                self._p4_ent43c(0x28000016, x, y)
+                e.d32(0x1C, 0x1E0)
+                e.d32(0x20, 0xF0)
+            elif t == 0x1A4:
+                e.d32(0x24, -0xB4 & 0xFFFFFFFF)
+                e.d32(0x28, 1)
+            if t > 0x78:
+                if y > 0xF0:
+                    if t <= 0x186:
+                        e.d32(0x1C, 0x258)
+                        e.d32(0x20, (y + 0x100) & 0xFFFFFFFF)
+                        if self.p4_rand() % 0xA == 0:
+                            self.p4_se_pan(0xA, (x - 0x140) << 4)
+                            self.spawn(self._p4_q("ui49c"), 0x31000013, x, y, -0x20)
+                else:
+                    if t < 0x186:
+                        e.d32(0x1C, 0x258)
+                        e.d32(0x20, (y - 0x100) & 0xFFFFFFFF)
+                        if self.p4_rand() % 0xA == 0:
+                            self.p4_se_pan(0xA, (x - 0x140) << 4)
+                            self.spawn(self._p4_q("ui49c"), 0x31000013, x, y, 0x20)
+        elif st == 9:
+            for _ in range(0xC):
+                rx = self.p4_rand() % 0x61
+                ry = self.p4_rand() % 0x61
+                jx = (self.p4_rand() & 0x3F) - 0x1F
+                jy = (self.p4_rand() & 0x3F) - 0x1F
+                self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                           x + rx - 0x30, y + ry - 0x30, (jx, jy))
+            self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+    return _p4_41ae20_tail(e, x, y, t)
+
+
+def _p4_41ae20_tail(e, x: int, y: int, t: int) -> bool:
+    """`0x41AE20` 公共尾 0x41B316：t/total 推进、HP 钳、死亡转态 9、node dst。"""
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x24, t)
+    total = (e.s32(0x30) + 1) & 0xFFFFFFFF
+    e.d32(0x30, total)
+    if total == 0x2328 and e.g32(0x18) > 0x960:
+        e.d32(0x18, 0x960)
+    if t == 0x3840:
+        e.d32(0x18, 0)
+    st = e.s32(0x28)
+    hp = e.g32(0x18)
+    if hp == 0 and st != 9:
+        if st != 7 or t < 0x14:
+            self.p4_spawn52c_flash(0, -0x10, 0x61000005, 0xFF)
+        e.d32(0x24, -1 & 0xFFFFFFFF)
+        e.d32(0x28, 9)
+        e.m[0x10] = 0
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return hp != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -6641,6 +6861,7 @@ P4_BEH: dict[int, object] = {
     0x41A480: _beh_41A480,                          # 批27
     0x41BDA0: _beh_41BDA0,                          # 批28
     0x41BF60: _beh_41BF60,                          # 批29
+    0x41AE20: _beh_41AE20,                          # 批30
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
