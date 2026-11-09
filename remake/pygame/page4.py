@@ -3863,6 +3863,32 @@ def _beh_4107D0(self, e) -> bool:
     return x > -0x18 and e.g32(0x18) != 0
 
 
+def _beh_415980(self, e) -> bool:
+    """`0x415980`（0x26000010）：t=++[0x1C]；x += [0x20]（node.dst.x 同加）；
+    (t&0x3F)==0x3F 且 t>0x3F → 朝自机十字五连：0x43B070(e,−[0x58]) 主向 +
+    0x43B290 四向 (−dy,dx)/(dy,−dx)/(dx−dy,dx+dy)/(dx+dy,dy−dx)（速度表 0）；
+    ([0x28]&t)==[0x28] → 0x414010 弹流行滚动；0x4305F0(e,0x18)；
+    return 在屏 且 HP≠0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    dx0 = e.s32(0x20)
+    e.d32(0x04, (e.s32(0x04) + dx0) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + dx0, e.node.dst[1])
+    if (t & 0x3F) == 0x3F and t > 0x3F:
+        dx = self.p4_player_x() - e.s32(0x04)
+        dy = self.p4_player_y() - e.s32(0x08)
+        self.p4_43B070(e, (-e.s32(0x58)) & 0xFFFFFFFF)   # 0x4159CC neg edx
+        self.p4_43B290(e, -dy, dx, 0)
+        self.p4_43B290(e, dy, -dx, 0)
+        self.p4_43B290(e, dx - dy, dx + dy, 0)
+        self.p4_43B290(e, dx + dy, dy - dx, 0)
+    mask = e.s32(0x28)
+    if mask != 0 and (mask & t) == mask:
+        self.p4_414010(e)
+    return self.p4_4305f0(e, 0x18) and e.g32(0x18) != 0
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -5376,6 +5402,7 @@ P4_BEH: dict[int, object] = {
     0x4070E0: _beh_4070E0, 0x4197B0: _beh_4197B0, 0x41A180: _beh_41A180, 0x413930: _beh_413930,   # 批2
     0x414380: _beh_414380, 0x414D60: _beh_414D60,   # 批3
     0x4107D0: _beh_4107D0,                          # 批4
+    0x415980: _beh_415980,                          # 批5
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
