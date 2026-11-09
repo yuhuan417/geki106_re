@@ -5380,8 +5380,6 @@ def _beh_41D080(self, e) -> bool:
     if t > 0x1518:
         e.d32(0x18, 0)
     if e.g32(0x18) != 0:
-        if e.g32(0x24 if False else 0x24) is None:
-            pass
         # 0x430860(0x4AD43C) == 1：队列 +0x24 忙标志（复刻侧暂以 False 处理）
         if e.s32(0x2C) != 0 and e.s32(0x04) > 0x118:
             e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
@@ -5823,6 +5821,99 @@ def _beh_41FE10(self, e) -> bool:
     if e.node is not None:
         e.node.dst = (x - 0x30, y - 0x30)
     return e.g32(0x18) != 0 and y > -0x30
+
+
+def _beh_41F860(self, e) -> bool:
+    """`0x41F860`（thunk 0x401398；0x29000015 **最终 boss**）。
+
+    [0x20]==0（编队态）：发 0x29000016 @(0,0) 入 0x4AD43C（护卫长机，
+    prm=自身指针）；sub=++[0x1C]&3 四编队：
+      0 → 0x1F8 帧后 8× 0x29000003?（rec {i*80+0x28, …, prm=1/7, y=0x1E8/0x1F8}
+      双发 ×8 入 0x4AD43C）、[0x20]=0xFA；
+      1 → rec {(0x298,0xF0,prm=3),(0x2C8,0xC0,prm=−0x1E)} + y 0x60 步进循环
+      {(0x2F8,0x90,−0x3C)}、{(0x328,0x60,−0x5A)} 各 y+0x60 至界限、[0x20]=0x15E；
+      2 → 8× rec {(i*33+0x298, 0x30, prm=2)}、[0x20]=0x122；
+      3 → rec {(0x140, −0x78, prm=5)} x −0x78 循环至 −0x3C0、[0x20]=0x168。
+    [0x20]≠0（冷却倒数）；[0x2C]（完成门）：==0 → [0x28]<0xDC → [0x28]+=0xA；
+    否则 [0x28]<0xF0 → [0x28]+=5；都到 → HP=0（终局）。
+    移动：y<0x230 且 [0x24]≠0 → [0x24]++；y += [0x24]（下压加速）；
+    node.dst.y += [0x24]；[0x20]−−==0 → 0x61000004 @(x,y,0x48) 入 52C（受击闪）
+    → return 0（死亡）；否则 node dst 同步、return 1。"""
+    if e.s32(0x20) == 0:
+        c = self._p4_ent43c(0x29000016, 0, 0)
+        c.d32(0x18, id(e) & 0x7FFFFFFF)
+        getattr(self, "p4_links", {})[id(e) & 0x7FFFFFFF] = e
+        sub = e.s32(0x1C) & 3
+        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+        if sub == 0:
+            e.d32(0x20, 0xFA)
+            for i in range(8):
+                xx = i * 80 + 0x28
+                self._p4_ent43c(0x29000003, xx, 0x1E8)
+                self._p4_ent43c(0x29000003, xx, 0x1F8)
+        elif sub == 1:
+            e.d32(0x20, 0x15E)
+            self._p4_ent43c(0x29000003, 0x298, 0xF0)
+            self._p4_ent43c(0x29000003, 0x2C8, 0xC0)
+            yy = 0xC0
+            while yy + 0x60 <= 0x120:
+                yy += 0x60
+                self._p4_ent43c(0x29000003, 0x2C8, yy)
+            yy = 0x90
+            while True:
+                self._p4_ent43c(0x29000003, 0x2F8, yy)
+                if yy + 0xC0 > 0x150:
+                    break
+                yy += 0xC0
+            yy = 0x60
+            while True:
+                self._p4_ent43c(0x29000003, 0x328, yy)
+                if yy + 0x60 > 0x180:
+                    break
+                yy += 0x60
+        elif sub == 2:
+            e.d32(0x20, 0x122)
+            for i in range(8):
+                self._p4_ent43c(0x29000003, i * 33 + 0x298, 0x30)
+        else:
+            e.d32(0x20, 0x168)
+            xx = -0x78
+            while xx - 0x78 >= -0x3C0:
+                self._p4_ent43c(0x29000003, 0x140, xx)
+                xx -= 0x78
+    else:
+        e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+    done = e.s32(0x2C)
+    y28 = e.s32(0x28)
+    v20 = (e.s32(0x20) - y28) & 0xFFFFFFFF
+    e.d32(0x20, v20)
+    if done == 0:
+        if y28 < 0xDC:
+            e.d32(0x28, (y28 + 0xA) & 0xFFFFFFFF)
+        else:
+            if done == 0:
+                pass
+            if y28 < 0xF0:
+                e.d32(0x28, (y28 + 5) & 0xFFFFFFFF)
+            else:
+                e.d32(0x18, 0)
+    else:
+        if y28 < 0xF0:
+            e.d32(0x28, (y28 + 5) & 0xFFFFFFFF)
+    if e.s32(0x04) < 0x230 and e.s32(0x24) != 0:
+        e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
+    v24 = e.s32(0x24)
+    x = (e.s32(0x04) + v24) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0], e.node.dst[1] + v24)
+    if e.s32(0x20) == 0 and e.g32(0x18) != 0:
+        e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
+    if e.s32(0x20) == 0:
+        e.d32(0x20, -1 & 0xFFFFFFFF)
+        self.p4_spawn52c_flash(x, e.s32(0x08), 0x61000004, 0x48)
+        return False
+    return True
 
 
 def page4_cos(ang: int) -> int:
@@ -7372,6 +7463,7 @@ P4_BEH: dict[int, object] = {
     0x41EE00: _beh_41EE00,                          # 批36
     0x41F3A0: _beh_41F3A0,                          # 批37
     0x41FE10: _beh_41FE10,                          # 批38
+    0x41F860: _beh_41F860,                          # 批39
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
     0x411120: _beh_411120, 0x411C10: _beh_411C10,
