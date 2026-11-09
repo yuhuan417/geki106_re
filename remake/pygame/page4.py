@@ -8874,6 +8874,108 @@ def _p4_407350_tail(self, e, x: int, y: int, v20: int) -> bool:
     return e.g32(0x18) != 0
 
 
+def _beh_408540(self, e) -> bool:
+    """`0x408540`（0x2D000019，**关8 真boss 十四态** 0x409380）。
+
+    每帧：word[0x1C]（低位=帧相位 hi/lo 双字节：hi=轮、lo=帧）、word[0x1E]=相角、
+    [0x20]/[0x24]=位置 8.4、[0x28]=半径、[0x2C]=角速度、[0x30]=寿命。
+    态表（word[0x1C]&0xFF → 0x409380）主要模式（依据各态 push 序）：
+      0：word[0x20] = 0x0F000000 | (0x1400 + (0x65−ang)²)&0xFFFF（半径内缩）；
+        word[0x1C] 低位自增到 ≥4 且 HP<0x4B00 → 态 5
+      1：word[0x1E]==0x32A → 重置低位；否则 t%0x195==0 → 0x33000026 @(x,y)
+        prm 4*轮+0x18 入 0x4AD49C
+      2：word[0x1E]==0x194 → 重置；否则 t%0xCA==0 或 t%0x65==0（轮≥2）→
+        0x33000028 @(x,y) 入 0x4AD49C
+      3：t 到 0x32A → 重置+铺 0x2D00001C @(x±0xE1/0x1C2) ×0xE1 圈入 0x4AD43C
+      4：word[0x1E]==0x194 → 切态 6；word[0x1E]==0 → (轮≥2? 0x1C2+0x96 : 0x258)
+        0x2D00001C 环 ×0xE1
+      5：t%3==0 → 双 0x33000023 @(x,y)（0x3C026C0 / 0x1A4026C0，镜像角）
+        入 0x4AD49C
+      6..13：相似角向/环形铺件（0x33000023/0x33000026/0x2D00001C）。
+    公共尾（0x4092F3）：word[0x1E]−−、x=[0x20]>>4、y=[0x24]>>4；
+    node dst=(x−0x78,y−0x78)；HP==0 → 0x4A000006 @(x,y) + return 0；else 1。"""
+    w1c = e.g16(0x1C)
+    w1e = e.g16(0x1E)
+    st = (w1c >> 8) & 0xFF
+    t = w1c & 0xFF
+    if st > 0xD:
+        return True
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    hp = e.g32(0x18)
+    if hp == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x4A000006, x, y, 0)
+        return False
+    if st == 0:
+        ang = w1e
+        rad = ((0x1400 + (0x65 - ang) * (0x65 - ang)) & 0xFFFF) | 0xF000000
+        e.d32(0x20, rad & 0xFFFFFFFF)
+        t += 1
+        if t >= 4 and hp < 0x4B00:
+            st = 5
+            t = 0
+        e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
+    elif st == 1:
+        if w1e == 0x32A:
+            t += 1
+            if t >= 4 and hp < 0x4B00:
+                st = 5
+                t = 0
+            e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
+        elif w1e % 0x195 == 0:
+            self.spawn(self._p4_q("ui49c"), 0x33000026, x, y,
+                       (4 * ((w1c >> 8) & 0xFF) + 0x18))
+    elif st == 2:
+        if w1e == 0x194:
+            t += 1
+            e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
+        elif (t < 2 and w1e % 0xCA == 0) or (t >= 2 and w1e % 0x65 == 0):
+            self.spawn(self._p4_q("ui49c"), 0x33000028, x, y, 0)
+    elif st == 3:
+        if w1e == 0x32A:
+            t += 1
+            e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
+        else:
+            for i in range(0xE1):
+                base = 0x1C2 + (0x96 if (w1c >> 8) & 0xFF >= 2 else 0x258) + i
+                self._p4_ent43c(0x2D00001C, x, y)
+    elif st in (4, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD):
+        if w1e == 0x194:
+            e.d32(0x1C, ((6 << 8) | (t + 1)) & 0xFFFF)
+        elif w1e == 0:
+            nb = (w1c >> 8) & 0xFF
+            base = 0x1C2 + (0x96 if nb >= 2 else 0x258)
+            for i in range(0xE1):
+                self._p4_ent43c(0x2D00001C, x, y)
+        elif st == 5:
+            if w1e % 3 == 0:
+                a = (19 * w1e) & 0xFFFFFFFF
+                self.spawn(self._p4_q("ui49c"), 0x33000023, x, y,
+                           (0x3C026C0, (a | 0x708) & 0xFFFFFFFF))
+                a2 = (0xE10 - a) & 0xFFFFFFFF
+                self.spawn(self._p4_q("ui49c"), 0x33000023, x, y,
+                           (0x1A4026C0, a2))
+        elif st in (6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD):
+            if w1e == 0x32A:
+                t += 1
+                e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
+            elif w1e % 0x65 == 0:
+                self.spawn(self._p4_q("ui49c"), 0x33000026, x, y,
+                           (4 * ((w1c >> 8) & 0xFF) + 0x10))
+    # 位置更新（0x4092F3）
+    w20 = e.s32(0x20)
+    w24 = e.s32(0x24)
+    e.d32(0x04, ((w20 if False else w20) >> 4) & 0xFFFFFFFF) \
+        if False else e.d32(0x04, (w20 >> 4) & 0xFFFFFFFF)
+    e.d32(0x08, (w24 >> 4) & 0xFFFFFFFF)
+    x = (w20 >> 4) & 0xFFFFFFFF
+    y = (w24 >> 4) & 0xFFFFFFFF
+    if e.node is not None:
+        e.node.dst = (x - 0x78, y - 0x78)
+    e.d16(0x1E, (w1e - 1) & 0xFFFF)
+    return True
+
+
 def page4_cos(ang: int) -> int:
     """0x45ABB0：查表余弦（p4_sin_q 的 cos 侧包装，供锁定准星螺旋用）。"""
     return p4_sin_q(ang, "cos")
@@ -10456,6 +10558,7 @@ P4_BEH: dict[int, object] = {
     0x406F60: _beh_406F60,                          # 批72
     0x407180: _beh_407180,                          # 批73
     0x407350: _beh_407350,                          # 批74
+    0x408540: _beh_408540,                          # 批75
     0x40F880: _beh_40F880,                          # 批57
     0x41A090: _beh_41A090, 0x416BE0: _beh_416BE0,
     0x411200: _beh_411200, 0x411040: _beh_411040,
