@@ -2900,10 +2900,14 @@ class Pages(Page4Mixin):
         t[5] = a2 & 0xFF
 
     def p4_45d700(self, slot: int) -> bool:
-        """`0x45D700(0x4CD5D8, …)`：回放装载门（0x5E1200 的 3 个存槽，3 次重试）。
+        """`0x45D700(0x4CD5D8, slot, …)`：回放装载门（0x5E1200 的 3 个存槽，3 次重试）。
 
-        持久化回放属 §15.4 未闭合项；复刻侧按会话内回放缓存判定：
-        该关有已记录回放 → True（进页11），否则 False（旗标 0x10000 → 页3）。"""
+        0x45D700 的可观察语义：按 slot 读存槽 → 0x45D1D0 有帧 → True。
+        复刻侧对接 P4Replay：count > 0 表示该槽有已记录回放。
+        持久化到磁盘属 §15.4 未闭合项（此处为会话内）。"""
+        rp = getattr(self, "p4_replay", None)
+        if rp is not None and rp.count > 0:
+            return True
         saves = getattr(self, "p4_replay_saves", None)
         return bool(saves) and 0 <= slot < 3 and saves.get(slot) is not None
 
