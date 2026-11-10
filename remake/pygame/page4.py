@@ -290,6 +290,18 @@ ENT23_INIT = {
     0x23000018: {"beh": 0x4013BB, "imm": {}},
     0x23000019: {"beh": 0x401B31, "imm": {}},
     0x2300001A: {"beh": 0x40242D, "imm": {}},
+    # —— 2026-11-11 补齐缺失 5 型（ctor case 0x40DB0D/0x40DB2D/0x40DBD6/0x40DBF5/0x40DCAA）——
+    0x2300000B: {"beh": 0x401D75, "imm": {0x1C: 0, 0x20: -0x1E, 0x24: 0}},
+    0x2300000C: {"beh": 0x401609, "imm": {}, "d_to": 0x1C},
+    0x23000010: {"beh": 0x402040, "imm": {0x1C: 0x24, 0x28: 0xC1}},
+    # 0x23000011（0x40DBF5）：byte[0x10]=0；+0x1C=(0x140+rand%0xF0-x)/0x50、
+    #   +0x20=(0x28+rand%0x190-y)/0x50、+0x24=+0x28=0
+    0x23000011: {"beh": 0x401DC5, "b10_0": True, "imm": {0x24: 0, 0x28: 0},
+                 "tp_grid": True},
+    # 0x23000014（0x40DCAA）：rect = p3==0?{F0,F0,11F,11F}:{180,F0,1AF,11F}、
+    #   +0x1C=0、+0x20=p3（0x40DD09 共用体）
+    0x23000014: {"beh": 0x40231A, "z1c": True, "d_to": 0x20,
+                 "rect_s3": ((0xF0, 0xF0, 0x11F, 0x11F), (0x180, 0xF0, 0x1AF, 0x11F))},
 }
 
 
@@ -314,6 +326,161 @@ ENT_PROP = {
     0x16: (24, 0xC80, 0x00, 0x00, 0x90), 0x17: (24, 0x00, 0x00, 0x00, 0x90),
     0x18: (24, 0xF0, 0x3C0, 0xC0, 0xF0), 0x19: (24, 0x0F, 0x00, 0x30, 0x90),
     0x1A: (24, 1, 0x200, 0x00, 0x00),
+}
+
+# 族属性表（2026-11-11 定案）：0x43AC30 的表址按族不同——0x23:0x498000、0x24:0x498138、
+# 0x25:0x498208、0x26:0x498290、0x27:0x4983B0、0x28:0x498480、0x29:0x4985A0（各族 ctor
+# 开头 `push <表址>; call 0x402455`）。此前 ENT_PROP 只有 0x23 一张，却按 type&0xFF
+# 应用到所有族 ⇒ 0x24..0x29 的半径/存活门/[+0x58]/源矩形全错。此表按**完整 type** 键入，
+# 值 = (半径, 存活门(0→-1), [+0x58], srcx, srcy)，从 exe 逐条读出。
+# 0x2A/0x2C/0x2D 族 ctor 不调 0x43AC30（+0xC/+0x18 由各 case 手写），故无表项。
+ENT_PROP_FAM = {
+    0x23000001: (24, 1, 512, 0, 0),
+    0x23000002: (24, 1, 384, 48, 0),
+    0x23000003: (24, 20, 512, 0, 0),
+    0x23000004: (24, 320, -640, 384, 0),
+    0x23000005: (24, 72, 0, 192, 0),
+    0x23000006: (24, 1, 448, 240, 0),
+    0x23000007: (24, 1, 0, 144, 0),
+    0x23000008: (24, 100, 0, 288, 0),
+    0x23000009: (24, 40, 704, 336, 0),
+    0x2300000a: (24, 20, 512, 480, 0),
+    0x2300000d: (72, 32, 0, 288, 48),
+    0x2300000e: (48, 1, 0, 48, 48),
+    0x2300000f: (24, 10, 0, 96, 144),
+    0x23000012: (24, 50, 1024, 96, 0),
+    0x23000013: (24, 20, 704, 288, 240),
+    0x23000015: (72, 3200, 0, 144, 48),
+    0x23000016: (24, 3200, 0, 0, 144),
+    0x23000017: (24, -1, 0, 0, 144),
+    0x23000018: (24, 240, 960, 192, 240),
+    0x23000019: (24, 15, 0, 48, 144),
+    0x2300001a: (24, 1, 512, 0, 0),
+    0x24000001: (24, 1, 512, 0, 0),
+    0x24000002: (24, 20, 640, 0, 48),
+    0x24000003: (24, -1, 0, 0, 96),
+    0x24000004: (24, 60, 704, 288, 144),
+    0x24000005: (24, 30, 576, 336, 0),
+    0x24000006: (24, 50, -640, 336, 48),
+    0x24000007: (24, 10, 0, 336, 96),
+    0x24000008: (24, 160, 0, 336, 144),
+    0x24000009: (24, 15, 0, 0, 192),
+    0x2400000a: (24, 240, 704, 48, 192),
+    0x2400000b: (24, 320, -512, 96, 192),
+    0x2400000c: (24, 10, 0, 144, 192),
+    0x2400000d: (24, 1, 640, 192, 192),
+    0x2400000e: (24, 30, 0, 240, 192),
+    0x2400000f: (24, 60, 1920, 288, 192),
+    0x24000010: (24, 1, 576, 384, 192),
+    0x24000011: (48, 120, 576, 384, 0),
+    0x25000001: (24, 1, 640, 0, 288),
+    0x25000002: (24, 10, 640, 48, 288),
+    0x25000003: (24, 50, 704, 96, 288),
+    0x25000004: (24, 30, -768, 144, 288),
+    0x25000005: (24, 1, 0, 192, 288),
+    0x25000006: (24, -1, 0, 240, 288),
+    0x25000007: (24, 22, 0, 288, 288),
+    0x25000008: (48, 960, 0, 336, 0),
+    0x25000009: (72, 7200, 832, 336, 192),
+    0x2500000a: (24, 380, 0, 0, 0),
+    0x26000001: (24, 1, 704, 0, 0),
+    0x26000002: (24, 1023, 896, 48, 0),
+    0x26000003: (24, 1, 704, 96, 0),
+    0x26000004: (24, 1, -896, 144, 0),
+    0x26000005: (24, -1, 0, 192, 0),
+    0x26000006: (24, -1, -640, 240, 0),
+    0x26000007: (24, 100, 768, 288, 0),
+    0x26000008: (24, 1, 0, 96, 192),
+    0x26000009: (24, 240, -1024, 384, 0),
+    0x2600000a: (24, 1, 768, 432, 0),
+    0x2600000b: (24, 1, -2048, 0, 192),
+    0x2600000c: (24, 100, -704, 48, 192),
+    0x2600000d: (24, 1, 0, 96, 192),
+    0x2600000e: (24, 1, 640, 144, 192),
+    0x2600000f: (24, 1, 640, 192, 192),
+    0x26000010: (24, 1, 704, 240, 192),
+    0x26000011: (24, 120, 736, 288, 192),
+    0x26000012: (24, 140, 800, 336, 192),
+    0x26000013: (24, 1, 704, 384, 192),
+    0x26000014: (24, 80, 0, 432, 192),
+    0x26000015: (24, 1, 0, 0, 384),
+    0x26000016: (24, 120, -1024, 48, 384),
+    0x26000017: (24, 120, 1408, 96, 384),
+    0x26000018: (24, 120, 640, 336, 0),
+    0x27000001: (24, 24, 832, 240, 0),
+    0x27000002: (24, 20, 768, 288, 0),
+    0x27000003: (24, 60, 960, 336, 0),
+    0x27000004: (24, 140, 896, 384, 0),
+    0x27000005: (24, 30, 768, 432, 0),
+    0x27000006: (24, 50, 768, 240, 96),
+    0x27000007: (24, 1, 640, 288, 96),
+    0x27000008: (24, 30, 832, 336, 96),
+    0x27000009: (24, 60, 896, 384, 96),
+    0x2700000a: (24, 50, 0, 432, 96),
+    0x2700000b: (24, 1, 704, 240, 192),
+    0x2700000c: (48, 200, -640, 192, 240),
+    0x2700000d: (48, 640, 768, 288, 240),
+    0x2700000e: (48, 50, 0, 384, 240),
+    0x2700000f: (120, 8000, 0, 0, 0),
+    0x27000010: (96, 1280, 0, 0, 240),
+    0x27000011: (0, 1, 0, 0, 0),
+    0x28000001: (24, 25, 832, 0, 96),
+    0x28000002: (24, 60, 832, 48, 96),
+    0x28000003: (24, 12, 0, 96, 96),
+    0x28000004: (24, 100, 896, 144, 96),
+    0x28000005: (24, 10, 768, 192, 96),
+    0x28000006: (24, 30, 864, 240, 96),
+    0x28000007: (24, 160, 896, 288, 96),
+    0x28000008: (24, 60, 1088, 336, 96),
+    0x28000009: (24, 8, 0, 0, 240),
+    0x2800000a: (24, 20, 960, 48, 240),
+    0x2800000b: (24, 1, 0, 96, 240),
+    0x2800000c: (24, 60, 960, 144, 240),
+    0x2800000d: (24, 220, -768, 192, 240),
+    0x2800000e: (24, 20, 1024, 240, 240),
+    0x2800000f: (24, 20, 896, 288, 240),
+    0x28000010: (24, 10, 1056, 336, 240),
+    0x28000011: (16, 1, 0, 0, 384),
+    0x28000012: (48, 640, 832, 384, 192),
+    0x28000013: (72, 4800, 0, 336, 288),
+    0x28000014: (24, 6400, 0, 432, 0),
+    0x28000015: (24, -1, 0, 432, 0),
+    0x28000016: (24, -1, 0, 336, 240),
+    0x28000017: (0, -1, 0, 0, 0),
+    0x28000018: (24, 40, 0, 384, 240),
+    0x29000001: (24, 80, 896, 0, 0),
+    0x29000002: (96, 3200, 0, 240, 0),
+    0x29000003: (12, 512, 0, 48, 0),
+    0x29000004: (24, 3, 0, 0, 48),
+    0x29000005: (24, 40, 0, 0, 96),
+    0x29000006: (24, 1, 0, 192, 48),
+    0x29000007: (24, -1, 960, 48, 0),
+    0x29000008: (24, -1, 960, 48, 48),
+    0x29000009: (24, -1, 960, 48, 96),
+    0x2900000a: (24, -1, 960, 48, 144),
+    0x2900000b: (24, -1, 960, 48, 192),
+    0x2900000c: (24, 140, 1088, 0, 192),
+    0x2900000d: (24, -1, 0, 192, 0),
+    0x2900000e: (48, 512, 1024, 96, 0),
+    0x2900000f: (12, -1, 0, 0, 0),
+    0x29000010: (0, -1, 1344, 0, 0),
+    0x29000011: (48, 512, 0, 416, 336),
+    0x29000012: (48, 640, 0, 0, 240),
+    0x29000013: (48, 60, 0, 96, 240),
+    0x29000014: (24, 40, 896, 288, 288),
+    0x29000015: (72, 3600, 0, 96, 96),
+    0x29000016: (24, 20, 1024, 48, 192),
+    0x29000017: (48, 320, 960, 0, 336),
+    0x29000018: (120, 9600, 0, 240, 0),
+    0x29000019: (24, -1, 0, 0, 0),
+    0x2900001a: (24, -1, 0, 0, 0),
+    0x2900001b: (24, -1, 0, 0, 0),
+    0x2900001c: (24, -1, 0, 384, 288),
+    0x2900001d: (24, -1, 0, 384, 240),
+    0x2900001e: (24, -1, 0, 0, 0),
+    0x2900001f: (24, -1, 0, 0, 0),
+    0x29000020: (24, -1, 0, 0, 0),
+    0x29000021: (16, -1, 0, 432, 240),
 }
 
 
@@ -415,6 +582,9 @@ ENT23_BEH_THUNK = {
     0x40158C: 0x407350, 0x40103C: 0x406F60, 0x402167: 0x4070E0, 0x4015E6: 0x407180,
     # 0x2D 族（0x408150 ctor）
     0x401EBF: 0x408540, 0x4017DA: 0x4098E0, 0x401690: 0x409C20, 0x4014AB: 0x40A020,
+    0x401C7B: 0x422470, 0x401852: 0x422DD0,   # 0x2900001C 真身 / 掉落自爆切换
+    0x401D75: 0x40EBB0, 0x401609: 0x40ECE0,   # 0x2300000B/0C
+    0x402040: 0x40F190, 0x401DC5: 0x40F2D0,   # 0x23000010/11
 }
 
 
@@ -615,16 +785,20 @@ class Ent:
             self.node.dst = (self.s32(0x04) - 0x18, self.s32(0x08) - 0x18)
             self.node.active = 1
             return
-        prop = ENT_PROP.get(typ & 0xFF)           # 0x43AC30 的 0x498000 记录
+        prop = ENT_PROP_FAM.get(typ) or ENT_PROP.get(typ & 0xFF)   # 0x43AC30：表址按族
         if prop is not None:
-            # ⚠ 原文在 0x23 分支内，但 0x498000 按 type&0xFF 各族共用（0x43AC30 对所有族调用）
+            # ⚠ 原文在 0x23 分支内，但各族表按 type&0xFF 索引（0x43AC30 对所有族调用）
             if True:
                 self.d32(0x0C, prop[0])           # 半径
                 self.d32(0x18, prop[1])           # 存活门
                 self.d32(0x58, prop[2])
                 self.m[0x10] = 1                  # 0x43ACC0 参与碰撞
                 self.node = DNode(2, prop[3], prop[4])   # 0x43ACC3 层号恒 2
-                self.node.dst = (self.s32(4) - 0x18, self.s32(8) - 0x18)
+                # 0x43AC8C..0x43AC95：矩形 = {srcx, srcy, srcx+2r-1, srcy+2r-1}
+                self.node.rect = (prop[3], prop[4],
+                                  prop[3] + 2 * prop[0] - 1, prop[4] + 2 * prop[0] - 1)
+                # 0x43ACD7：node dst = (x-r, y-r)（r=半径，非固定 0x18）
+                self.node.dst = (self.s32(4) - prop[0], self.s32(8) - prop[0])
             info = ENT23_INIT.get(typ)
             if info is not None:
                 thunk = info["beh"]
@@ -637,6 +811,13 @@ class Ent:
                 if info.get("d20"):       # 0x40D98E：`[+0x20] = (b<=0xF0) ? -1 : 1`
                     self.d32(0x20, 0xFFFFFFFF if b <= 0xF0 else 1)
         self._apply_family_init(typ, a, b, d)          # 0x24-0x2D 各族（ENT24_INIT 等）
+
+    def _deref_link(self, h: int):
+        """句柄 → 实体（id&0x7FFFFFFF ↔ Pages.p4_links；无宿主/无链接 → None）。"""
+        p = getattr(self, "_pages", None)
+        if p is None:
+            return None
+        return getattr(p, "p4_links", {}).get(h & 0x7FFFFFFF)
 
     def _apply_family_init(self, typ: int, a: int, b: int, d: int) -> None:
         """0x24-0x2D 各族 ctor case 体（ENT24_INIT 等）。rec = (a, b, typ, d)。"""
@@ -689,7 +870,7 @@ class Ent:
             self.d32(0x1C, d[0] & 0xFFFFFFFF)          #   [0x1C] = prm[0]
             self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)   #   [0x20] = prm[1]<<4
         if "deref3" in info:                           # 0x410CC8：[0x20]=*rec3、[0x24]=rec3[1]
-            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            tgt = self._deref_link(d)
             if tgt is not None:
                 self.d32(0x20, tgt.g32(0x00))
                 self.d32(0x24, tgt.g32(0x04))
@@ -783,12 +964,12 @@ class Ent:
             v = K if cond else (((-1) & N) + K)
             self.d32(off, v & 0xFFFFFFFF)
         if "deref3_20_24" in info:                     # 0x4160A9：[0x20]=rec3[0x20]、[0x24]=rec3[0x24]?? —— rec3[0x20/0x24]
-            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            tgt = self._deref_link(d)
             if tgt is not None:
                 self.d32(0x20, tgt.g32(0x20))
                 self.d32(0x24, tgt.g32(0x24))
         if "d_to_ptr" in info:                         # 0x416262：[0xC]=rec3[0xC]；拷父节点 src/dst；rec3=父句柄
-            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            tgt = self._deref_link(d)
             if tgt is not None:
                 self.d32(0x0C, tgt.g32(0x0C))
                 if tgt.node is not None and self.node is not None:
@@ -844,7 +1025,7 @@ class Ent:
             off, n = info["r3sh"]
             self.d32(off, (d << n) & 0xFFFFFFFF)
         if "deref3_all" in info:                       # 0x41915B：全字段从 rec3[0x18..0x30] 拷
-            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            tgt = self._deref_link(d)
             if tgt is not None:
                 for so, to in ((0x18, 0x18), (0x1C, 0x1C), (0x20, 0x20),
                                (0x24, 0x24), (0x28, 0x28), (0x2C, 0x2C), (0x30, 0x30)):
@@ -854,12 +1035,46 @@ class Ent:
         if "d_all" in info:                            # 多字段 d_to（rec[3] → 各偏移）
             for o in info["d_all"]:
                 self.d32(o, d & 0xFFFFFFFF)
+        if "s3nz8000" in info:                         # 0x41C5DD：[off]=(p3!=0)?0x8000:0
+            self.d32(info["s3nz8000"], 0x8000 if d != 0 else 0)
+        if "node_custom" in info:                      # ctor 直写节点（rect/dst/active）
+            nc = info["node_custom"]
+            if self.node is not None:
+                if "rect" in nc:
+                    self.node.rect = tuple(nc["rect"])
+                if "dst" in nc:
+                    self.node.dst = tuple(nc["dst"])
+                if "active" in nc:
+                    self.node.active = nc["active"]
+        if "r1_28" in info:                            # 0x4082FF：[0x28] = rec[1]
+            self.d32(0x28, b & 0xFFFFFFFF)
+        if "s1z2_30" in info:                          # 0x40830F：[0x30] = (p1==0)?2:0
+            self.d32(0x30, 2 if b == 0 else 0)
+        if "deref0_24" in info:                        # 0x40835C：[0x24] = *rec0[+0x20]
+            tgt = self._deref_link(a)
+            if tgt is not None:
+                self.d32(0x24, tgt.g32(0x20))
+        if "s3m450_28" in info:                        # 0x40836A：[0x28] = p3*(p1?450:1)
+            self.d32(0x28, (d * 450 if b != 0 else d) & 0xFFFFFFFF)
+        if "s3if_2C" in info:                          # 0x40837A：[0x2C] = p1 ? p3 : 0
+            self.d32(0x2C, (d if b != 0 else 0) & 0xFFFFFFFF)
+        if "tp_grid" in info:                          # 0x40DBF5：瞬移格步（0x50 步长）
+            r = rng.randrange(0x7FFFFFFF)
+            q1, r1 = divmod(r, 0xF0)
+            self.d32(0x1C, ((0x140 + r1 - a) // 0x50) & 0xFFFFFFFF)
+            r = rng.randrange(0x7FFFFFFF)
+            q3, r3 = divmod(r, 0x190)
+            self.d32(0x20, ((0x28 + r3 - b) // 0x50) & 0xFFFFFFFF)
+        if "rect_s3" in info:                          # 0x40DCAE：rect 按 rec3 选
+            ra, rb = info["rect_s3"]
+            if self.node is not None:
+                self.node.rect = ra if d == 0 else rb
         if "r0_20" in info:
             self.d32(0x20, a & 0xFFFFFFFF)
         if "r1_24" in info:
             self.d32(0x24, b & 0xFFFFFFFF)
         if "d3pair" in info:                           # 0x41200B：[0x1C]=*rec3、[0x20]=rec3[1]
-            tgt = self._owner_links.get(d) if hasattr(self, "_owner_links") else None
+            tgt = self._deref_link(d)
             if tgt is not None:
                 self.d32(info["d3pair"][0], tgt.g32(0x1C))
                 self.d32(info["d3pair"][1], tgt.g32(0x20))
@@ -2055,17 +2270,41 @@ ENT29_INIT = {
     0x29000015: {"beh": 0x401398, "imm": {0x24: -8}, "d_to": 0x28},
     0x29000016: {"beh": 0x4018A7},
     0x29000017: {"beh": 0x40217B, "imm": {0x1C: 0, 0x20: 0x10}},
-    0x29000018: {"beh": 0x4013C5, "d_all": [0x1C, 0x20, 0x24, 0x28, 0x2C]},
-    0x29000019: {"beh": 0x401CCB, "imm": {0x04: -0xA0},
-                 "d_all": [0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30]},
+    # —— 0x29000018..0x29000021（2026-11-11 按各自 ctor case 重读修正）——
+    # 0x29000018（0x41C5CC）：+0x1C=(p3!=0)?0x8000:0、+0x20=0、+0x24=p0<<2、+0x28=p1<<2、+0x2C/30=0
+    0x29000018: {"beh": 0x4013C5, "imm": {0x20: 0, 0x2C: 0, 0x30: 0},
+                 "s3nz8000": 0x1C, "r0sh": (0x24, 2), "r1sh": (0x28, 2)},
+    # 0x29000019（0x41C613）：x=-0xA0、+0x1C=p3、+0x20..24=*p0（块解引用，生成点填）、
+    #   +0x28=*(p3+0x1C)（生成点填）、+0x2C=*p1、rect=*(p1+4)?{180,F0,1AF,11F}:{180,120,1AF,14F}
+    0x29000019: {"beh": 0x401CCB, "imm": {0x04: -0xA0}, "d_to": 0x1C},
+    # 0x2900001A（0x41C6E5）：x=-0xA0、+0x1C=p3、+0x20..2C=*p0[0..3]、+0x30=*p1、rect 同上式
     0x2900001A: {"beh": 0x401384, "imm": {0x04: -0xA0}, "d_to": 0x1C},
-    0x2900001B: {"beh": 0x40140B, "imm": {0x04: -0xA0, 0x28: 3},
-                 "d_all": [0x1C, 0x20, 0x24]},
-    0x2900001C: {"beh": 0x40209F, "imm": {0x04: -0xA0, 0x24: 0}, "d_to": 0x1C},
-    0x2900001D: {"beh": 0x40209F, "imm": {0x04: -0xA0, 0x24: 0}, "d_to": 0x1C},
+    # 0x2900001B（0x41C7BB）：x=-0xA0、+0x1C=p3、+0x20=p0、+0x24=p1、+0x28=3、+0x2C/30=0、
+    #   node.rect={-30,-1,-1,-30}、node.dst=(-30,-30)、node.active=0
+    0x2900001B: {"beh": 0x40140B, "imm": {0x04: -0xA0, 0x28: 3, 0x2C: 0, 0x30: 0},
+                 "d_to": 0x1C, "r0_20": True, "r1_24": True,
+                 "node_custom": {"rect": (-0x30, -1, -1, -0x30), "dst": (-0x30, -0x30),
+                                 "active": 0}},
+    # 0x2900001C（0x41C849）：x=-0xA0、beh=0x401C7B、+0x1C=p3、+0x20=p0、+0x24=0、
+    #   node.rect={0,0,0,0}、node.dst=(0,0)（0x41C849 → 0x41CB47 直跳：dst=(-30,-30)?? ——
+    #   实测 0x41C870 jmp 0x41CB47 → 只设 dst=(-0x30,-0x30)，rect 不动）
+    0x2900001C: {"beh": 0x401C7B, "imm": {0x04: -0xA0, 0x24: 0}, "d_to": 0x1C,
+                 "r0_20": True,
+                 "node_custom": {"dst": (-0x30, -0x30), "active": 1}},
+    # 0x2900001D（0x41C875）：x=-0xA0、beh=0x40209F、+0x1C=p3、+0x20=p0、+0x24=p1、+0x28=0、
+    #   node.dst=(-0x30,-0x30)、node.active=0
+    0x2900001D: {"beh": 0x40209F, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C,
+                 "r0_20": True, "r1_24": True,
+                 "node_custom": {"dst": (-0x30, -0x30), "active": 0}},
     0x2900001E: {"beh": 0x401474, "imm": {0x20: 0x40, 0x24: 0}, "d_to": 0x1C},
-    0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0}},
-    0x29000020: {"beh": 0x401A82, "imm": {0x04: -0xA0}},
+    # 0x2900001F（0x41C99E）：x=-0xA0、+0x1C=p3、+0x20=*p0、+0x24=*(p0+4)+0x18、+0x28=0、
+    #   rect=*(p0+8)?if:else（生成点填）
+    0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C},
+    # 0x29000020（0x41CA67）：x=-0xA0、+0x1C=*p3、+0x20=p0、+0x24=p1、+0x28=*(p3+4)、
+    #   rect=p1==-0xA8?if:else（生成点填）
+    0x29000020: {"beh": 0x401A82, "imm": {0x04: -0xA0}, "r0_20": True, "r1_24": True},
+    # 0x29000021（0x41CB69）：+0x1C=*p3、+0x20=*(p3+4)、+0x24=p0<<8、+0x28=p1<<8、+0x2C=0、
+    #   +0x18=|*p3|+|*(p3+4)|、SE(2,(x-0x140)<<4)（0x41FFF0 生成点填）
     0x29000021: {"beh": 0x40166D, "imm": {0x2C: 0}},
 }
 
@@ -2111,9 +2350,21 @@ ENT2D_INIT = {
                  "imm": {0x0C: 0x78, 0x18: 0x7080, 0x20: 0xF003200,
                          0x24: 0x780014, 0x28: -0x708}, "d_to": 0x2C},                # r=120、HP=28800
     0x2D00001A: {"beh": 0x4017DA},                                                   # 多部位（9 生成点）
-    0x2D00001B: {"beh": 0x401690, "imm": {0x0C: 0x10, 0x18: -1}, "d_to": 0x2C},
-    0x2D00001C: {"beh": 0x4014AB, "imm": {0x18: -1}, "d_to": 0x28, "d_to2": 0x2C},
-    0x2D00001D: {"beh": 0x4014AB, "imm": {0x18: -1}, "d_to": 0x28, "d_to2": 0x2C},
+    # 0x2D00001B（0x4082CE）：+0xC=0x10、+0x18=-1、+0x1C=p0(主)、+0x20=0、+0x24=0、
+    #   +0x28=p1（主铺=0 待机；链生子=p1≠0 即散开）、+0x2C=p3、+0x30=(p1==0)?2:0
+    0x2D00001B: {"beh": 0x401690, "imm": {0x0C: 0x10, 0x18: -1, 0x20: 0, 0x24: 0},
+                 "r0_1C": True, "r1_28": True, "d_to": 0x2C, "s1z2_30": True},
+    # 0x2D00001C/1D（0x40832D/0x4083A1）：+0xC=8、+0x18=-1、+0x1C=p0(主)、+0x20=p1、
+    #   +0x24=*(p0+0x20)（主打包位）、+0x28=p3*(p1?450:1)、+0x2C=(p1?p3:0)、+0x30=0、
+    #   node.rect={0,0,0,0}、node.dst=(0,0)、node.active=1
+    0x2D00001C: {"beh": 0x4014AB, "imm": {0x0C: 8, 0x18: -1, 0x30: 0},
+                 "r0_1C": True, "r1_20": True, "deref0_24": True,
+                 "s3m450_28": True, "s3if_2C": True,
+                 "node_custom": {"rect": (0, 0, 0, 0), "dst": (0, 0), "active": 1}},
+    0x2D00001D: {"beh": 0x4014AB, "imm": {0x0C: 8, 0x18: -1, 0x30: 0},
+                 "r0_1C": True, "r1_20": True, "deref0_24": True,
+                 "s3m450_28": True, "s3if_2C": True,
+                 "node_custom": {"rect": (0, 0, 0, 0), "dst": (0, 0), "active": 1}},
 }
 
 
@@ -3687,6 +3938,1018 @@ def _beh_422D40(self, e) -> bool:
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x10, e.s32(0x08) - 0x10)
     return e.g32(0x18) != 0 and self.p4_4305f0(e, 0x10)
+
+
+# ---------------------------------------------------------------------------
+# 0x29 族高段（关8 真 boss 0x29000018 及其编队/卫星）——2026-11-11 逐函数转写。
+# 依据 docs/p4_beh_29high_notes.md；反汇编 re_dis + esp_flow（0x41FC60 处 R.dis 曾失步
+# 6 字节，关键序列用 capstone 直解校对）。
+# ---------------------------------------------------------------------------
+
+def _p4_idiv(a: int, b: int) -> int:
+    """x86 idiv 语义（向零截断的有符号除）。"""
+    if b == 0:
+        return 0
+    q = abs(a) // abs(b)
+    return -q if (a < 0) != (b < 0) else q
+
+
+def p4_409760(self, e) -> None:
+    """`0x409760`（thunk 0x402478）：0x2D00001B/1C/1D 的节点朝向/尺寸同步。
+
+    node[+0x1C]==0 → 直接返回。dx=this.x-主.x、dy=this.y-主.y；
+    ang = 0x45A9A0(dy, dx)；rect.l==0xF0 → 斜率段跳过；否则 slope =
+      |cos|>|sin| ? dx*8/cos : dy*8/sin；slope==0 → l=0x320、slope>=5 → l=0xF0、
+      否则 l=0x190-(slope<<5)。t = ang>=0xE00 ? 0x1A0 : (ang>>3)&-0x20；
+    node.rect = {l, t, l+0x1F, t+0x1F}；node.dst = (x-0x10, y-0x10)。"""
+    if e.node is None or not e.node.active:
+        return
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None:
+        return
+    dx = e.s32(0x04) - main.s32(0x04)
+    dy = e.s32(0x08) - main.s32(0x08)
+    ang = self.p4_45a9a0(dy, dx)                    # 0x40978C 0x401091 → 0x45A9A0
+    c = page4_cos(ang)
+    s = page4_sin(ang)
+    rect_l = e.node.rect[0]
+    if rect_l != 0xF0:                              # 0x4097B2
+        if abs(c) > abs(s):                         # 0x4097CB jle 取反
+            slope = _p4_idiv(dx * 8, c)
+        else:
+            slope = _p4_idiv(dy * 8, s)
+        if slope == 0:
+            rect_l = 0x320                          # 0x4097F4
+        elif slope >= 5:
+            rect_l = 0xF0                           # 0x409805
+        else:
+            rect_l = 0x190 - (slope << 5)           # 0x40980C
+    rect_t = 0x1A0 if ang >= 0xE00 else ((ang >> 3) & -0x20)   # 0x409816..0x409828
+    e.node.rect = (rect_l, rect_t, rect_l + 0x1F, rect_t + 0x1F)
+    e.node.dst = (e.s32(0x04) - 0x10, e.s32(0x08) - 0x10)
+
+
+def p4_41fff0(self, e, tx: int, ty: int, spd: int) -> None:
+    """`0x41FFF0`（thunk 0x401D34，ret 0xC）：从 e 位置向 (tx,ty) 发一枚 0x29000021。
+
+    v = p4_43af90(e, spd) >> 4；inv = 0x45AA80(dx, dy)；
+    vx = (inv*dx*v)>>8、vy = (inv*dy*v)>>8（0x420023..0x42003E：ecx=ang*esi(dx)、
+    eax=ang*edi(dy) 各乘 spd 后 sar 8）；vx==0 且 vy==0 → 不发。
+    0x29000021 ctor（0x41CB69）：+0x1C=vx、+0x20=vy、+0x24=x<<8、+0x28=y<<8、
+    +0x18=|vx|+|vy|、SE 槽2 声像 (x-0x140)<<4。"""
+    dx = tx - e.s32(0x04)
+    dy = ty - e.s32(0x08)
+    v = self.p4_43af90(e, spd) >> 4                 # 0x420010 0x401FB4 → 0x43AF90
+    inv = self.p4_45aa80(dx, dy)                    # 0x42001C 0x40231F → 0x45AA80
+    vx = _p4_idiv(inv * dx * v, 256)
+    vy = _p4_idiv(inv * dy * v, 256)
+    if vx == 0 and vy == 0:                         # 0x42003C
+        return
+    c = self._p4_ent43c(0x29000021, e.s32(0x04), e.s32(0x08))
+    c.d32(0x1C, vx & 0xFFFFFFFF)
+    c.d32(0x20, vy & 0xFFFFFFFF)
+    c.d32(0x24, (e.s32(0x04) << 8) & 0xFFFFFFFF)
+    c.d32(0x28, (e.s32(0x08) << 8) & 0xFFFFFFFF)
+    c.d32(0x18, (abs(vx) + abs(vy)) & 0xFFFFFFFF)   # 0x41CBBC cdq/xor/sub 链
+    self.p4_se_pan(2, (e.s32(0x04) - 0x140) << 4)   # 0x41CB70 0x450350(槽2,…)
+
+
+def p4_41fc60(self, e, k: int) -> None:
+    """`0x41FC60`（thunk 0x40102D，ret 4）：入场舱纵队——6×0x29000019。
+
+    ctor 0x41C613：x=-0xA0、+0x1C=p3(主)、+0x20=*p0、+0x24=*(p0+4)、+0x28=*(p3+0x1C)、
+    +0x2C=*p1(=k)；rect=*(p1+4)!=0?{180,F0,1AF,11F}:{180,120,1AF,14F}（此处恒非0→前者）、
+    node.dst=(-0x30,-0x30)。六组 (p0[0],p0[1]) 见 0x41FC9A..0x41FD73 的 push 对。"""
+    h = id(e) & 0x7FFFFFFF
+    self.p4_links[h] = e
+    for ox, oy in ((0x78, -0x18), (0x9C, -0x24), (0xA8, -0x48),
+                   (0xAC, -0x6C), (0xA8, -0x90), (0x9C, -0xA8)):
+        c = self._p4_ent43c(0x29000019, 0, 0, h)    # d_to 0x1C → +0x1C=主句柄
+        c.d32(0x20, ox & 0xFFFFFFFF)
+        c.d32(0x24, oy & 0xFFFFFFFF)
+        c.d32(0x28, e.g32(0x1C))                    # 0x41C640 *(p3+0x1C)
+        c.d32(0x2C, k & 0xFFFFFFFF)
+        if c.node is not None:
+            c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
+            c.node.dst = (-0x30, -0x30)
+
+
+def _p4_spawn29a(self, boss, quad, k: int, rflag: int):
+    """0x2900001A 生成（ctor 0x41C6E5 等价）：cur=quad01、target=quad23、+0x30=k、
+    rect = rflag ? {180,F0,1AF,11F} : {180,120,1AF,14F}、node.dst=(-0x30,-0x30)。"""
+    h = id(boss) & 0x7FFFFFFF
+    self.p4_links[h] = boss
+    c = self._p4_ent43c(0x2900001A, 0, 0, h)
+    c.d32(0x20, quad[0] & 0xFFFFFFFF)
+    c.d32(0x24, quad[1] & 0xFFFFFFFF)
+    c.d32(0x28, quad[2] & 0xFFFFFFFF)
+    c.d32(0x2C, quad[3] & 0xFFFFFFFF)
+    c.d32(0x30, k & 0xFFFFFFFF)
+    if c.node is not None:
+        c.node.rect = ((0x180, 0xF0, 0x1AF, 0x11F) if rflag
+                       else (0x180, 0x120, 0x1AF, 0x14F))
+        c.node.dst = (-0x30, -0x30)
+    return c
+
+
+def _p4_spawn29f(self, boss, blk):
+    """0x2900001F 生成（ctor 0x41C99E 等价）：+0x20=*p0、+0x24=*(p0+4)+0x18、+0x28=0、
+    rect = *(p0+8) ? {180,F0,1AF,11F} : {180,120,1AF,14F}、node.dst=(-0x30,-0x30)。"""
+    h = id(boss) & 0x7FFFFFFF
+    self.p4_links[h] = boss
+    c = self._p4_ent43c(0x2900001F, 0, 0, h)
+    c.d32(0x20, blk[0] & 0xFFFFFFFF)
+    c.d32(0x24, (blk[1] + 0x18) & 0xFFFFFFFF)
+    if c.node is not None:
+        c.node.rect = ((0x180, 0xF0, 0x1AF, 0x11F) if blk[2] != 0
+                       else (0x180, 0x120, 0x1AF, 0x14F))
+        c.node.dst = (-0x30, -0x30)
+    return c
+
+
+def _p4_spawn29t(self, boss, x: int, y: int, val: int):
+    """0x29000020 生成（ctor 0x41CA67 等价）：+0x1C=*p3(主)、+0x28=*(p3+4)(val)、
+    +0x20=p0(x)、+0x24=p1(y)、rect = y==-0xA8 ? if : else、node.dst=(-0x30,-0x30)。"""
+    h = id(boss) & 0x7FFFFFFF
+    self.p4_links[h] = boss
+    c = self._p4_ent43c(0x29000020, x, y)
+    c.d32(0x1C, h)
+    c.d32(0x28, val & 0xFFFFFFFF)
+    if c.node is not None:
+        c.node.rect = ((0x180, 0xF0, 0x1AF, 0x11F) if y == -0xA8
+                       else (0x180, 0x120, 0x1AF, 0x14F))
+        c.node.dst = (-0x30, -0x30)
+    return c
+
+
+def _beh_4200C0(self, e) -> bool:
+    """`0x4200C0`（0x29000018，**关8 真 boss**，thunk 0x4013C5）：九态机。
+
+    态 = [0x1C]&0xFF（态字高字节 = 巡回 round）；跳表 0x421974。
+    位置：[0x24]+=[0x2C](vx)、[0x28]+=[0x30](vy)；x=[0x24]>>2、y=[0x28]>>2；
+    node dst=(x-0x78, y-0x78)（240×240）。死亡：HP==0 或 ([0x1C]&0x7FFF)>0x1800（round≥24）
+    → 0x49000008 @(x,y) 入 0x4AD4CC 并 return 0。态体见 docs/p4_beh_29high_notes.md。"""
+    st = e.s32(0x1C)
+    state = st & 0xFF
+    t = e.s32(0x20)
+    if state == 0:                                    # 0x4200EA
+        p4_41fc60(self, e, 0x3E8)
+        e.d32(0x2C, 0)
+        e.d32(0x30, 0)
+    elif state == 1:                                  # 0x420103
+        if t < 0x40:
+            e.d32(0x2C, (t - 0x40) & 0xFFFFFFFF)
+        if t == 0:                                    # 0x4214C0 公共重生门
+            p4_41fc60(self, e, 0x3E8)
+    elif state == 2:                                  # 0x42011A
+        if e.s32(0x08) > 0x190:
+            e.d32(0x30, -2 & 0xFFFFFFFF)
+        elif e.s32(0x08) < 0xA0:
+            e.d32(0x30, 2)
+        if t == 0:
+            e.d32(0x30, 2)
+            p4_41fc60(self, e, 0x3E8)
+            self._p4_ent43c(0x2900001B, 0x9C, -0xA8, id(e) & 0x7FFFFFFF)
+    elif state == 3:                                  # 0x420192
+        if 0x3C < t < 0x1A4:
+            e.d32(0x2C, (page4_cos(t * 20) >> 4) & 0xFFFFFFFF)
+            e.d32(0x30, (page4_sin(t * 20) >> 4) & 0xFFFFFFFF)
+        if t == 0:
+            for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0x9C, -0x24, 0xA0, -0x18), 0),
+                          ((0xA8, -0x48, 0xC8, -0x18), 0), ((0xAC, -0x6C, 0xF0, -0x18), 0),
+                          ((0xA8, -0x70, 0x118, -0x18), 0), ((0x9C, -0x58, 0x140, -0x18), 1)):
+                _p4_spawn29a(self, e, q, 0x3C, rf)
+        elif t == 0x3C:                               # 0x4203FC：16×0x2900001C 纵列
+            for i in range(16):
+                self._p4_ent43c(0x2900001C, i * 0x28, -0x18, id(e) & 0x7FFFFFFF)
+        elif t == 0x1A4:                              # 0x42046B：再铺 6×0x2900001A
+            for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0xA0, -0x18, 0x9C, -0x24), 0),
+                          ((0xC8, -0x18, 0xA8, -0x48), 0), ((0xF0, -0x18, 0xAC, -0x6C), 0),
+                          ((0x118, -0x18, 0xA8, -0x90), 0), ((0x140, -0x18, 0x9C, -0x58), 1)):
+                _p4_spawn29a(self, e, q, 0x3C, rf)
+    elif state == 4:                                  # 0x420677
+        if t == 0:
+            p4_41fc60(self, e, 0x3E8)
+            self._p4_ent43c(0x2900001D, 0x9C, -0xA8, id(e) & 0x7FFFFFFF)
+        if t <= 0x80 and (t & 0xF) == 0 and (st & 0x8000) == 0:
+            self.spawn(self._p4_q("ui4fc"), 0x5100000A, (0x80 - t) * 5, 0x18, 0)
+    elif state == 5:                                  # 0x420743
+        if t == 0:
+            e.d32(0x2C, 0)
+            e.d32(0x30, 0)
+        elif t < 0x96:
+            py = self.p4_stat.get(0x56CC90, 0)
+            v = e.s32(0x30)
+            if e.s32(0x08) < py:
+                if v < 0xC:
+                    e.d32(0x30, (v + 1) & 0xFFFFFFFF)
+            else:
+                e.d32(0x30, (v + (0 if v <= -0xC else -1)) & 0xFFFFFFFF)
+        elif t == 0x96:
+            e.d32(0x2C, 0x30)
+            e.d32(0x30, 0)
+        elif t < 0x10E:
+            v = e.s32(0x2C)
+            e.d32(0x2C, (v - 2) & 0xFFFFFFFF if e.s32(0x04) > -0xC8 else 0)
+        elif t == 0x10E:
+            e.d32(0x24, -0x320 & 0xFFFFFFFF)
+            if st & 0x8000:
+                e.d32(0x28, (self.p4_stat.get(0x56CC90, 0) * 4) & 0xFFFFFFFF)
+            e.d32(0x2C, 0x30)
+        elif t == 0x186:
+            e.d32(0x24, 0xE60)
+            e.d32(0x2C, -0x40 & 0xFFFFFFFF)
+        elif t > 0x186:
+            v = e.s32(0x2C)
+            e.d32(0x2C, (v + (1 if v != 0 else 0)) & 0xFFFFFFFF)
+        if t == 0:                                    # 0x42081C
+            p4_41fc60(self, e, 0x5B)
+            for q in ((0x9C, -0x58, 0x9C, 0x78), (0xAC, -0x6C, 0xAC, 0x3C),
+                      (0xA8, -0x48, 0xA8, 0x18), (0x9C, -0x24, 0x9C, -0xC)):
+                _p4_spawn29a(self, e, q, 0x5B, 1)
+        elif t == 0x5A:                               # 0x4209F9：11×0x2900001F
+            for blk in ((0x9C, 0x78, 1, 0), (0xA8, 0x60, 0, 0), (0xAC, 0x3C, 0, 0),
+                        (0xA8, 0x18, 0, 0), (0x9C, -0xC, 0, 0), (0x78, -0x18, 0, 0),
+                        (0x9C, -0x24, 0, 0), (0xA8, -0x48, 0, 0), (0xAC, -0x6C, 0, 0),
+                        (0xA8, -0x90, 0, 0), (0x9C, -0x58, 1, 0)):
+                _p4_spawn29f(self, e, blk)
+    elif state == 6:                                  # 0x420D2F
+        if t == 0:
+            e.d32(0x2C, 0)
+            e.d32(0x30, (0x11 if e.s32(0x08) >= 0x118 else -0x11) & 0xFFFFFFFF)
+        else:
+            e.d32(0x2C, ((0x198 - e.s32(0x04)) >> 4) & 0xFFFFFFFF)
+            if t & 1:
+                v = e.s32(0x30)
+                if e.s32(0x08) < 0x108:
+                    if v < 0x12:
+                        e.d32(0x30, (v + 1) & 0xFFFFFFFF)
+                else:
+                    e.d32(0x30, (v + (0 if v <= -0x12 else -1)) & 0xFFFFFFFF)
+        if 0x5A < t < 0x258 and (t & 3) == 0:         # 0x420DA1 开火段
+            c = page4_cos(t * 40)
+            s = page4_sin(t * 40)
+            x = e.s32(0x04) + 0x9C
+            y = e.s32(0x08) - 0xA8
+            if st & 0x8000:                           # 0x420DD5 八发两排
+                p4_41fff0(self, e, x + c, y + s, -0x680)
+                p4_41fff0(self, e, x - c, y - s, -0x680)
+                p4_41fff0(self, e, x + s, y - c, -0x340)
+                p4_41fff0(self, e, x - s, y + c, -0x340)
+                y += 0x120                            # 0x420E61 [ebp+8]+=0x120
+                p4_41fff0(self, e, x + c, y - s, -0x680)
+                p4_41fff0(self, e, x - c, y + s, -0x680)
+                p4_41fff0(self, e, x + s, y + c, -0x340)
+                p4_41fff0(self, e, x - s, y - c, -0x340)
+            else:                                     # 0x420EC2
+                p4_41fff0(self, e, x, y, -0x900)
+                if (t & 0x1F) == 0:
+                    p4_41fff0(self, e, self.p4_stat.get(0x56CC8C, 0),
+                              self.p4_stat.get(0x56CC90, 0) + 0x30, 0x400)
+                y += 0x120
+                p4_41fff0(self, e, x, y, -0x900)
+                if (t & 0x1F) == 0:
+                    p4_41fff0(self, e, self.p4_stat.get(0x56CC8C, 0),
+                              self.p4_stat.get(0x56CC90, 0) - 0x30, 0x400)
+        if t == 0:                                    # 0x420F4E
+            p4_41fc60(self, e, 0x3E8)
+            for q, rf in (((0x9C, -0x24, 0x9C, -0xC), 0), ((0xA8, -0x48, 0xA8, 0x18), 0),
+                          ((0xAC, -0x6C, 0xAC, 0x3C), 0), ((0xA8, -0x70, 0xA8, 0x60), 0),
+                          ((0x9C, -0x58, 0x9C, 0x78), 1)):
+                _p4_spawn29a(self, e, q, 0x259, rf)
+        elif t == 0x258:                              # 0x42112A
+            for q, rf in (((0x9C, -0xC, 0x9C, -0x24), 0), ((0xA8, 0x18, 0xA8, -0x48), 0),
+                          ((0xAC, 0x3C, 0xAC, -0x6C), 0), ((0xA8, 0x60, 0xA8, -0x70), 0),
+                          ((0x9C, 0x78, 0x9C, -0x58), 1)):
+                _p4_spawn29a(self, e, q, 0x5B, rf)
+    elif state == 7:                                  # 0x421301
+        if t < 0x5A:
+            e.d32(0x2C, 0)
+            v = e.s32(0x30)
+            e.d32(0x30, (v - (1 if e.s32(0x08) > -0xA0 else v)) & 0xFFFFFFFF)
+        elif t == 0x5A:
+            e.d32(0x24, ((self.p4_stat.get(0x56CC8C, 0) * 2) if (st & 0x8000) else 0)
+                  & 0xFFFFFFFF)
+            e.d32(0x28, -0x280 & 0xFFFFFFFF)
+            e.d32(0x30, 0x20)
+        elif t < 0x12C:
+            if e.s32(0x08) > 0x2A8:
+                e.d32(0x30, 0)
+        elif t == 0x12C:
+            e.d32(0x28, 0xAA0)
+            e.d32(0x30, -0x20 & 0xFFFFFFFF)
+        elif t < 0x1FE:
+            if e.s32(0x08) >= -0xA0:
+                e.d32(0x30, 0)
+        elif t == 0x1FE:
+            e.d32(0x24, 0x640)
+            e.d32(0x28, -0x460 & 0xFFFFFFFF)
+            e.d32(0x30, 0x40)
+        else:
+            v = e.s32(0x30)
+            e.d32(0x30, (v - (1 if v != 0 else 0)) & 0xFFFFFFFF)
+        if t == 0x1E:                                 # 0x4213DF
+            self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x18, 0x18, 0)
+        elif t == 0xF0:
+            self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x1C8, 0x18, 0)
+        if 0x5A < t < 0x1FE and (t & 1) == 0:         # 0x421461
+            vy = e.s32(0x30)
+            wob = (8 - (t & 0xF)) if vy > 0 else ((t & 7) - 4)
+            p4_41fff0(self, e, e.s32(0x04) + 0x9C + 0x18,
+                      e.s32(0x08) - 0xA8 + wob, 0x380)
+    elif state == 8:                                  # 0x4214DC
+        e.d32(0x30, ((0x5A0 - e.s32(0x28)) >> 3) & 0xFFFFFFFF)
+        if t == 0:                                    # 0x4214F7：6×0x29000020
+            for x, y, val in ((0x78, -0x18, 0x3E8), (0x9C, -0x24, 0x96),
+                              (0xA8, -0x48, 0x78), (0xAC, -0x6C, 0x5A),
+                              (0xA8, -0x70, 0x3C), (0x9C, -0x58, 0x1E)):
+                _p4_spawn29t(self, e, x, y, val)
+            p4_41fc60(self, e, 0x3E8)                  # 0x4214CB（t==0 重生门）
+        elif t == 0x12C:                              # 0x421609：6×0x2900001A
+            for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0x78, -0x24, 0x9C, -0x18), 0),
+                          ((0x78, -0x48, 0xA8, -0x18), 0), ((0x78, -0x6C, 0xAC, -0x18), 0),
+                          ((0x78, -0x70, 0xA8, -0x18), 0), ((0x78, -0x58, 0x9C, -0x18), 1)):
+                _p4_spawn29a(self, e, q, 0x3D, rf)
+    # —— 公共尾 0x42180F ——
+    thr = (0x40, 0, 0x10E, 0x1DF, 0x118, 0x1C6, 0x2B2, 0x24E, 0x168)
+    t = e.s32(0x20)
+    if t == thr[state]:
+        if state == 0:                                # 0x421883
+            if e.s32(0x04) > 0x280:
+                e.d32(0x1C, (e.s32(0x1C) | 1) & 0xFFFFFFFF)     # → 态1
+            else:
+                r = rng.randrange(0x7FFFFFFF)
+                e.d32(0x1C, (e.s32(0x1C) | ((r % 7) + 2)) & 0xFFFFFFFF)  # → 态2..8
+            e.d32(0x20, 0)
+        else:                                         # 0x42186C：round+1、态回 0
+            e.d32(0x1C, ((st & 0xFF00) + 0x100) & 0xFFFFFFFF)
+            e.d32(0x20, 0)
+    else:
+        e.d32(0x20, (t + 1) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x30)) & 0xFFFFFFFF)
+    acc_x = e.s32(0x24)
+    acc_y = e.s32(0x28)
+    x = (acc_x >> 2) if acc_x >= 0 else -((-acc_x) >> 2)        # sar 2
+    y = (acc_y >> 2) if acc_y >= 0 else -((-acc_y) >> 2)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x78, y - 0x78)           # 0x4218E6
+    if e.g32(0x18) != 0 and (e.s32(0x1C) & 0x7FFF) <= 0x1800:
+        return True                                 # 0x42191D
+    self.spawn(self._p4_q("ui4cc"), 0x49000008, e.s32(0x04), e.s32(0x08), 0)
+    return False                                    # 0x42192A
+
+
+def _beh_421FE0(self, e) -> bool:
+    """`0x421FE0`（0x29000019 入场舱，thunk 0x401CCB）：跟随主位。
+
+    [0x18]=-1；x=主.x+[0x20]、y=主.y+[0x24]、node dst=(x-0x18,y-0x18)；
+    主死 → beh=0x401852(0x422DD0) return 1；主态字变 且 [0x2C]≠0 → [0x2C]=1；
+    [0x2C]−−==0 → return 0（寿终）。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    x = main.s32(0x04) + e.s32(0x20)
+    y = main.s32(0x08) + e.s32(0x24)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if main.m[0x34] == 0:
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    if main.g32(0x1C) != e.g32(0x28) and e.g32(0x2C) != 0:
+        e.d32(0x2C, 1)
+    v = e.s32(0x2C)
+    e.d32(0x2C, (v - 1) & 0xFFFFFFFF)
+    return v != 1                                   # 0x422054 je（减前==1 → 死）
+
+
+def _beh_422DD0(self, e) -> bool:
+    """`0x422DD0`（掉落自爆，thunk 0x401852）：主亡后的舱体自由坠落。
+
+    type≠0x29000022 → 改型并 [0x1C]=rand&0x7F；t=++[0x1C]；y+=t>>4、x-=t>>5；
+    node dst=(x-0x18,y-0x18)；(t&7)==0 → 0x41000004 @(x,y) prm={rand&0x1F,rand&0x1F}
+    入 0x4AD4CC；return y<0x1F8。"""
+    if e.g32(0x14) != 0x29000022:
+        e.d32(0x14, 0x29000022)
+        e.d32(0x1C, rng.randrange(0x7FFFFFFF) & 0x7F)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    e.d32(0x08, (e.s32(0x08) + (t >> 4)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) - (t >> 5)) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    if (t & 7) == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x41000004, e.s32(0x04), e.s32(0x08),
+                   (rng.randrange(0x7FFFFFFF) & 0x1F, rng.randrange(0x7FFFFFFF) & 0x1F))
+    return e.s32(0x08) < 0x1F8
+
+
+def _beh_4220A0(self, e) -> bool:
+    """`0x4220A0`（0x2900001A 编队僚机，thunk 0x401384）：缓动追随主位。
+
+    [0x18]=-1；[0x20]+=(Δ+carry)>>4（Δ=[0x28]-[0x20]，≥0 加 0xF）、[0x24] 同理向 [0x2C]；
+    x=主.x+[0x20]、y=主.y+[0x24]、node dst=(x-0x18,y-0x18)；主死 → beh=0x401852 return 1；
+    [0x30]−−==0 → return 0。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    d = e.s32(0x28) - e.s32(0x20)
+    e.d32(0x20, (e.s32(0x20) + ((d + 0xF if d >= 0 else d) >> 4)) & 0xFFFFFFFF)
+    d = e.s32(0x2C) - e.s32(0x24)
+    e.d32(0x24, (e.s32(0x24) + ((d + 0xF if d >= 0 else d) >> 4)) & 0xFFFFFFFF)
+    x = main.s32(0x04) + e.s32(0x20)
+    y = main.s32(0x08) + e.s32(0x24)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if main.m[0x34] == 0:
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    v = e.s32(0x30)
+    e.d32(0x30, (v - 1) & 0xFFFFFFFF)
+    return v != 1
+
+
+def _beh_422170(self, e) -> bool:
+    """`0x422170`（0x2900001B 隐形追踪卫星，thunk 0x40140B）：转向自机的 pod 播撒器。
+
+    m = (主态字>>0xF)&1 ? 5 : 3；t=[0x2C]。
+    t%m==0 → 生成两只 0x29000019：A{+0x20=(0xB4-t)/m-t+0xB5, +0x24=1, +0x2C=[0x20]}
+    与 B{+0x20 同-1, +0x2C=0}（rect 均 if 式、+0x28=主态字）。
+    移动：步长 s=(bl?13:8)：[0x28]&1 → [0x20]+= ([0x28]&2? -s:+s)；
+    否则 [0x24]+= ([0x28]&2? +s:-s)。方向修正（[0x30]<4，跳表 0x4223C0）：
+      case0: y<py → dir = x≥px?3:1；case1: x>px → dir = y≥py?0:2；
+      case2: y>py → dir = x≥px?3:1；case3: x<px → dir = y≥py?0:2（否则保持）。
+      变向 → [0x28]=dir、[0x30]+=1。
+    每帧生成 C：pod {+0x20=1, +0x24=1, +0x2C=[0x20], rect=[0x24]→if}。
+    x=主.x+[0x20]、y=主.y+[0x24]（自身 node 隐藏不显示）。
+    主死 → beh=0x401852 return 1；t≥0xB4 → return 0；否则 t+=1 return 1。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    st_m = main.g32(0x1C)
+    bl = (st_m >> 0xF) & 1
+    m = 5 if bl else 3
+    t = e.s32(0x2C)
+    px = self.p4_stat.get(0x56CC8C, 0)
+    py = self.p4_stat.get(0x56CC90, 0)
+    if t % m == 0:                                    # 0x4221E4
+        off = (0xB4 - t) // m - t + 0xB5              # 0x422209 divmod + 0x422213 链
+        for o2, life in ((off, e.s32(0x20)), (off - 1, 0)):   # A/B
+            c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)
+            self.p4_links[id(c) & 0x7FFFFFFF] = c
+            c.d32(0x20, o2 & 0xFFFFFFFF)
+            c.d32(0x24, 1)
+            c.d32(0x28, st_m)
+            c.d32(0x2C, life & 0xFFFFFFFF)
+            if c.node is not None:
+                c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
+                c.node.dst = (-0x30, -0x30)
+    step = 13 if bl else 8                            # 0x42225E neg/sbb/and 5/add 8
+    d = e.s32(0x28)
+    if d & 1:
+        e.d32(0x20, (e.s32(0x20) + (-step if (d & 2) else step)) & 0xFFFFFFFF)
+    else:
+        e.d32(0x24, (e.s32(0x24) + (step if (d & 2) else -step)) & 0xFFFFFFFF)
+    x = main.s32(0x04) + e.s32(0x20)
+    y = main.s32(0x08) + e.s32(0x24)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.s32(0x30) < 4:                               # 0x42229B 方向修正
+        nd = d
+        if d == 0:
+            if y < py:
+                nd = 3 if x >= px else 1
+        elif d == 1:
+            if x > px:
+                nd = 0 if y >= py else 2
+        elif d == 2:
+            if y > py:
+                nd = 3 if x >= px else 1
+        else:
+            if x < px:
+                nd = 0 if y >= py else 2
+        if nd != d:
+            e.d32(0x28, nd)
+            e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)
+    # 每帧 C（0x422330）：p0={1,1}、p1={[0x20],[0x24]}
+    c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)
+    self.p4_links[id(c) & 0x7FFFFFFF] = c
+    c.d32(0x20, 1)
+    c.d32(0x24, 1)
+    c.d32(0x28, st_m)
+    c.d32(0x2C, e.s32(0x20) & 0xFFFFFFFF)
+    if c.node is not None:
+        c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
+        c.node.dst = (-0x30, -0x30)
+    if main.m[0x34] == 0:                             # 0x42237F
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    if t < 0xB4:                                      # 0x422397
+        e.d32(0x2C, (t + 1) & 0xFFFFFFFF)
+        return True
+    return False
+
+
+def _beh_422470(self, e) -> bool:
+    """`0x422470`（0x2900001C 弧线小机，thunk 0x401C7B）：绕主圆弧 + 随机点开火。
+
+    aimed=(主态字>>0xF)&1；t=[0x24]；ang = (aimed ? (t<0x12C?0:t*3-0x384) : t)*20；
+    x=主.x+((cos(ang)*[0x20])+0x7F>>8)+0x78、y=主.y+((sin(ang)*[0x20])+0x7F>>8)-0x18；
+    t==0x5A/0x10E → 0x41FFF0(this, rand%0x280, rand%0x1E0, 0x340)；
+    node dst=(x-0x18,y-0x18)；主死 → beh=0x401852 return 1；t≥0x168 → return 0。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    aimed = (main.g32(0x1C) >> 0xF) & 1
+    t = e.s32(0x24)
+    base = (0 if t < 0x12C else t * 3 - 0x384) if aimed else t
+    ang = base * 20
+    r = e.s32(0x20)
+    x = main.s32(0x04) + (((page4_cos(ang) * r) + 0x7F) >> 8) + 0x78
+    y = main.s32(0x08) + (((page4_sin(ang) * r) + 0x7F) >> 8) - 0x18
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if t == 0x5A or t == 0x10E:                       # 0x4224F6
+        r1 = rng.randrange(0x7FFFFFFF)
+        r2 = rng.randrange(0x7FFFFFFF)
+        p4_41fff0(self, e, r2 % 0x280, r1 % 0x1E0, 0x340)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if main.m[0x34] == 0:
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    if t >= 0x168:                                    # 0x42256A
+        return False
+    e.d32(0x24, (t + 1) & 0xFFFFFFFF)
+    return True
+
+
+def _beh_4225E0(self, e) -> bool:
+    """`0x4225E0`（0x2900001D 下降卫星，thunk 0x40209F）：先降后升 + 双段 pod 播撒。
+
+    t=[0x28]；t%5==0 且 t<0x3C → pod{+0x20=[0x20],+0x24=[0x24],+0x2C=2*(0x87-t),rect else}；
+    t<0x3C → [0x20]-=4、[0x24]-=7；t≥0xD2 → [0x20]+=4、[0x24]+=7；
+    x=主.x+[0x20]、y=主.y+[0x24]、node dst=(x-0x18,y-0x18)；
+    每帧 pod{+0x20=[0x20],+0x24=[0x24],+0x2C=1,rect if}；
+    t==0x3C → 14×0x2900001E @(0x280, y=-0x18-0x28*i)（i=0..13，y>−0x230 门）prm=主；
+    主死 → beh=0x401852 return 1；return [0x24]!=-0xA8。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    st_m = main.g32(0x1C)
+    t = e.s32(0x28)
+    if t % 5 == 0 and t < 0x3C:                       # 0x422649
+        c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)
+        self.p4_links[id(c) & 0x7FFFFFFF] = c
+        c.d32(0x20, e.g32(0x20))
+        c.d32(0x24, e.g32(0x24))
+        c.d32(0x28, st_m)
+        c.d32(0x2C, (2 * (0x87 - t)) & 0xFFFFFFFF)
+        if c.node is not None:
+            c.node.rect = (0x180, 0x120, 0x1AF, 0x14F)
+            c.node.dst = (-0x30, -0x30)
+    if t < 0x3C:                                      # 0x422693
+        e.d32(0x20, (e.s32(0x20) - 4) & 0xFFFFFFFF)
+        e.d32(0x24, (e.s32(0x24) - 7) & 0xFFFFFFFF)
+    elif t >= 0xD2:                                   # 0x4226A4
+        e.d32(0x20, (e.s32(0x20) + 4) & 0xFFFFFFFF)
+        e.d32(0x24, (e.s32(0x24) + 7) & 0xFFFFFFFF)
+    x = main.s32(0x04) + e.s32(0x20)
+    y = main.s32(0x08) + e.s32(0x24)
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)   # 0x4226DA 每帧 pod
+    self.p4_links[id(c) & 0x7FFFFFFF] = c
+    c.d32(0x20, e.g32(0x20))
+    c.d32(0x24, e.g32(0x24))
+    c.d32(0x28, st_m)
+    c.d32(0x2C, 1)
+    if c.node is not None:
+        c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
+        c.node.dst = (-0x30, -0x30)
+    if t == 0x3C:                                     # 0x42270A：0x2900001E 纵列
+        yk = -0x18
+        while yk > -0x230:
+            self._p4_ent43c(0x2900001E, 0x280, yk, id(main) & 0x7FFFFFFF)
+            yk -= 0x28
+    e.d32(0x28, (t + 1) & 0xFFFFFFFF)
+    if main.m[0x34] == 0:                             # 0x422773
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    return e.s32(0x24) != -0xA8                       # 0x422791 setne
+
+
+def _beh_422830(self, e) -> bool:
+    """`0x422830`（0x2900001E 阶梯下落小机，thunk 0x401474）：竖直坠落 + 每 16 帧变向。
+
+    y+=[0x20]、node dst.y+=[0x20]；aimed=(主态字>>0xF)&1；t=[0x24]+1；
+    t%16==8 → [0x20]=-0x40；elif t%16==0 → [0x20]=0x40 且
+    （aimed ? (node dst.x=px-0x18, x=px) : (node dst.x-=0x50, x-=0x50)）；
+    主死 → beh=0x401852 return 1；return t<=0x90。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    v = e.s32(0x20)
+    e.d32(0x08, (e.s32(0x08) + v) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0], e.node.dst[1] + v)     # 0x422855 node+0x18 += [0x20]
+    aimed = (main.g32(0x1C) >> 0xF) & 1
+    t = (e.s32(0x24) + 1) & 0xFFFFFFFF
+    e.d32(0x24, t)
+    if t % 16 == 8:                                   # 0x42287C
+        e.d32(0x20, -0x40 & 0xFFFFFFFF)
+    elif t % 16 == 0:                                 # 0x422899
+        e.d32(0x20, 0x40)
+        if aimed:                                     # 0x4228A8
+            px = self.p4_stat.get(0x56CC8C, 0)
+            if e.node is not None:
+                e.node.dst = (px - 0x18, e.node.dst[1])
+            e.d32(0x04, px & 0xFFFFFFFF)
+        else:                                         # 0x4228BE
+            if e.node is not None:
+                e.node.dst = (e.node.dst[0] - 0x50, e.node.dst[1])
+            e.d32(0x04, (e.s32(0x04) - 0x50) & 0xFFFFFFFF)
+    if main.m[0x34] == 0:                             # 0x4228D6
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    return t <= 0x90                                  # 0x4228F8 setle
+
+
+def _beh_422950(self, e) -> bool:
+    """`0x422950`（0x2900001F 摆动小机，thunk 0x401F6E）：固定 x、纵向 cos 摆 + 定点开火。
+
+    [0x18]=-1；x=[0x20]+主.x；n=[0x28]&0xF；
+    y=((cos(113*n)*[0x24])>>8)+主.y-0x18；
+    |[0x24]|==0x90 且 0xB4<[0x28]<0x12C 且 [0x28]&3==0 →
+      aimed ? 0x41FFF0(this,px,py,0x340) : 0x41FFF0(this,this.x,([0x28]&4?0x1E0:0),0x340)；
+    node dst=(x-0x18,y-0x18)；主死 → beh=0x401852 return 1；
+    [0x28]≥0x12C → return 0；else ++[0x28] return 1。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    e.d32(0x18, -1 & 0xFFFFFFFF)
+    if main is None:
+        return False
+    aimed = (main.g32(0x1C) >> 0xF) & 1
+    t = e.s32(0x28)
+    n = t & 0xF
+    x = e.s32(0x20) + main.s32(0x04)
+    y = _p4_idiv(page4_cos(113 * n) * e.s32(0x24), 256) + main.s32(0x08) - 0x18
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if abs(e.s32(0x24)) == 0x90 and 0xB4 < t < 0x12C and (t & 3) == 0:
+        if aimed:                                     # 0x4229CE
+            p4_41fff0(self, e, self.p4_stat.get(0x56CC8C, 0),
+                      self.p4_stat.get(0x56CC90, 0), 0x340)
+        else:                                         # 0x4229DE
+            p4_41fff0(self, e, x, (0x1E0 if (t & 4) else 0), 0x340)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    if main.m[0x34] == 0:                             # 0x422A14
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
+        return True
+    if t >= 0x12C:                                    # 0x422A29
+        return False
+    e.d32(0x28, (t + 1) & 0xFFFFFFFF)
+    return True
+
+
+def _beh_422A90(self, e) -> bool:
+    """`0x422A90`（0x29000020 卫星环射体，thunk 0x401A82）：先跟主、t 归零后下坠、
+    低处环形 5 连弹后自灭。
+
+    aimed=(主态字>>0xF)&1；[0x18]≠0 → [0x18]=-1（免伤）；t=[0x28]-1；
+    t>0 → x=主.x+[0x20]、y=主.y+[0x24]；t==0 → [0x20]=0、[0x24]=-0x112；
+    t<0 → x+=[0x20]、[0x24]+=1、y+=[0x24]、[0x20]+= (x<=0x140?1:-1)。
+    node dst=(x-0x18,y-0x18)；[0x18]==0 或 t==0x29E → return 0；
+    t<0 且 [0x24]>0 且 (2y>py+0x1E0 或 y>0x1B8) → 环射：
+      spd=0x340+(aimed?0x200:0)；k=0.. while 0x340+0x80k<=spd：d=(px-x,py-y)
+        (px,py, -(0x340+0x80k))；player+(dy,-dx)；player+(-dy,dx)；
+        player+2(dy,-dx)；player+(dx-dy,dx+dy)——各 spd=0x340+0x80k
+      → return 0（射完自灭）。"""
+    main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None:
+        return False
+    aimed = (main.g32(0x1C) >> 0xF) & 1
+    if e.g32(0x18) != 0:                              # 0x422AA7
+        e.d32(0x18, -1 & 0xFFFFFFFF)
+    t = (e.s32(0x28) - 1) & 0xFFFFFFFF
+    e.d32(0x28, t)
+    ts = t - 0x100000000 if t & 0x80000000 else t
+    if ts > 0:                                        # 0x422ABF
+        e.d32(0x04, (main.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)
+        e.d32(0x08, (main.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF)
+    elif ts == 0:                                     # 0x422ADA
+        e.d32(0x20, 0)
+        e.d32(0x24, -0x112 & 0xFFFFFFFF)
+    else:                                             # 0x422B3A
+        e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)
+        e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF)
+        v = e.s32(0x20)
+        e.d32(0x20, (v + (1 if e.s32(0x04) <= 0x140 else -1)) & 0xFFFFFFFF)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)             # 0x422AE8
+    if e.g32(0x18) == 0 or ts == 0x29E:               # 0x422B15
+        return False
+    if ts >= 0:                                       # 0x422B66 jge → 存活尾
+        return True
+    if e.s32(0x24) <= 0:                              # 0x422B71
+        return True
+    py = self.p4_stat.get(0x56CC90, 0)
+    if not (2 * y > py + 0x1E0 or y > 0x1B8):         # 0x422B8B
+        return True
+    spd = 0x340 + (0x200 if aimed else 0)             # 0x422B9B
+    k = 0
+    while 0x340 + 0x80 * k <= spd:                    # 0x422C82 jle
+        sp = 0x340 + 0x80 * k
+        px = self.p4_stat.get(0x56CC8C, 0)
+        py = self.p4_stat.get(0x56CC90, 0)
+        dx = px - x
+        dy = py - y
+        p4_41fff0(self, e, px, py, -sp)               # 0x422BEC 朝自机负速
+        p4_41fff0(self, e, px + dy, py - dx, sp)      # 0x422C05 player+rot-90(d)
+        p4_41fff0(self, e, px - dy, py + dx, sp)      # 0x422C1F player+rot+90(d)
+        p4_41fff0(self, e, px + 2 * dy, py - 2 * dx, sp)   # 0x422C46 player+2rot-90(d)
+        p4_41fff0(self, e, px + dx - dy, py + dx + dy, sp)  # 0x422C66 player+2rot+45(d)
+        k += 1
+    return False                                      # 0x422C92 射完自灭
+
+
+def _beh_40A020(self, e) -> bool:
+    """`0x40A020`（0x2D00001C/1D 环轨部件，thunk 0x4014AB）：随主 → 角度收敛环轨 →
+    0xC8 帧散开（HP=0xA）→ 直线飞出屏。
+
+    主=[0x1C]；主死 → return 0；[0x30]==0 且 [0x2C]<0xA → 链生一只自身
+    （rec={主, self, type, [0x2C]+1}；子 +0x24=主[0x20]、+0x28=p3*450、+0x2C=p3）。
+    [0x20]!=0（环轨）：word[0x28] 收敛到 word[主+0x28]（±1800 环绕、word[0x2A] ±5/±10）、
+    word[0x28]+=word[0x2A]；x8.4=word[主+0x24]低16+(7*(cos我+cos主))>>3、y8.4 同理 sin；
+    x/y = (short)x8.4>>4；word[0x24]=x8.4、word[0x26]=y8.4；
+    type==0x2D00001C 且 [0x30]==0xC8 → 散开：[0x2C]=((sin&~1)<<15)|((cos>>1)&0xFFFF)
+    （rand%3600 的 sin/cos）、[0x20]=0、[0x18]=0xA（HP=0xA，可击破）；
+    0x409760 节点同步；[0x30]++；主死 → return 0。
+    [0x20]==0 且 [0x2C]!=0（自由飞）：word[0x24/26]+=word[0x2C/2E]；x/y=(short)>>4；
+    0x409760；0x4305F0(e,0x10) 不在屏 或 HP==0 → return 0。
+    待机（[0x20]==0 且 [0x2C]==0）：[0x24]=主[0x20]（打包位）、x=(short)低16>>4、
+    y=(short)高16>>4；[0x30]++；return [0x30]<0xCA（0x2D00001B 分支对本型不可达）。"""
+    links = self.p4_links
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if main is None or main.m[0x34] == 0:             # 0x40A033
+        return False
+    typ = e.g32(0x14)
+    if e.s32(0x30) == 0 and e.s32(0x2C) < 0xA:        # 0x40A044 链生
+        c = self._p4_ent43c(typ, id(main) & 0x7FFFFFFF, id(e) & 0x7FFFFFFF,
+                            (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+        links[id(c) & 0x7FFFFFFF] = c
+        links[id(main) & 0x7FFFFFFF] = main
+        c.d32(0x24, main.g32(0x20))                   # 0x40835C *(p0+0x20)
+        c.d32(0x28, ((e.s32(0x2C) + 1) * 450) & 0xFFFFFFFF)   # 0x40836A
+        c.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)   # 0x408385
+        if c.node is not None:
+            c.node.rect = (0, 0, 0, 0)
+            c.node.dst = (0, 0)
+    if e.s32(0x20) != 0:                              # 0x40A0FD 环轨
+        pa = main.g16(0x28)
+        pa = pa - 0x10000 if pa & 0x8000 else pa
+        ma = e.g16(0x28)
+        ma = ma - 0x10000 if ma & 0x8000 else ma
+        diff = pa - ma                                # 0x40A107
+        if diff > 0x708:                              # 0x40A109 环绕归一（/45 魔数）
+            diff -= ((diff + 0x707) // 45) * 360
+        if diff <= -0x708:
+            diff += ((0x708 - diff) // 45) * 360
+        va = e.g16(0x2A)                              # 0x40A15C 角速度修正
+        vas = va - 0x10000 if va & 0x8000 else va
+        if diff > 0:
+            vas = vas + 0xA if vas < 0 else (vas if vas >= 0x3C else vas + 5)
+        elif diff < 0:
+            vas = vas - 0xA if vas > 0 else (vas if vas <= -0x3C else vas - 5)
+        e.d16(0x2A, vas & 0xFFFF)
+        ma = (ma + vas) & 0xFFFF                      # 0x40A19A word[0x28]+=word[0x2A]
+        e.d16(0x28, ma)
+        mas = ma - 0x8000 if ma & 0x8000 else ma
+        cs = page4_cos(mas) + page4_cos(pa)
+        sn = page4_sin(mas) + page4_sin(pa)
+        x84 = (e.g16(0x24) - 0x10000 if e.g16(0x24) & 0x8000 else e.g16(0x24)) \
+            + ((cs * 7) >> 3)
+        y84 = (e.g16(0x26) - 0x10000 if e.g16(0x26) & 0x8000 else e.g16(0x26)) \
+            + ((sn * 7) >> 3)
+        x84 = (x84 - 0x10000 if x84 & 0x8000 else x84) & 0xFFFF
+        y84 = (y84 - 0x10000 if y84 & 0x8000 else y84) & 0xFFFF
+        e.d16(0x24, x84)
+        e.d16(0x26, y84)
+        e.d32(0x04, ((x84 - 0x8000 if x84 & 0x8000 else x84) >> 4) & 0xFFFFFFFF)
+        e.d32(0x08, ((y84 - 0x8000 if y84 & 0x8000 else y84) >> 4) & 0xFFFFFFFF)
+        if typ == 0x2D00001C and e.s32(0x30) == 0xC8:  # 0x40A215 散开
+            r = rng.randrange(0x7FFFFFFF)
+            ang = r % 0xE10
+            sv = page4_sin(ang)
+            cv = page4_cos(ang)
+            e.d32(0x2C, (((sv & -2) << 15) | ((cv >> 1) & 0xFFFF)) & 0xFFFFFFFF)
+            e.d32(0x20, 0)                            # 0x40A296
+            e.d32(0x18, 0xA)                          # HP=0xA（可击破）
+        p4_409760(self, e)                            # 0x40A2C0
+        e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)
+        if e.s32(0x20) == 0:                          # 0x40A2CC 散开当帧仍存活
+            return True
+        return main.m[0x34] != 0                      # 0x40A2D3 主死 → 0
+    if e.s32(0x2C) != 0:                              # 0x40A2E8 自由飞
+        w24 = (e.g16(0x24) + e.g16(0x2C)) & 0xFFFF
+        w26 = (e.g16(0x26) + e.g16(0x2E)) & 0xFFFF
+        e.d16(0x24, w24)
+        e.d16(0x26, w26)
+        e.d32(0x04, ((w24 - 0x8000 if w24 & 0x8000 else w24) >> 4) & 0xFFFFFFFF)
+        e.d32(0x08, ((w26 - 0x8000 if w26 & 0x8000 else w26) >> 4) & 0xFFFFFFFF)
+        p4_409760(self, e)                            # 0x40A314
+        if not self.p4_4305f0(e, 0x10):               # 0x40A319
+            return False
+        return e.g32(0x18) != 0                       # 0x40A326
+    # 待机（[0x20]==0 且 [0x2C]==0）0x40A097
+    packed = main.g32(0x20)
+    e.d32(0x24, packed)                               # 0x40A0B4
+    lo = packed & 0xFFFF
+    hi = (packed >> 16) & 0xFFFF
+    e.d32(0x04, ((lo - 0x8000 if lo & 0x8000 else lo) >> 4) & 0xFFFFFFFF)
+    e.d32(0x08, ((hi - 0x8000 if hi & 0x8000 else hi) >> 4) & 0xFFFFFFFF)
+    e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)       # 0x40A0C7
+    return e.s32(0x30) < 0xCA                         # 0x40A0EA
+
+
+
+def _beh_40EBB0(self, e) -> bool:
+    """`0x40EBB0`（0x2300000B，thunk 0x401D75）：左飘机——首帧生 0x2300000C 随从、
+    每 0x80 帧 0x1F 相位朝自机发弹、t=0x1E0 起加速。
+
+    t=[0x1C]++；t==0 → 0x2300000C @(x,y) prm=0 入 0x4AD43C；t==0x1E0 → [0x20]=1；
+    (t&0x7F)==0x1F → 0x43B070(this,0)（朝自机弹）；[0x20]≠0 → ++[0x20]；
+    [0x24] += (y>0xF0 ? -1 : +1)；x += [0x20]>>1；y += [0x24]>>4；
+    node dst=(x-0x18,y-0x18)；return x<0x298 且 HP≠0。"""
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t == 0:                                        # 0x40EBC4
+        self._p4_ent43c(0x2300000C, e.s32(0x04), e.s32(0x08), 0)
+    elif t == 0x1E0:                                  # 0x40EBFF
+        e.d32(0x20, 1)
+    elif (t & 0x7F) == 0x1F:                          # 0x40EC10
+        self.p4_43B070(e, 0)
+    if e.s32(0x20) != 0:                              # 0x40EC21
+        e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    v = e.s32(0x24)
+    e.d32(0x24, (v + (-1 if e.s32(0x08) > 0xF0 else 1)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) + (e.s32(0x20) >> 1)) & 0xFFFFFFFF)   # sar 1
+    e.d32(0x08, (e.s32(0x08) + (e.s32(0x24) >> 4)) & 0xFFFFFFFF)   # sar 4
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return e.s32(0x04) < 0x298 and e.g32(0x18) != 0
+
+
+def _beh_40ECE0(self, e) -> bool:
+    """`0x40ECE0`（0x2300000C，thunk 0x401609）：随从——[0x1C] 指向 0x2300000B 主。
+
+    [0x1C]==0 → x-=8；主死 → [0x1C]=0；否则 目标 = 主位 + (自机-主位)>>2，
+    x += (目标x-x+4)>>3、y += (目标y-y+4)>>3；node dst=(x-0x18,y-0x18)；
+    return 0x4305F0(this,0x18) 在屏 且 HP≠0。"""
+    t = e.s32(0x1C)
+    if t == 0:                                        # 0x40ECEA
+        e.d32(0x04, (e.s32(0x04) - 8) & 0xFFFFFFFF)
+    else:
+        main = self.p4_links.get(t & 0x7FFFFFFF)
+        if main is None or main.m[0x34] == 0:         # 0x40ECF0
+            e.d32(0x1C, 0)
+        else:
+            px = self.p4_stat.get(0x56CC8C, 0)
+            py = self.p4_stat.get(0x56CC90, 0)
+            tx = main.s32(0x04)
+            ty = main.s32(0x08)
+            gx = tx + ((px - tx) >> 2)                # 0x40ED00 链
+            gy = ty + ((py - ty) >> 2)
+            e.d32(0x04, (e.s32(0x04) + ((gx - e.s32(0x04) + 4) >> 3)) & 0xFFFFFFFF)
+            e.d32(0x08, (e.s32(0x08) + ((gy - e.s32(0x08) + 4) >> 3)) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return self.p4_4305f0(e, 0x18) and e.g32(0x18) != 0
+
+
+_P40F190_SCHED = (0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1,
+                  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2,
+                  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 3)
+
+
+def _beh_40F190(self, e) -> bool:
+    """`0x40F190`（0x23000010 中 boss，thunk 0x402040）：入场（HP 0x40 步泻 + 放大）
+    → x≥0x78 且未受伤 → 待机；受伤 → 闪光帧（rect 滚动 + 半径+0xA + dst 左上移）；
+    t==0x60 → SE(4) + 8 向 0x43B290 环（45° 步）。
+
+    HP≠0xC1 → x 步 5 否则 2；x-=步；HP≠0xC1 → node.dst.x += -4 否则 -2；
+    HP==0 → return 0；x≥0x78 且 [0x28]==HP → return 1（未受伤待机）；
+    t=[0x1C]；t≠0x60 → [0xC]+=0xA、[0x28]-=0x40、HP=[0x28]、
+      rect += {0, t, t+0x14, 0x14}、node.dst += (-0xA,-0xA)、t+=0x14；
+    t==0x60 → SE(4,(x-0x140)<<4) + for a in 0,0x1C2..<0xE10: 0x43B290(e,cos(a),sin(a),0)、return 0。"""
+    hp = e.s32(0x18)
+    step = 5 if hp != 0xC1 else 2
+    e.d32(0x04, (e.s32(0x04) - step) & 0xFFFFFFFF)      # 0x40F1B1
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + (-4 if hp != 0xC1 else -2), e.node.dst[1])
+    hp = e.s32(0x18)                                    # 0x40F1CA 重读
+    if hp == 0:
+        return False
+    x = e.s32(0x04)
+    if x >= 0x78 and e.s32(0x28) == hp:                 # 0x40F1D6 未受伤待机
+        return True
+    t = e.s32(0x1C)
+    if t != 0x60:                                       # 0x40F237 闪光/泻血帧
+        e.d32(0x0C, (e.s32(0x0C) + 0xA) & 0xFFFFFFFF)
+        v28 = (e.s32(0x28) - 0x40) & 0xFFFFFFFF
+        e.d32(0x28, v28)
+        e.d32(0x18, v28)                                # HP=[0x28]
+        if e.node is not None:
+            r = e.node.rect
+            e.node.rect = (r[0], r[1] + t, r[2] + t + 0x14, r[3] + 0x14)   # 0x401A0A
+            e.node.dst = (e.node.dst[0] - 0xA, e.node.dst[1] - 0xA)        # 0x401415
+        e.d32(0x1C, (t + 0x14) & 0xFFFFFFFF)
+        return True                                     # 0x40F27D
+    # t==0x60：SE + 8 向环（0x40F1EF）
+    self.p4_se_pan(4, (e.s32(0x04) - 0x140) << 4)
+    a = 0
+    while a < 0xE10:
+        p4_43B290(self, e, page4_cos(a), page4_sin(a), 0)
+        a += 0x1C2
+    return False
+
+
+def _beh_40F2D0(self, e) -> bool:
+    """`0x40F2D0`（0x23000011 瞬移小机，thunk 0x401DC5）：待机闪烁计时 →
+    0xF 碰撞开 / 0x1F 朝自机弹 / 0x2F 碰撞关 / 0x3F 瞬移（0x50 格步）×5 后改慢移。
+
+    [0x24]++；[0x1C]==0 且 [0x20]==0（待机）：t&3==3 → rect.l/r ±0x30（t≤0x1F 加否则减）；
+    0xF≤t≤0x4E → 调度 _P40F190_SCHED[t-0xF]（0=+0x10 碰撞、1=0x43B070(this,0)、
+    2=清 0x10、3=瞬移、4=无）；瞬移：[0x1C]=(0x140+rand%0x140-x)/0x50、
+    [0x20]=(0x28+rand%0x190-y)/0x50、[0x28]++、[0x24]=0、[0x28]>5 → [0x1C]=0x10。
+    移动态：t==0x50 → [0x1C]=[0x20]=[0x24]=0。
+    x+=[0x1C]、y+=[0x20]、node dst+=(同)；return x≤0x298 且 HP≠0。"""
+    t = (e.s32(0x24) + 1) & 0xFFFFFFFF
+    e.d32(0x24, t)
+    if e.s32(0x1C) == 0 and e.s32(0x20) == 0:         # 0x40F2F6 待机
+        if (t & 3) == 3 and e.node is not None:       # 0x40F2FB rect 脉冲
+            dl = 0x30 if t <= 0x1F else -0x30
+            r = e.node.rect
+            e.node.rect = (r[0] + dl, r[1], r[2] + dl, r[3])
+        d = t - 0xF
+        if 0 <= d <= 0x30:                            # 0x40F32E ja（无符号界）
+            act = _P40F190_SCHED[d]
+            if act == 0:                              # 0x40F346
+                e.m[0x10] = 1
+            elif act == 1:                            # 0x40F34F
+                self.p4_43B070(e, 0)
+            elif act == 2:                            # 0x40F35C
+                e.m[0x10] = 0
+            elif act == 3:                            # 0x40F364 瞬移
+                r = rng.randrange(0x7FFFFFFF)
+                q1, r1 = divmod(r, 0x140)
+                e.d32(0x1C, ((0x140 + r1 - e.s32(0x04)) // 0x50) & 0xFFFFFFFF)
+                r = rng.randrange(0x7FFFFFFF)
+                q3, r3 = divmod(r, 0x190)
+                e.d32(0x20, ((0x28 + r3 - e.s32(0x08)) // 0x50) & 0xFFFFFFFF)
+                v28 = (e.s32(0x28) + 1) & 0xFFFFFFFF
+                e.d32(0x28, v28)
+                e.d32(0x24, 0)
+                if v28 > 5:
+                    e.d32(0x1C, 0x10)                 # 0x40F3D4
+    else:                                             # 0x40F3DD 移动态
+        if t == 0x50:
+            e.d32(0x1C, 0)
+            e.d32(0x20, 0)
+            e.d32(0x24, 0)
+    dx = e.s32(0x1C)
+    dy = e.s32(0x20)
+    e.d32(0x04, (e.s32(0x04) + dx) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + dx, e.node.dst[1] + dy)   # 0x40F402 0x401415
+    return e.s32(0x04) <= 0x298 and e.g32(0x18) != 0
+
+
 
 
 def _beh_4070E0(self, e) -> bool:
@@ -10713,6 +11976,22 @@ P4_BEH: dict[int, object] = {
     0x41FE10: _beh_41FE10,                          # 批38
     0x41F860: _beh_41F860,                          # 批39
     0x41F010: _beh_41F010,                          # 批40
+    # —— 0x29 族高段 + 0x2D00001C（2026-11-11 批78）——
+    0x4200C0: _beh_4200C0,                          # 0x29000018 关8真boss（九态）
+    0x421FE0: _beh_421FE0,                          # 0x29000019 入场舱
+    0x422DD0: _beh_422DD0,                          # 舱体掉落自爆（0x401852）
+    0x4220A0: _beh_4220A0,                          # 0x2900001A 编队僚机
+    0x422170: _beh_422170,                          # 0x2900001B 隐形追踪卫星
+    0x422470: _beh_422470,                          # 0x2900001C 弧线小机（0x401C7B）
+    0x4225E0: _beh_4225E0,                          # 0x2900001D 下降卫星
+    0x422830: _beh_422830,                          # 0x2900001E 阶梯下落小机
+    0x422950: _beh_422950,                          # 0x2900001F 摆动小机
+    0x422A90: _beh_422A90,                          # 0x29000020 卫星环射体
+    0x40A020: _beh_40A020,                          # 0x2D00001C/1D 环轨部件
+    0x40EBB0: _beh_40EBB0,                          # 0x2300000B 左飘机
+    0x40ECE0: _beh_40ECE0,                          # 0x2300000C 随从
+    0x40F190: _beh_40F190,                          # 0x23000010 中boss
+    0x40F2D0: _beh_40F2D0,                          # 0x23000011 瞬移小机
     0x40A930: _beh_40A930,                          # 批41
     0x40B040: _beh_40B040,                          # 批42
     0x40CE90: _beh_40CE90,                          # 批43
