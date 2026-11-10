@@ -2278,6 +2278,8 @@ class Pages(Page4Mixin):
                 self._bar_block(e)
             elif e.beh == "scene_segment":
                 self._scene_segment(e)
+            elif e.beh == "rank_cell":
+                self._rank_cell(e)
             elif e.beh == "psel":
                 self._psel(e)
             elif e.beh == "psel_band":
@@ -2493,77 +2495,107 @@ class Pages(Page4Mixin):
             self._rank_tail(e, seg, bl)
             return
 
-    # ---- 0x43E4C0 态0/1：排行榜画面构建 ------------------------------------
+    # ---- 0x43E4C0 态0/1：排行榜画面构建（层13 ← 资源15 bm_cmrc 字形片） ----
     def _rank_build(self, e: UiEntity, seg: int, lim: int, bl: int) -> None:
+        """0x43E4C0..0x43E702（2026-11-11 转写）。
+
+        0x4018B6→0x44B0A0：4FC 队列整备。0x4017D5(this, seg, 0xF)→0x43DD20：
+        读选中项 → 0x44C640(层13, 资源15 bm_cmrc) + 0x44CE60(13, 0) 色键 +
+        0x45FE10(0x4100000D, 项+0x4C) 放大窗。
+        行环 i=0..seg：每行 = 框架格(rec1=0x10001) + 得分十进制位（0x402185：
+        低位在 x=0xD8、步 -0x18，格号 = r*8+1）+ 10 字名字格（项+0x12 起）。
+        头部 0x49875B 14 项 / 标签 0x4987AC / 关卡图标 0x498794 同为格切片。
+        格 → rect：l=24w、t=24b、r=24w+24h-1、b=24b+23（w=格号>>3、b=格号&7、
+        h=rec1 高 16 位）。页2 冻结金标期间只在页5 构建。"""
         e.aux = seg                                  # [+0x24] = 当前段
         if self.page != 5:
-            return                                   # 页2 冻结金标：不做视觉构建（见 docstring）
-        self._rank_sel = seg                         # 0x4017D5(this, seg, 0xF) 的选中行
-        # 0x43E4C0：0x61000005 闪光 rec{0,-0xFF,typ,8}
-        f = self.spawn_flash(0, -0xFF, 8)
-        f.disp = None
-        # 0x43E509 0x4018B6→0x44B0A0：4FC 队列整备（复刻侧清空重铺）
-        self.ui4fc.clear()
-        texts = []
-        # 0x43E50E..0x43E56C：头部表 0x49875B（4B/项，终止 0）→ 字形格切片
-        #   rec0 = ((b0<<16 | 6) << 3)（dst = (0x30, b0*8)）、rec1 = b1|b2<<16（格号）
-        tbl = RANK_HEADER_RECORDS
-        for (b0, b1, b2) in tbl:
-            dx, dy = 0x30, b0 * 8
-            texts.append({"str": _rank_cell_text(b1, b2), "x": dx, "y": dy,
-                          "h": 0x18, "fg": 0xD9})
-        # 0x43E56E..0x43E5DA：0x4987AC 标签表（[帧+0x20] 从 0x148/0x190 起、步 0x18）
-        base_x = 0x190 if self.scene_ab else 0x148
-        y = 0x190 if self.scene_ab else 0x148
-        k = 0
-        for (cell, term) in RANK_LABEL_RECORDS:
-            if term == 0:
+            return
+        self._rank_sel = seg
+        # 0x4017D5 → 0x43DD20：层13 ← 资源15 + 色键 0（选中项相关参在零表下为 0）
+        self.layers.load(13, 15)
+        self.layers.color_key(13, 0)
+        self.ui4fc.clear()                           # 0x44B0A0 队列整备
+        # 0x43E4C0：rec={x=-0xFF, y=0, 0x61000005, 8} → 亮度 -0xFF → 0 步 8（淡入）
+        self.spawn_flash(-0xFF, 0, 8)
+        # 头部表 0x49875B（4B/项：b0=dst-y/8、b1=格号低、b2=格宽单位）
+        for (b0, b1, b2) in RANK_HEADER_RECORDS:
+            self._rank_spawn_cell((6 << 3) | ((b0 << 3) << 16), b1 | (b2 << 16), 0)
+        # 标签 0x4987AC（格号表，0 终止；x 从 0x148/0x190 起、步 0x18；y 同步进）
+        x0 = 0x190 if self.scene_ab else 0x148
+        y0 = 0x190 if self.scene_ab else 0x148
+        for (cell, cont) in RANK_LABEL_RECORDS:
+            if cont == 0:
                 break
-            texts.append({"str": _rank_cell_text(cell >> 3, cell & 7),
-                          "x": base_x + 0x18 * k, "y": y, "h": 0x18, "fg": 0xD9})
-            y += 0x18
-            k += 1
-        # 0x43E5DC..0x43E60A：旗标1 → 附加行 {0x1800148, 0x30040}
+            self._rank_spawn_cell((x0 << 16) | y0, cell | 0x10000, 0)
+            y0 += 0x18
+        # 旗标1 → 附加格（0x43E5F0：rec0=0x1800148、rec1=0x30040）
         if self.keys.test(1):
-            texts.append({"str": "", "x": 0x148, "y": 0x180, "h": 0x18, "fg": 0xD9})
-        # 0x43E60F 0x4017D5(this, seg, 0xF)：选中行详绘（0x43DD20）——复刻侧并入行环
-        # 0x43E619..0x43E702：行环 i=0..seg（排行行：框架 + 得分数字 + 10 字名字）
+            self._rank_spawn_cell(0x1800148, 0x30040, 0)
+        # 行环（0x43E619..0x43E702）
         for i in range(min(seg + 1, lim)):
             ry = 0x60 + 0x20 * i
             entry = self.p4_45c740_entry(i, self._rank_tbl())
             score = int.from_bytes(entry[0:4], "little")
-            texts.append({"str": _rank_frame_text(i), "x": 0xF0, "y": ry,
-                          "h": 0x18, "fg": 0xD9})
-            # 0x402185(score, 0xD8, ry, i+0x10)：十进制位，低位居 0xD8、步 -0x18
-            if score > 0:
-                v = score
-                xd = 0xD8
-                while v > 0:
-                    v, r = divmod(v, 10)
-                    texts.append({"str": str(r), "x": xd, "y": ry, "h": 0x18, "fg": 0xD9})
-                    xd -= 0x18
-            # 0x43E6B6：名字 10 格（entry+0x12 起，格号字节；0 = 空格）
-            for kk in range(10):
+            self._rank_spawn_cell((0xF0 << 16) | ry, 0x10001, i + 0x10)   # 行框架
+            v = score
+            xd = 0xD8
+            while v > 0:                                                  # 0x402185
+                v, r = divmod(v, 10)
+                self._rank_spawn_cell(((xd & 0xFFFF) << 16) | (ry & 0xFFFF),
+                                      (r * 8 + 1) | 0x10000, i + 0x10)
+                xd -= 0x18
+            for kk in range(10):                                          # 名字 10 格
                 ci = entry[0x12 + kk]
                 if ci:
-                    texts.append({"str": _rank_cell_text(ci >> 3, ci & 7),
-                                  "x": 0x140 + 0x18 * kk, "y": ry, "h": 0x18, "fg": 0xD9})
-            # 日期（entry+0x1C 组：年(+0x30)+1900 / 月 / 日 / 时 / 分 / 秒）
-            yy = int.from_bytes(entry[0x30:0x34], "little") + 0x76C
-            mo = entry[0x22] if entry[0x22] < 100 else 0
-            dd = entry[0x24] if entry[0x24] < 100 else 0
-            if score > 0 and yy >= 1900:
-                texts.append({"str": "%04d/%02d/%02d" % (yy, mo, dd),
-                              "x": 0x220, "y": ry, "h": 0x18, "fg": 0xD9})
-        # 0x43E708..0x43E79A：关卡图标行（0x498794，8 项 3B；当前模式项闪烁）
+                    self._rank_spawn_cell(((0x140 + 0x18 * kk) & 0xFFFF) << 16
+                                          | (ry & 0xFFFF), ci | 0x10000, i + 0x10)
+        # 关卡图标行（0x498794，3B/项 ×8；当前模式项不铺=闪烁）
+        cur_mode = ((1 if self.keys.test(2) else 0)
+                    + (2 if self.keys.test(1) else 0)
+                    + (4 if self.scene_ab else 0))
         for k2, (b0, b1, b2) in enumerate(RANK_ICON_RECORDS):
-            blink = (k2 == ((self.keys.test(2) and 1)
-                            + (2 if self.keys.test(1) else 0)
-                            + (4 if self.scene_ab else 0)))
-            if not blink:
-                texts.append({"str": _rank_cell_text(b1 >> 3, b1 & 7),
-                              "x": (b0 & 0x3FFF) << 2, "y": 0x20, "h": 0x18, "fg": 0xD9})
-        e.texts = texts
+            if k2 != cur_mode:
+                self._rank_spawn_cell((((b0 & 0x3FFF) << 2) & 0xFFFF) | 0x200000,
+                                      b1 | (b2 << 16), 0)
+        e.texts = []
+
+    def _rank_cell(self, e: UiEntity) -> None:
+        """0x425D50（0x5F00001A 行为）：节点显隐节拍。t=++[+0x28]；
+        [+0x24]==1 → node.active = (t>>3)&1；[+0x24]-0x10==段数(0x4AB5A0/49，此处恒 8)
+        → node.active = (t>>4)&1；否则 node.active = 1。恒存活。"""
+        e.aux = (e.aux + 1) & 0xFFFFFFFF
+        t = e.aux
+        if e.disp is not None:
+            if e.a4 == 1:
+                e.disp.active = (t >> 3) & 1
+            elif (e.a4 - 0x10) == 8:                 # 0x4AB5A0/49（页5 复刻恒 8）
+                e.disp.active = (t >> 4) & 1
+            else:
+                e.disp.active = 1
+        return True
+
+    def _rank_spawn_cell(self, rec0: int, rec1: int, v: int) -> None:
+        """0x44B140(0x4AD4FC, rec{rec0, rec1, 0x5F00001A, v}) 的复刻等价。
+
+        0x424A52 ctor：格 rect = (24w, 24b, 24w+24h-1, 24b+23)（w=rec1>>3、
+        b=rec1&7、h=rec1>>16）、dst = (rec0 低 16 位, 高 16 位)、[+0x24]=v。
+        行为 0x425D50：v==1 → 节点闪烁 (t>>3)&1；v-0x10==段数 → (t>>4)&1；否则常显。"""
+        e2 = self.spawn(self.ui4fc, 0x5F00001A)
+        e2.beh = "rank_cell"
+        e2.a4 = v
+        e2.aux = 0                                   # [+0x28] 计数
+        w = ((rec1 & 0xFFFF) >> 3) & 0xFFFFFFFF      # 0x424A69 movsx word → >>3
+        b = rec1 & 7                                 # 0x424A79 byte & 7
+        h = (rec1 >> 16) & 0xFFFF                    # 0x424A9B word[+6]
+        dx = rec0 & 0xFFFF
+        dy = (rec0 >> 16) & 0xFFFF
+        if dx >= 0x8000:
+            dx -= 0x10000
+        if dy >= 0x8000:
+            dy -= 0x10000
+        l = 24 * w
+        t = 24 * b
+        e2.disp = DisplayNode(13, [l, t, l + 24 * h - 1, t + 23], [dx, dy])
 
     # ---- 0x43E7B1/0x43EB6E 态尾：详绘 + 驻留计数（[0x20] 门 → 输入态激活） ----
     def _rank_tail(self, e: UiEntity, seg: int, bl: int) -> None:
