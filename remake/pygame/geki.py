@@ -79,6 +79,14 @@ def _rank_magic_div(v: int) -> int:
     return q
 
 
+def _adjust_magic_div(v: int) -> int:
+    """0x444A4C 的魔法除：`(v * 0x4BDA12F7) >> 36`（有符号）——段高 ≈ 54.05px。"""
+    v &= 0xFFFFFFFF
+    if v & 0x80000000:
+        v -= 0x100000000
+    return (v * 0x4BDA12F7) >> 36
+
+
 def _rank_cell_text(col: int, row: int) -> str:
     """RAM 字形格 (col,row)（格号 = row + 8*col）的复刻侧内容占位。
 
@@ -347,11 +355,25 @@ class Layers:
         return p if p.exists() else None
 
     def load(self, n: int, ggd_id: int) -> bool:
-        """0x44BE10：LoadStringA(id) → 打开 GGD → 逐像素写入层（整幅，左上角）。"""
+        """0x44BE10：LoadStringA(id) → 打开 GGD → 逐像素写入层（整幅，左上角）。
+
+        资源 1/2（bm_pal/bm_pald.bmp，8×8 调色板预览条）是 BMP——0x44BE10 的
+        LoadStringA 路径同样接受；复刻侧按 GGD 调色板索引读入（P 模式 8×8）。"""
         lay = self.tab.get(n)
         p = self.ggd_path(ggd_id)
         if lay is None or p is None:
             return False
+        if str(p).lower().endswith(".bmp"):
+            from PIL import Image as _I
+            import numpy as _np
+            im = _I.open(p).convert("P")
+            w, h = im.size
+            if lay.w < w or lay.h < h:
+                self.tab[n] = Layer(max(w, lay.w), max(h, lay.h))
+                lay = self.tab[n]
+            lay.buf[0:h, 0:w] = _np.asarray(im, dtype=_np.uint8)
+            lay.bind_id = ggd_id
+            return True
         w, h, px = ggd_load(p)
         # 0x44C640 → 0x44BE10：层表面**按资源尺寸**建立，不是固定 640×480。
         # bm_cm48 是 240×528（页13 层0），旧版把它裁到 480 行 ⇒ y≥0x1E0 的精灵
@@ -683,6 +705,12 @@ class Input:
         self._prevdir = {}          # 方向键"上一帧是否按住"，用于取按下沿
         self.p4_cfg = None          # 页4 预设（set_preset4 装载）；None = 页1-3 菜单管线
         self.mouse_tx, self.mouse_ty = 320, 240   # 鼠标目标位置（0x44E82B 的追踪目标）
+
+    def rebind_cfg(self, f3: int, f2: int, f1: int) -> None:
+        """0x4018C0(0x4AB454, f3, f2, f1)：按調整画面的三字段重绑输入预设（占位：
+        复刻侧预设树 0x446470 的 7..22 由 鍛錬/操作器/选机 决定，这三字段的
+        精确映射待 0x44E620 表对照；先按位存入 rec 供回放）。"""
+        self.rec.key = (f3 << 8) | (f2 << 4) | f1
 
     def set_mode(self, mode: int) -> None:
         """0x44EDA0(0x4AB454, mode)：输入模式（0 = 游戏内光标模式）。"""
@@ -1093,6 +1121,7 @@ class Pages(Page4Mixin):
         self.p2_text_on = True                    # 0x4AB5B0 的 flag 0x400（文字表示）
         self.p2_blits: list = []                  # ⑧ 静态页的待贴清单（draw 里执行）
         self.keys = KeyMgr()                       # 0x4AB5B0
+        self.disp_cfg = KeyMgr()                   # 0x4AB5B8（亮度/对比度等显示配置字段）
         self.sky_color = -1
         # 色带引擎（0x4CD484 / 0x4561D0 push、0x4562A0 draw、0x456270+0x4560C0 advance）
         self.band_table: list[list[int]] = [[0xB4, 0x200]]   # 0x456180 初始：一条 {color=0xB4,h=0x200}
@@ -1950,42 +1979,75 @@ class Pages(Page4Mixin):
         self.layers.free_all()
         self.page = 3                                 # 0x452910 无映射 → 默认回页3
 
-    # ---- 页6：調整（设置画面）----------------------------------------------------
+    # ---- 页6：調整（设置画面）——0x4523C0/0x4525E0/0x452660（2026-11-11 全序列）----
     def page6_enter(self) -> None:
-        """`0x4523C0`：装调色板 2 → SetCursorPos → SetPeriod(0)。"""
+        """`0x4523C0` 全序列：0x44CDF0(2, 0, 0) 调色板2（参 0,0）→ 层 11/12/13 ←
+        资源 0/1/2（ストリーム注意書き / bm_pal / bm_pald）+ 0x44CE60 色键 0 →
+        0x44E620(预设 1 @(0,0)) → 0x44EDA0(0) → 0x458D60 场景重置 →
+        0x6F00000A @(0,0) prm=0 入 52C（調整总控 0x444A30）→ 0x4F000001 网格
+        （x=0 步 0x78 ≤0x2D0、y=0 步 0x50 ≤0x230、prm=rand&3）入 0x4AD4CC →
+        SetPeriod(0)（失败旗标 0x40）。"""
         self.flags.clear()
         self.screen_fill = -1
         self.pal = self._load_pal(2)
         self.pal_now = self.pal
-        self.inp.set_pos(320, 240)
-        self.inp.set_preset4(0, (320, 240))
+        # 资源 0 = 开发者注意文本（非 GGD）→ 0x44C640(11, 0) 为"清层"语义（成功）；
+        # 层 12/13 ← bm_pal/bm_pald（亮度/对比度预览条）。
+        self.layers.create(11, 640, 480) if 11 not in self.layers.tab else None
+        if not self.layers.load(12, 1) or not self.layers.load(13, 2):
+            self.flags.set(FLAG_LAYER_FAIL)          # 0x45244C 0x45AF30(2)
+        for n in (11, 12, 13):
+            self.layers.color_key(n, 0)              # 0x44CE60
+        self.inp.set_pos(0, 0)                       # 0x44E620(1, 0, 0, 0)
+        self.inp.set_preset4(1, (0, 0))
+        self.inp.set_mode(0)                         # 0x44EDA0(0)
+        self.scene_reset()
+        e = self.spawn(self.ui52c, 0x6F00000A)
+        e.beh = "adjust_root"                        # 0x444A30
+        e.a3 = 0                                     # [+0x1C] 态
+        e.aux = 0                                    # [+0x24]
+        import random as _r
+        y = 0
+        while y <= 0x230:                            # 0x452515..0x452537
+            x = 0
+            while x <= 0x2D0:
+                g = self.spawn(self.trailq, 0x4F000001, x, y,
+                               _r.randrange(0x7FFFFFFF) & 3)   # 0x4AD4CC（0x401686）
+                g.beh = "adjust_tile"
+                x += 0x78
+            y += 0x50
         self.timer.set_period(0)
 
     def page6_step(self) -> bool:
-        """`0x4525E0`：泵 → draw → 输入 → SetCursorPos → key → 色带 → 旗标。"""
+        """`0x4525E0`：与页5 step 同构（0x4562A0 在 0x458F80 合成前）。"""
         self.keys.update(self.inp.rec)
         self.key_command(self.inp.rec.key)
         self.begin_frame()
         self.band_draw()
+        self.tick_ui(self.ui4fc)
+        self.tick_ui(self.ui52c)
+        self.ui4fc = [e for e in self.ui4fc if e.alive]
+        self.ui52c = [e for e in self.ui52c if e.alive]
         self.draw()
         self.band_advance()
         return self.flags.is_empty()
 
     def page6_finish(self) -> None:
-        """`0x452970`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 旗标映射：
-        0x100→页0、0x200→页3、0x10000→页3、**0x1000000→页11（調整适用游戏）**、
-        其它→0xFF（0x4529AF..0x4529CC 实测）。"""
-        self.timer.kill()
+        """`0x452660` 全序列：0x44F950 停 MIDI → 0x45A510 停计时器（失败旗标 0x40）→
+        0x44D200(0xB4)+present ×2 → 0x44CEE0 层释放 → 0x45B070 最低旗标：
+        0x100→页0、0x200/0x10000→页3、其它→0xFF（0x4526C7..0x4526FE 实测，
+        旧注 0x1000000→页11 属页5 的 0x452910 串写）。"""
+        self.midi_stop()
+        if not self.timer.kill():
+            self.flags.set(FLAG_EXIT)                # 0x45267B 0x45AF30(0x40)
         self.canvas.fill(0xB4); self.present()
         self.canvas.fill(0xB4); self.present()
         self.layers.free_all()
-        r = self.flags.lowest()                       # 0x452974 0x45B070
+        r = self.flags.lowest()
         if r == 0x100:
             self.page = 0
         elif r in (0x200, 0x10000):
             self.page = 3
-        elif r == 0x1000000:
-            self.page = 11                            # 0x4529C2：調整适用 → 页11
         else:
             self.page = 0xFF
 
@@ -2280,6 +2342,10 @@ class Pages(Page4Mixin):
                 self._scene_segment(e)
             elif e.beh == "rank_cell":
                 self._rank_cell(e)
+            elif e.beh == "adjust_root":
+                self._adjust_root(e)
+            elif e.beh == "adjust_tile":
+                self._adjust_tile(e)
             elif e.beh == "psel":
                 self._psel(e)
             elif e.beh == "psel_band":
@@ -2596,6 +2662,41 @@ class Pages(Page4Mixin):
         l = 24 * w
         t = 24 * b
         e2.disp = DisplayNode(13, [l, t, l + 24 * h - 1, t + 23], [dx, dy])
+
+    # ---- 0x444A30（0x6F00000A 調整总控）态机骨架 -----------------------------
+    def _adjust_root(self, e: UiEntity) -> None:
+        """0x444A30：帧头段 = (指针Y*0x4BDA12F7)>>36（÷54.05）；bl = 段!=[+0x20]；
+        态跳表 0x445464：0=闪光+++、1/3=[0x24]≥0x20 门、2=系统键调 0x4AB5B8 的
+        0xF/0xF0/0xF00（亮度/对比度/模式微调 0x20..0x2F）+ 0x4018C0 重绑输入、
+        4/5/6/7=（0x445415/0x445431/0x444B99/0x444BAD，深部设置态待逐条转写）。
+        C/X → 0x444B7F（旗标 0x200/0x10000 出页）。本实现先落骨架：段跟踪 +
+        系统键字段写 + 旗标出页，深部设置态以 a3 计数占位。"""
+        seg = _adjust_magic_div(int(getattr(self.inp, "y", 0)) & 0xFFFFFFFF)
+        e.aux = seg
+        st = e.t
+        # 系统键 0x20..0x2F：态 4/5/6 分别写 0xF/0xF0/0xF00 字段（0x444AE5..0x444B5E）
+        key = self.inp.rec.key
+        if 0x20 <= key <= 0x2F and st in (4, 5, 6):
+            mask = {4: 0xF, 5: 0xF0, 6: 0xF00}[st]
+            val = key - 0x20
+            self.disp_cfg.write(mask, val)           # 0x45B0E0(0x4AB5B8, mask, val)
+            # 0x444B32..0x444B5E：读回三字段 → 0x4018C0(inp, …) 重绑输入预设
+            f3 = self.disp_cfg.field(0xF00)
+            f2 = self.disp_cfg.field(0xF0)
+            f1 = self.disp_cfg.field(0xF)
+            self.inp.rebind_cfg(f3, f2, f1)
+        # C/X（0x4AB596/97）→ 出页旗标（0x444B7F 的可观察结果）
+        if self.inp.rec.b0:
+            self.flags.set(0x200)                    # → 页3
+        elif self.inp.rec.b1:
+            self.flags.set(0x10000)                  # → 页3
+        e.t += 1
+        return True
+
+    def _adjust_tile(self, e: UiEntity) -> None:
+        """0x401910（0x4F000001）：随自机镜像漂移的网格块。复刻侧按 ctor 的
+        [0x1C]=[0x20]=自机Y<<5 固定铺位（深部行为待逐条转写），恒存活。"""
+        return True
 
     # ---- 0x43E7B1/0x43EB6E 态尾：详绘 + 驻留计数（[0x20] 门 → 输入态激活） ----
     def _rank_tail(self, e: UiEntity, seg: int, bl: int) -> None:
@@ -4424,6 +4525,8 @@ class Pages(Page4Mixin):
             # 0x458EF0 无条件依次调用 6 条链表的渲染（空表也调），不能因列表为空而跳过
             self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
             self._render_queue(c, self._p4_q("ui49c"))  # 0x4AD49C
+        if self.page != 4:
+            self._render_queue(c, self.trailq)          # 0x430840(0x4AD4CC)（0x458F80 首遍）
         self._render_queue(c, self._p4_q("ui4fc"))      # 0x4AD4FC（与页1-3 的 ui4fc 同表）
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
