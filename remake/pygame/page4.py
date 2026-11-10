@@ -17554,6 +17554,20 @@ class Page4Mixin:
         off = (0x740 if t[5] else 8) + 0x54 * idx
         return int.from_bytes(t[off:off + 4], "little")
 
+    def p4_45c740_entry(self, row: int, tbl_obj=None) -> bytearray:
+        """`0x45C740(obj, row, &out)` 全项读取（2026-11-11 定案）：0x54 字节/项。
+
+        idx = obj[4] + 2*row；src = obj + (obj[5] ? 0x740 : 8) + 0x54*idx。
+        项内：+0x00 dword 得分、+0x12..+0x1B 10B 名字（字形格号）、
+        +0x1C..+0x30 日期组（+0x30 = 年−1900）、+0x34 dword。"""
+        if tbl_obj is None:
+            t = self._p4_tbl4ab5cc()
+        else:
+            t = tbl_obj
+        idx = t[4] + 2 * row
+        off = (0x740 if t[5] else 8) + 0x54 * idx
+        return bytearray(t[off:off + 0x54])
+
     def stage_layers(self, a3: int, a4: int) -> None:
         """`0x458DCE → 0x460930(0x4CD590, a3, a4)`：结算对象构造（docs §2）。
 

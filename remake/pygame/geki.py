@@ -66,6 +66,47 @@ FLAG_ESC = 0x200
 FLAG_CLICK = 0x10000
 SYS_FLAG_LEAVE = 0x10          # 0x56CC84 的 0x10：离开本页（0x45AFF0 命中即让亮度渐变实体自尽并复位）
 FLAG_SELECT = 0x200000
+
+# ---- 页5 排行榜（0x43E410）用的常量与助手（docs/p5_rank_notes.md）------------
+
+def _rank_magic_div(v: int) -> int:
+    """0x43E42B 的魔法除：`(v * 0x5397829D) >> 36`（有符号）= v // 49。"""
+    v &= 0xFFFFFFFF
+    if v & 0x80000000:
+        v -= 0x100000000
+    prod = v * 0x5397829D
+    q = prod >> 36
+    return q
+
+
+def _rank_cell_text(col: int, row: int) -> str:
+    """RAM 字形格 (col,row)（格号 = row + 8*col）的复刻侧内容占位。
+
+    exe 用 0x44D330 把标签预先写进层 0xD 的 24px 格（内容随页流程而定）；
+    复刻侧尚未逐格追踪缓冲填充，先按格号给稳定占位（空白为主），不影响
+    排行数据（得分/名字/日期直接来自 0x45C740 全项读）。"""
+    return ""
+
+
+def _rank_frame_text(i: int) -> str:
+    """行框架格（rec1=0x10001 → 格 1 = (0,1)）的复刻侧占位：行号。"""
+    return ""
+
+
+RANK_HEADER_RECORDS = (          # 0x49875B 起 4B/项：(b0, b1, b2)；b3=下一项首字节非 0 继续
+    (0x30, 0x1B, 0x30), (0x08, 0x06, 0x34), (0x10, 0x06, 0x38), (0x28, 0x38, 0x30),
+    (0x50, 0x35, 0x34), (0x58, 0x3E, 0x34), (0x60, 0x47, 0x34), (0x68, 0x35, 0x38),
+    (0x70, 0x3E, 0x38), (0x78, 0x47, 0x38), (0x80, 0x3E, 0x30), (0x82, 0x41, 0x30),
+    (0x6A, 0x47, 0x30),
+)
+RANK_LABEL_RECORDS = (           # 0x4987AC 起字节表：格号（0 终止）
+    (0x83, 1), (0x86, 1), (0x84, 1), (0x43, 1), (0x0C, 1), (0x5D, 0),
+    (0x86, 1), (0x45, 0), (0x83, 1), (0x0C, 1),
+)
+RANK_ICON_RECORDS = (            # 0x498794 起 3B/项 ×8：(b0=x*4, b1=格号, b2=行)
+    (0x02, 0x22, 0x02), (0x11, 0x42, 0x03), (0x2A, 0x22, 0x02), (0x36, 0x52, 0x04),
+    (0x52, 0x32, 0x02), (0x61, 0x42, 0x03), (0x7A, 0x32, 0x02), (0x86, 0x52, 0x04),
+)
 FLAG_EXIT = 0x40
 
 # 键码（0x498A60 归一后的值）
@@ -1856,25 +1897,49 @@ class Pages(Page4Mixin):
         """`0x454CB0`：与页4 finish 同族。"""
         self.p4_finish()
 
-    # ---- 页5：記錄（排行榜显示）------------------------------------------------
+    # ---- 页5：記錄（排行榜显示）——0x452730/0x452890（2026-11-11 按反汇编全序列重写）----
     def page5_enter(self) -> None:
-        """`0x452730`：装调色板 2 → SetCursorPos(320,240) → SetPeriod(0)。"""
+        """`0x452730` 全序列：
+
+        1. 亮度/对比度字段(0x4AB5B8 的 0x1FC0000/0xFE000000，各 *4-0xC8) →
+           0x44CDF0(0x4AA7B0, 2, 参) 装调色板 2（失败 → 旗标 2）；
+        2. 0x44E620(inp, 预设2, 0x140, 0, 0) + 0x44EDA0(inp, 0)；
+        3. 0x450140(0x4AB4B0, 1, 0x24)（槽1 ← wave 36 菜单旋律；失败 → 旗标 8）；
+        4. 0x458D60 场景重置；
+        5. 生成 0x6F000003 @(0,0) prm=-1 入 0x4AD52C（排行榜总控）；
+        6. byte[0x56CCD8]=0；SetPeriod(0)（失败 → 旗标 0x40）。"""
         self.flags.clear()
         self.screen_fill = -1
-        self.pal = self._load_pal(2)
+        self.pal = self._load_pal(2)                 # 亮度参 field*4-0xC8（复刻侧整表装载）
         self.pal_now = self.pal
-        self.inp.set_pos(320, 240)
-        self.inp.set_preset4(0, (320, 240))
+        self.inp.set_pos(0x140, 0)                   # 0x44E620(2, 0x140, 0, 0)
+        self.inp.set_preset4(2, (0x140, 0))
+        self.scene_reset()
+        self.scene_ab = False                        # byte[0x56CCD8] = 0
+        e = self.spawn(self.ui52c, 0x6F000003, a3=-1)
+        # 0x43D8F0 ctor：[+0x1C]=p3(-1)、[+0x24]=(指针Y*0x5397829D)>>36
+        e.a3 = -1
+        e.aux = _rank_magic_div(int(getattr(self.inp, "y", 0)) & 0xFFFFFFFF)
+        if not self.sound_bind(1, 0x24):             # 0x450140(0x4AB4B0, 1, 0x24)
+            self.flags.set(8)                        # 0x4527BB 0x45AF30(8)
+        self.inp.set_mode(0)                         # 0x44EDA0(0x4AB454, 0)
         self.timer.set_period(0)
 
     def page5_step(self) -> bool:
-        """`0x452890`：泵 → 光标 → 输入 → SetCursorPos → key → 色带 → 0x402261 → 旗标。"""
+        """`0x452890` 全序列：泵/上屏（run.py+begin_frame）→ 输入 → 系统键 →
+        0x4562A0 色带 → **0x458F80 合成**（4CC→4CC渲→4FC行为→52C行为→4FC渲→色带推进）→
+        0x45AFF0(0x4AB5C0,0) 返回旗标空。"""
         self.keys.update(self.inp.rec)
         self.key_command(self.inp.rec.key)
         self.begin_frame()
-        self.band_draw()
-        self.draw()
-        self.band_advance()
+        self.band_draw()                             # 0x4562A0（在合成**前**）
+        self.tick_ui(self.ui4fc)                     # 0x44B0D0（4FC 行为遍）
+        self.tick_ui(self.ui52c)                     # 0x445A30（52C 行为遍）
+        # 0x401C5D（0x44B0D0/0x445A30 的死体摘链）：行为返回 0 的实体出队
+        self.ui4fc = [e for e in self.ui4fc if e.alive]
+        self.ui52c = [e for e in self.ui52c if e.alive]
+        self.draw()                                  # 0x430840 显示表两遍（4CC/4FC）+文字
+        self.band_advance()                          # 0x456270
         return self.flags.is_empty()
 
     def page5_finish(self) -> None:
@@ -2031,10 +2096,11 @@ class Pages(Page4Mixin):
             elif idx == 1:
                 e.beh = "opmovie"                # 0x43E1C0
             elif idx == 2:
-                # 0x43D8F0 ctor：段号 = [0x4AB5A0]/49（魔数 0x5397829D + sar 4）；
-                # 行为 0x43E410 每帧再按指针重算并铺该段的 84 字节场景记录
+                # 0x43D8F0 ctor：[+0x1C]=rec[3]、[+0x24]=(指针Y*0x5397829D)>>36（=Y/49）；
+                # 行为 0x43E410（排行榜段渲染，页5/页2 共用）
                 e.beh = "scene_segment"          # 0x43E410
-                e.a4 = int(self.inp.y) // 49
+                e.aux = _rank_magic_div(int(self.inp.y) & 0xFFFFFFFF)   # [+0x24]
+                e.a3 = int(a3) if a3 else 0                             # [+0x1C]
             elif idx == 5:
                 # 0x43D970 ctor（页13 的选择画面总控）：[1C]=[20]=[24]=[28]=0，
                 # 并 `0x45B0E0(0x4AB5B0, 0xC000, 0)` 把"选中槽"字段清 0；
@@ -2354,19 +2420,189 @@ class Pages(Page4Mixin):
             e.alive = False
         e.t += 1
 
-    # 0x43E410（0x6F000003，场景段渲染）
+    # 0x43E410（0x6F000003，排行榜段渲染——页5 記録 与 页2 吸引共用；docs/p5_rank_notes.md）
     def _scene_segment(self, e: UiEntity) -> None:
-        """0x6F000003：按指针 Y/49 取段号，铺该段 84 字节场景记录（§16.61/16.64）。"""
-        seg = int(self.inp.y) // 49
-        lim = (self.keys.test(0xF00000) or 8) if self.keys.test(1) else 8
-        if seg >= lim:                              # 0x43E475：越界 → 回卷指针
+        """0x43E410 全态机（2026-11-11 转写）。
+
+        帧头：seg = (指针Y*0x5397829D)>>36（=Y/49）；上限 = 旗标非空 ? 字段(0xF00000) : 8；
+        seg 越界 → seg=上限-1 并 0x44E620(inp,0x140,seg*49+0x18)；bl = (seg != [+0x24])。
+        态 = ++[+0x1C]（ctor -1 → 0），跳表 0x43EBA8：
+          态0/1 = 构建（0x61000005 闪光 + 4FC 头部表 + 行环 + 0x4017D5 + 行详绘 + 关卡图标行），
+          态2/4 = 0x43E7D1（[+0x20]>0x20 → [+0x1C]=3），
+          态3   = 0x43E7DC（输入：C/X → 回放；指针横移 ≥0x31 → 8 模式切换重建），
+          态5   = 0x43E967（回放装载 0x45D700 → 旗标 0x1000000/0x10000、[0x4AB5C8]=选段）。
+        视觉在复刻侧用 e.texts 直绘（exe 是 0x44D330 写 RAM 字形格 + 0x5F00001A 切片贴，
+        可观察结果相同）；页2 冻结金标期间只在页5 启用视觉构建。"""
+        seg = _rank_magic_div(int(getattr(self.inp, "y", 0)) & 0xFFFFFFFF)
+        lim = (self.keys.field(0xF00000) or 8) if self.flags.is_empty() else 8
+        if lim <= 0:
+            lim = 8
+        if seg >= lim:                               # 0x43E475
             seg = max(0, lim - 1)
-            self.inp.set_pos(0x140, seg * 49 + 0x18)  # 0x44E620(inp, 320, idx*49+0x18)
-        e.a4 = seg
-        # TODO(§16.70)：段数据（mgr+8 / mgr+0x740 的 84 字节记录）尚未取到，此处仅记录段号
-        if not getattr(e, "_logged", False):
-            e._logged = True
-            self.log(f"scene_segment：段号 {seg}（上限 {lim}）")
+            self.inp.set_pos(0x140, seg * 49 + 0x18)
+        bl = 1 if seg != e.aux else 0                # 0x43E49E setne（[+0x24]=前段号）
+        # 帧头派发用 [0x1C]+1（eax 不回写！态体自己决定 [+0x1C] 的去向）
+        n = e.t + 1
+        if n in (0, 1):                              # 表0/1：构建（0x43E4C0/0x43E504）
+            self._rank_build(e, seg, lim, bl)
+            e.t = e.t + 2                            # 0x43E7A2..0x43E7AE [0x1C] += 2
+        elif n in (2, 4):                            # 表2/4：0x43E7D1 驻留门
+            if e.a3 > 0x20:
+                e.t = n                              # 0x43E7D7 [0x1C] = eax(=N)
+            self._rank_tail(e, seg, bl)
+            return
+        elif n == 3:                                 # 表3：0x43E7DC 输入
+            if self.inp.rec.b0 or self.inp.rec.b1:   # C/X 按住 → [0x1C]=3 钉住
+                e.a4 = seg if self.inp.rec.b0 else -1   # 0x43E7F5..0x43E813
+                if self.scene_ab:
+                    e.a4 = -1
+                self._rank_cursor(e)                 # 0x4019FB → 0x43DCB0
+                e.t = 3                              # 0x43E7EE
+            else:
+                dx = int(getattr(self.inp, "x", 0x140)) - 0x140
+                if dx < -0x31 or dx > 0x31:          # 0x43E830 出死区 → 模式切换
+                    mode = ((1 if self.keys.test(2) else 0)
+                            | (2 if self.keys.test(1) else 0)
+                            | (4 if self.scene_ab else 0))   # 0x43E839..0x43E874
+                    mode = (mode - 1) % 8 if dx < 0 else (mode + 1) % 8
+                    bit0, bit1 = mode & 1, (mode >> 1) & 1
+                    # 0x45C710 两表：obj[4]=(arg1!=0)、obj[5]=arg2
+                    self.p4_45c710(bit0 | (4 if self.scene_ab else 0), bit1)
+                    self.p4_45c710(bit0, bit1)
+                    self.keys.write(2, bit1)         # 0x45B0A0(0x4AB5B0, 2, …)
+                    self.keys.write(1, bit1)         # 0x45B0A0(0x4AB5B0, 1, …)
+                    self.scene_ab = bool((mode >> 2) & 1)   # 0x43E908
+                    self.inp.set_preset4(2, (0x140, seg * 49 + 0x18))   # 0x43E912
+                    self.spawn(self.ui52c, 0x6F000003)   # 0x43E91D 重建（prm=0）
+                    e.alive = False                  # return 0
+                    return
+                self._rank_tail(e, seg, bl)
+                return
+            self._rank_tail(e, seg, bl)
+            # 按住时 [0x1C]=3 → 下帧 N=4（0x43E7D1）→ 再下帧 N=5（回放）——由门推进
+            return
+        elif n == 5:                                 # 表5：0x43E967 回放出口
+            if e.a4 >= 0 and self.p4_45d700(e.a4):
+                self.flags.bits |= 0x1000000         # → 页11（回放）
+            else:
+                self.flags.bits |= 0x10000           # → 页3
+            self.theatre = e.a4 & 0xFFFFFFFF         # 0x43E9B6 [0x4AB5C8]
+            e.alive = False
+            return
+        else:                                        # N>5：只有尾段
+            self._rank_tail(e, seg, bl)
+            return
+
+    # ---- 0x43E4C0 态0/1：排行榜画面构建 ------------------------------------
+    def _rank_build(self, e: UiEntity, seg: int, lim: int, bl: int) -> None:
+        e.aux = seg                                  # [+0x24] = 当前段
+        if self.page != 5:
+            return                                   # 页2 冻结金标：不做视觉构建（见 docstring）
+        self._rank_sel = seg                         # 0x4017D5(this, seg, 0xF) 的选中行
+        # 0x43E4C0：0x61000005 闪光 rec{0,-0xFF,typ,8}
+        f = self.spawn_flash(0, -0xFF, 8)
+        f.disp = None
+        # 0x43E509 0x4018B6→0x44B0A0：4FC 队列整备（复刻侧清空重铺）
+        self.ui4fc.clear()
+        texts = []
+        # 0x43E50E..0x43E56C：头部表 0x49875B（4B/项，终止 0）→ 字形格切片
+        #   rec0 = ((b0<<16 | 6) << 3)（dst = (0x30, b0*8)）、rec1 = b1|b2<<16（格号）
+        tbl = RANK_HEADER_RECORDS
+        for (b0, b1, b2) in tbl:
+            dx, dy = 0x30, b0 * 8
+            texts.append({"str": _rank_cell_text(b1, b2), "x": dx, "y": dy,
+                          "h": 0x18, "fg": 0xD9})
+        # 0x43E56E..0x43E5DA：0x4987AC 标签表（[帧+0x20] 从 0x148/0x190 起、步 0x18）
+        base_x = 0x190 if self.scene_ab else 0x148
+        y = 0x190 if self.scene_ab else 0x148
+        k = 0
+        for (cell, term) in RANK_LABEL_RECORDS:
+            if term == 0:
+                break
+            texts.append({"str": _rank_cell_text(cell >> 3, cell & 7),
+                          "x": base_x + 0x18 * k, "y": y, "h": 0x18, "fg": 0xD9})
+            y += 0x18
+            k += 1
+        # 0x43E5DC..0x43E60A：旗标1 → 附加行 {0x1800148, 0x30040}
+        if self.keys.test(1):
+            texts.append({"str": "", "x": 0x148, "y": 0x180, "h": 0x18, "fg": 0xD9})
+        # 0x43E60F 0x4017D5(this, seg, 0xF)：选中行详绘（0x43DD20）——复刻侧并入行环
+        # 0x43E619..0x43E702：行环 i=0..seg（排行行：框架 + 得分数字 + 10 字名字）
+        for i in range(min(seg + 1, lim)):
+            ry = 0x60 + 0x20 * i
+            entry = self.p4_45c740_entry(i, self._rank_tbl())
+            score = int.from_bytes(entry[0:4], "little")
+            texts.append({"str": _rank_frame_text(i), "x": 0xF0, "y": ry,
+                          "h": 0x18, "fg": 0xD9})
+            # 0x402185(score, 0xD8, ry, i+0x10)：十进制位，低位居 0xD8、步 -0x18
+            if score > 0:
+                v = score
+                xd = 0xD8
+                while v > 0:
+                    v, r = divmod(v, 10)
+                    texts.append({"str": str(r), "x": xd, "y": ry, "h": 0x18, "fg": 0xD9})
+                    xd -= 0x18
+            # 0x43E6B6：名字 10 格（entry+0x12 起，格号字节；0 = 空格）
+            for kk in range(10):
+                ci = entry[0x12 + kk]
+                if ci:
+                    texts.append({"str": _rank_cell_text(ci >> 3, ci & 7),
+                                  "x": 0x140 + 0x18 * kk, "y": ry, "h": 0x18, "fg": 0xD9})
+            # 日期（entry+0x1C 组：年(+0x30)+1900 / 月 / 日 / 时 / 分 / 秒）
+            yy = int.from_bytes(entry[0x30:0x34], "little") + 0x76C
+            mo = entry[0x22] if entry[0x22] < 100 else 0
+            dd = entry[0x24] if entry[0x24] < 100 else 0
+            if score > 0 and yy >= 1900:
+                texts.append({"str": "%04d/%02d/%02d" % (yy, mo, dd),
+                              "x": 0x220, "y": ry, "h": 0x18, "fg": 0xD9})
+        # 0x43E708..0x43E79A：关卡图标行（0x498794，8 项 3B；当前模式项闪烁）
+        for k2, (b0, b1, b2) in enumerate(RANK_ICON_RECORDS):
+            blink = (k2 == ((self.keys.test(2) and 1)
+                            + (2 if self.keys.test(1) else 0)
+                            + (4 if self.scene_ab else 0)))
+            if not blink:
+                texts.append({"str": _rank_cell_text(b1 >> 3, b1 & 7),
+                              "x": (b0 & 0x3FFF) << 2, "y": 0x20, "h": 0x18, "fg": 0xD9})
+        e.texts = texts
+
+    # ---- 0x43E7B1/0x43EB6E 态尾：详绘 + 驻留计数（[0x20] 门 → 输入态激活） ----
+    def _rank_tail(self, e: UiEntity, seg: int, bl: int) -> None:
+        # 0x43EB7C..0x43EB97：段稳定时 [0x20]++（0x20>0x20 → 0x43E7D1 放行输入），
+        # [0x24] = 当前段；实体恒存活（al=1）。
+        if bl == 0:
+            e.a3 = (e.a3 + 1) & 0xFFFFFFFF
+        else:
+            e.a3 = 0
+        e.aux = seg
+
+    def _rank_cursor(self, e: UiEntity) -> None:
+        """0x43DCB0（0x4019FB）：0x61000005 @(0,-8) 入 52C + 0x44EDA0(inp,1)。"""
+        c = self.spawn(self.ui52c, 0x61000005, a3=-8)
+        c.aux = -8
+        self.inp.set_pos(0x140, 0)
+
+    def _rank_tbl(self) -> bytearray:
+        """页5 的排行榜表：scene_ab=0 → 0x4AB5CC 运行期表；1 → 0x4AC4EC 保存表。
+
+        保存表复刻侧尚未持久化（§15.4），暂与运行期表同源（零表 = 未登录）。"""
+        return self.p4_stat.get("tbl_4ab5cc") or self._p4_tbl4ab5cc()
+
+    def p4_45c710(self, a1: int, a2: int) -> None:
+        """`0x45C710(obj, a1, a2)`：obj[4] = (a1!=0)、obj[5] = a2。
+
+        obj[4] = 行对选择、obj[5] = 半表选择（0 → +8 / 非0 → +0x740）。
+        复刻侧只有一张 0x4AB5CC 等价表（0x4AC4EC 保存表持久化属 §15.4）。"""
+        t = self._p4_tbl4ab5cc()
+        t[4] = 1 if a1 else 0
+        t[5] = a2 & 0xFF
+
+    def p4_45d700(self, slot: int) -> bool:
+        """`0x45D700(0x4CD5D8, …)`：回放装载门（0x5E1200 的 3 个存槽，3 次重试）。
+
+        持久化回放属 §15.4 未闭合项；复刻侧按会话内回放缓存判定：
+        该关有已记录回放 → True（进页11），否则 False（旗标 0x10000 → 页3）。"""
+        saves = getattr(self, "p4_replay_saves", None)
+        return bool(saves) and 0 <= slot < 3 and saves.get(slot) is not None
 
     # 0x43E1C0（0x6F000002，OPMOVIE / "Now Loading" 进度屏）
     def _opmovie(self, e: UiEntity) -> None:
