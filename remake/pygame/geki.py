@@ -1125,6 +1125,10 @@ class Pages(Page4Mixin):
         self._adjust_bgm_i = 0
         self._adjust_bgm_dirty = False
         self._adjust_pal_dirty = False
+        self._adjust_dev = 0                         # 0x444A30 [0x30] 输入设备切换
+        self.p4_bgm_field = 0                        # 0x4AB514 byte[0x50]
+        self.p4_op_flag = 0                          # 0x4AA49C byte（操作器）
+        self.p4_keyblob = bytearray(0x78)            # 0x4A4080..F7 键位 blob（DirectInput）
         self.sky_color = -1
         # 色带引擎（0x4CD484 / 0x4561D0 push、0x4562A0 draw、0x456270+0x4560C0 advance）
         self.band_table: list[list[int]] = [[0xB4, 0x200]]   # 0x456180 初始：一条 {color=0xB4,h=0x200}
@@ -2712,15 +2716,19 @@ class Pages(Page4Mixin):
             if e.p["dwell"] >= 0x20:
                 e.t = st + 1                         # 0x444ADD ++[0x1C]
             return True
-        if st == 2:                                  # 0x444AE5 系统键字段调
+        if st == 2:                                  # 0x444AE5 主交互态（常驻）
             key = self.inp.rec.key
-            if 0x20 <= key <= 0x2F:
+            if 0x20 <= key <= 0x2F:                  # 0x444AF2 系统键 0x20..0x2F
                 mask = {4: 0xF, 5: 0xF0, 6: 0xF00}.get(seg, 0xF)
                 self.disp_cfg.write(mask, key - 0x20)   # 0x45B0E0
-                f3 = self.disp_cfg.field(0xF00)
+                f3 = self.disp_cfg.field(0xF00)         # 0x444B32 读回三字段
                 f2 = self.disp_cfg.field(0xF0)
                 f1 = self.disp_cfg.field(0xF)
                 self.inp.rebind_cfg(f3, f2, f1)         # 0x4018C0
+            if self.inp.rec.b0 or self.inp.rec.b1:      # 0x444B69 b0/b1 → C/X 行表
+                self._adjust_bl = bl
+                self._adjust_row(seg)                   # 0x444B7F → 0x44547C[段]
+            self._adjust_tail()                         # 0x444F7A
             return True
         if st == 4:                                  # 0x445415
             self.flags.set(0x10000)                  # → 页3
@@ -2730,9 +2738,10 @@ class Pages(Page4Mixin):
             self._adjust_apply(seg != 0)             # 0x40182A(段!=0)
             e.t = 2
             return True
-        # 态 6/7 及一切 >7：走 C/X 行表（0x444B7F：edi=段，ja → 尾）
-        if self.inp.rec.b0 or self.inp.rec.b1:
-            self._adjust_row(seg)
+        if st in (6, 7):                             # 0x445464[6/7] = 行 0/1 动作同源
+            self._adjust_row(0 if st == 6 else 1)
+            self._adjust_tail()
+            return True
         self._adjust_tail()
         return True
 
@@ -2743,22 +2752,27 @@ class Pages(Page4Mixin):
         elif row == 1:                               # 0x444BAD
             cur = self.keys.field(0x18)
             nxt = {0: 1, 1: 3}.get(cur, 0)
-            self.keys.field_write(0x18, nxt)         # 0x45B0E0(0x4AB5B0, 0x18, nxt)
+            self.keys.set_field(0x18, nxt)         # 0x45B0E0(0x4AB5B0, 0x18, nxt)
             b0 = 1 if self.keys.test(8) else 0       # 0x45AFF0(8)
             b1 = 1 if self.keys.test(0x10) else 0    # 0x45AFF0(0x10)
             self.load_wave(0, 0)                     # 0x401C80(0x4AB4B0, …) 等效
         elif row == 2:                               # 0x444C0D
             self.keys.bits &= ~4
-            self.p4_stat[0x4AB514] = self.p4_stat.get(0x4AB514, 0)   # 0x4011F9 占位
+            self.p4_bgm_field = 4                    # 0x44FEE0(0x4AB514, 4): byte[0x50]=4
         elif row == 3:                               # 0x444C3A
             self.keys.bits |= 0x400
-        elif row == 7:                               # 0x444F14
-            pass                                     # （未逐条：亮度行确认）
+        elif row == 7:                               # 0x444F14 输入设备切换
+            e_r7 = self._adjust_dev ^ 1              # [0x30] ^= 1
+            self._adjust_dev = e_r7
+            self.inp.set_pos(0, 0)                   # 0x4013DE→0x44E620(inp,0,dev)
+            self.inp.set_preset4(0, (0, 0))
         elif row == 8:                               # 0x444ECF 亮度→对比度连算
             b = self.disp_cfg.field(0x1FC0000)
             c = b * 4 - 0xC8
-            self.disp_cfg.field_write(0xFE000000, c & 0xFFFFFFFF)
-            self._adjust_apply_pal()
+            self.disp_cfg.set_field(0xFE000000, c & 0xFFFFFFFF)
+            self._adjust_apply_pal()                 # 0x444F60 0x44CDF0(2,…)
+            e_t8 = 3                                 # 0x444F6E [0x1C]=3
+            self._adjust_cursor()                    # 0x4019FB
         elif row == 9:                               # 0x444C4E BGM 序号
             self._adjust_bgm_i += 1                  # 0x444C66 inc [0x2C]
         elif row == 10:                              # 0x444CCA 对比度 ±2
@@ -2768,17 +2782,41 @@ class Pages(Page4Mixin):
                 cur = 0
             elif cur == 0x7F:
                 cur = 0x63
-            self.disp_cfg.field_write(0xFE000000, cur & 0xFFFFFFFF)
+            self.disp_cfg.set_field(0xFE000000, cur & 0xFFFFFFFF)
             self._adjust_pal_dirty = True
         elif row == 16:                              # 0x444E91 BGM 行
             if self.keys.test(0x80):
                 v = self._adjust_bgm_i + 1
                 self._adjust_bgm_i = 0 if v >= 0xD else v
                 self._adjust_bgm_dirty = True
-        elif row == 17:                              # 0x444F01
+        elif row == 17:                              # 0x444F01 保存确认行
             if self.keys.test(0x80):
                 self._adjust_apply_pal()
-        # 行 4/5/6 = 尾直跳（无动作）；行 11..15 未逐条（笔记）
+                self._adjust_ser()                   # 0x445062 设置 blob 序列化
+                self._adjust_cursor()                # 0x444F6E [0x1C]=3 + 0x43DCB0
+        elif row == 11:                              # 0x444D4D 亮度 ±2
+            cur = self.disp_cfg.field(0x1FC0000)
+            cur = cur + (2 if self.inp.rec.b0 else -2)
+            if cur == 0x64:
+                cur = 0
+            elif cur == 0x7F:
+                cur = 0x63
+            self.disp_cfg.set_field(0x1FC0000, cur & 0xFFFFFFFF)
+            self._adjust_pal_dirty = True
+        elif row == 12:                              # 0x444DD0 背景 CG 开关
+            self.keys.bits |= 0x40
+            self.layers.cg40 = 1 if self.keys.test(0x40) else 0   # 0x44DCD0 byte[0x86]
+        elif row == 13:                              # 0x444DF8 前景 CG 开关
+            self.keys.bits |= 0x20
+            self.layers.cg20 = 1 if self.keys.test(0x20) else 0   # 0x44DCB0 byte[0x85]
+        elif row == 14:                              # 0x444E20
+            self.keys.bits |= 0x800
+        elif row == 15:                              # 0x444E34 操作器切换
+            cur = self.keys.field(0x3000)
+            nxt = {0: 1, 1: 3}.get(cur, 0)
+            self.keys.set_field(0x3000, nxt)       # 0x45B0E0(0x3000)
+            self.p4_op_flag = 1 if self.keys.test(0x1000) else 0   # 0x454E60 byte[0x4AA49C]
+        # 行 4/5/6 = 尾直跳（无动作）
 
     def _adjust_tail(self) -> None:
         """0x444F7A：BGM 切换旗标 → 0x401F69(0x4AB514, 表[bgm])；调色板旗标 → 重载。"""
@@ -2793,6 +2831,30 @@ class Pages(Page4Mixin):
         if self._adjust_pal_dirty:
             self._adjust_apply_pal()
             self._adjust_pal_dirty = False
+
+    def _adjust_cursor(self) -> None:
+        """0x444F6E [0x1C]=3 + 0x4019FB→0x43DCB0：0x61000005 @(0,-8) + 0x44EDA0(1)。"""
+        c = self.spawn(self.ui52c, 0x61000005, a3=-8)
+        c.aux = -8
+        self.inp.set_mode(1)
+
+    def _adjust_ser(self) -> None:
+        """0x445062..0x4453AE（edi==0x10 且 0x45AFF0(0x4AB5B0,0x80) 门）：
+
+        0x4A4080..F7 键位 blob → 本地 7×0x40 项 {dword, word, byte, 名字串}；
+        `[(0x28)<<6]+帧+0x54` 取当前行名字串 → 0x44D330(0x4AA7B0, 0, 0x68,
+        0x1B0, 串, 0x10, 0xD9)（键名上屏）；末尾 0x40132F(0x4AB4B0, 0) 音（段变时）。
+        复刻侧 blob 为会话内镜像（持久化属 §15.4）。"""
+        if not self.keys.test(0x80):
+            return
+        texts = []
+        for i2 in range(7):
+            off = 0x08 + i2 * 0x10                   # blob 项步进（0x4A4088+）
+            if off + 4 <= len(self.p4_keyblob):
+                name = bytes(self.p4_keyblob[off:off + 4]).split(b"\x00")[0]
+                if name:
+                    texts.append(name.decode("ascii", "replace"))
+        self.p4_key_rows = texts                     # 0x44D330 绘制由 adjust 文字通道
 
     def _adjust_apply(self, nonzero: bool) -> None:
         """0x40182A（段!=0 时 0x458D60 场景重置族的调用）占位。"""
