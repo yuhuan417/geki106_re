@@ -1777,46 +1777,52 @@ class Pages(Page4Mixin):
 
     # ---- 页12：中间页（鍛錬 mode：页13 选人后 → 页12 → 页4/页15）--------------
     def page12_enter(self) -> None:
-        """`0x4536E0`：装调色板 2（bm_pald）→ 层13 ← 0x0D（bm_otit）/层0 ← 0x0D →
-        SetCursorPos(320,240) → 0x458D60(0,0,0,0) 场景重置 → 生成 0x5F000014
-        （舞台文字显示实体）→ 0x4100000D 效果（放大窗）→ 0x45C740 排行榜读 →
-        0x45FE10 场景应用 → SetPeriod(4)。"""
+        """`0x4536E0` 全序列（2026-11-11 按反汇编订正）：
+
+        亮度/对比度字段(0x4AB5B8) ×4-0xC8 → 0x44CDF0(2, 参) 调色板2 →
+        0x44C640(13, 0x2B)（层13 ← bm_s1lg 关卡大字）→ 0x44CE60(13, 0) →
+        0x44E620(预设 4 @(0x140, 0xF0)) → 0x44EDA0(0) → **[0x4AB5C8]=0** →
+        0x458D60 场景重置 → 0x5F000014 @(0,0) prm=0 入 0x4AD4FC →
+        0x45C740(0x4AB5CC, 0, &buf) 排行榜读 → 0x401C99 →
+        0x45FE10(0x4100000D, 项+0x4C) 放大窗 → SetPeriod(**0**)（失败旗标 0x40）。"""
         self.flags.clear()
         self.screen_fill = -1
         self.pal = self.data and self._load_pal(2)
         self.pal_now = self.pal
-        self.layers.bind(13, 43)                      # 0x44C640(13, 0x2B) ← bm_s1lg（关卡大字）
+        self.layers.bind(13, 43)                      # 0x44C640(13, 0x2B) ← bm_s1lg
         self.layers.color_key(13, 0)                  # 0x44CE60(13, 0)
-        self.inp.set_pos(320, 240)                    # 0x45377A
-        self.inp.set_preset4(4, (320, 240))           # 0x453786 0x44E620(preset 4, 320, 240)
+        self.inp.set_pos(0x140, 0xF0)                 # 0x44E620(4, 0x140, 0xF0, 0, 0)
+        self.inp.set_preset4(4, (0x140, 0xF0))
+        self.inp.set_mode(0)                          # 0x44EDA0(0)
+        self.theatre = 0                              # 0x45379C [0x4AB5C8] = ebx = 0
         self.scene_reset()                            # 0x4537A2 → 0x458D60
         st = self.p4_stat
-        st[0x4AB5C8] = self.theatre                   # 0x45379C [0x4AB5C8] = 舞台 id
-        # 0x4537A8: 0x430400(rec, 0, 0x5F000014, 0) → 0x44B140(0x4AD4FC, rec)
-        m = self.spawn(self.ui4fc, 0x5F000014)
+        m = self.spawn(self.ui4fc, 0x5F000014)        # 0x4537A8..0x4537D3
         m.beh = "stage_text"                          # 舞台文字显示（第一幕　市街 等）
-        # 0x4537E3: 0x45C740(0x4AB5CC, 0, buf) → 排行榜读
-        st["45c740_buf"] = self.p4_45c740_score(0)
-        # 0x4537E8: 0x45FB80(this) — 记录流复位
-        self.stream_reset()
-        # 0x4537F1: 0x45FE10(0x4100000D, 0) → 场景应用（放大窗效果）
-        self._p4_43c9c2(None, None, 0)                # 场景应用的简化调用
-        self.timer.set_period(4)                      # 0x453814 0x45A490(4) = SetPeriod(4)
-        # 0x453830 0x45AFF0(0x4AB5C0, 0)：旗标读取（位 0x01 = 鍛錬）
-        self._p4_dbg()
+        entry = self.p4_45c740_entry(0)               # 0x4537DC 0x45C740(0x4AB5CC, 0, &buf)
+        st["45c740_buf"] = entry
+        self.stream_reset()                           # 0x4537E8 0x401C99 → 0x45FB80
+        zoom = int.from_bytes(entry[0x4C:0x50], "little")
+        self._p4_43c9c2(None, None, zoom)             # 0x4537F1 0x45FE10(0x4100000D, 项+0x4C)
+        if not self.timer.set_period(0):              # 0x45380E 0x45A490(0)
+            self.flags.set(FLAG_EXIT)                 # 0x45381E 0x45AF30(0x40)
 
     def page12_step(self) -> bool:
-        """`0x4538E0`：泵 → draw → 色带 → 输入 → SetCursorPos → key → 色带 →
-        0x402261 → 旗标测试。返回 0x45AFF0(0x4AB5C0, 0)。"""
+        """`0x4538E0` 全序列：泵 → 上屏(0x458CB0) → 0x4562A0 色带 → 输入 →
+        SetCursorPos(0x140,0xF0) → 系统键 → **0x4562A0 色带（第二次）** →
+        0x458F80 合成 → 0x45AFF0(0x4AB5C0, 0)。"""
         self.keys.update(self.inp.rec)
-        self.key_command(self.inp.rec.key)
         self.begin_frame()
-        self.band_draw()
-        self._tick_spark4cc()
+        self.band_draw()                              # 0x4538F4 第一次
+        self.key_command(self.inp.rec.key)
+        self.band_draw()                              # 0x45392E 第二次
+        self.tick_ui(self.ui4fc)                      # 0x458F80：4FC 行为
+        self.tick_ui(self.ui52c)                      #         52C 行为
+        self.ui4fc = [e for e in self.ui4fc if e.alive]
+        self.ui52c = [e for e in self.ui52c if e.alive]
         self.draw()
         self.band_advance()
-        self._p4_dbg()
-        return self.flags.is_empty()                  # 0x45AFF0(0x4AB5C0, 0)
+        return self.flags.is_empty()
 
     def page12_finish(self) -> None:
         """`0x453970`：KillTimer → 0xB4 fill+present ×2 → 0x44CEE0 → 页号映射：
