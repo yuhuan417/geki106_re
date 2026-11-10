@@ -1122,6 +1122,9 @@ class Pages(Page4Mixin):
         self.p2_blits: list = []                  # ⑧ 静态页的待贴清单（draw 里执行）
         self.keys = KeyMgr()                       # 0x4AB5B0
         self.disp_cfg = KeyMgr()                   # 0x4AB5B8（亮度/对比度等显示配置字段）
+        self._adjust_bgm_i = 0
+        self._adjust_bgm_dirty = False
+        self._adjust_pal_dirty = False
         self.sky_color = -1
         # 色带引擎（0x4CD484 / 0x4561D0 push、0x4562A0 draw、0x456270+0x4560C0 advance）
         self.band_table: list[list[int]] = [[0xB4, 0x200]]   # 0x456180 初始：一条 {color=0xB4,h=0x200}
@@ -2013,13 +2016,22 @@ class Pages(Page4Mixin):
         e.a3 = 0                                     # [+0x1C] 态
         e.aux = 0                                    # [+0x24]
         import random as _r
+        mode = self.keys.field(0xC000)               # 0x436A8D 0x45AFC0(0x4AB5B0,0xC000)
         y = 0
         while y <= 0x230:                            # 0x452515..0x452537
             x = 0
             while x <= 0x2D0:
                 g = self.spawn(self.trailq, 0x4F000001, x, y,
                                _r.randrange(0x7FFFFFFF) & 3)   # 0x4AD4CC（0x401686）
-                g.beh = "adjust_tile"
+                g.beh = "adjust_tile"                # 0x4381B0
+                g.a3 = (y << 5) & 0xFFFFFFFF         # [0x20] = 自机Y<<5（此处=铺位行）
+                g.a4 = 0x20                          # [0x24] = 步进
+                g.aux = 0                            # [0x28] 计数
+                g.p["bound"] = (y << 5) + 0x60       # [0x1C] 反弹界（自机Y<<5 近似）
+                g.p["x0"] = x
+                # 0x436A5D ctor：层 0、rect = (0, mode*48, 0x2F, mode*48+0x2F)
+                g.disp = DisplayNode(0, [0, mode * 48, 0x2F, mode * 48 + 0x2F],
+                                     [x - 0x18, y - 0x18])
                 x += 0x78
             y += 0x50
         self.timer.set_period(0)
@@ -2669,40 +2681,130 @@ class Pages(Page4Mixin):
         t = 24 * b
         e2.disp = DisplayNode(13, [l, t, l + 24 * h - 1, t + 23], [dx, dy])
 
-    # ---- 0x444A30（0x6F00000A 調整总控）态机骨架 -----------------------------
+    # ---- 0x444A30（0x6F00000A 調整总控）态机（2026-11-11 转写） ----------------
     def _adjust_root(self, e: UiEntity) -> None:
-        """0x444A30：帧头段 = (指针Y*0x4BDA12F7)>>36（÷54.05）；bl = 段!=[+0x20]；
-        态跳表 0x445464：0=闪光+++、1/3=[0x24]≥0x20 门、2=系统键调 0x4AB5B8 的
-        0xF/0xF0/0xF00（亮度/对比度/模式微调 0x20..0x2F）+ 0x4018C0 重绑输入、
-        4/5/6/7=（0x445415/0x445431/0x444B99/0x444BAD，深部设置态待逐条转写）。
-        C/X → 0x444B7F（旗标 0x200/0x10000 出页）。本实现先落骨架：段跟踪 +
-        系统键字段写 + 旗标出页，深部设置态以 a3 计数占位。"""
+        """0x444A30：帧头 edi = (指针Y*0x4BDA12F7)>>36（÷54.05 段）；bl = 段!=[+0x20]。
+        态跳表 0x445464：0=0x444A86（0x61000005 闪光 rec{0,-0xFF,typ,8}、++[0x1C]）、
+        1/3=0x444AD2（[0x24]≥0x20 → ++[0x1C]）、2=0x444AE5（系统键 0x20..0x2F 调
+        0x4AB5B8 的 0xF/0xF0/0xF00 字段 + 0x4018C0 重绑输入）、4=0x445415（旗标 0x10000
+        → 页3，return 0）、5=0x445431（0x40182A(段!=0) + 态=2）、6/7 走 C/X 表。
+        C/X（0x4AB596/97）→ 0x444B7F：`cmp edi,0x11; ja 尾` → 0x44547C 18 行表：
+          0=0x444B99（0x4AB5B0 |= 0x200 鍛錬）、1=0x444BAD（0x18 字段 1/3/0 循环 + SE）、
+          2=0x444C0D（清 0x4 + 0x4011F9(0x4AB514,4)）、3=0x444C3A（0x4AB5B0 |= 0x400）、
+          4/5/6=尾直跳、7=0x444F14、8=0x444ECF（亮度→对比度连算 + 0x444F60 应用）、
+          9=0x444C4E（[0x28] BGM 序号循环 ≤0x32）、10=0x444CCA（对比度 0xFE000000 ±2、
+          0/100 钳、0x7F→0x63）、11..15=未逐条（0x444D4D/0x444DD0/0x444DF8/0x444E20/
+          0x444E34）、16=0x444E91（BGM 序号循环 ≤0xD + BGM 切换旗标）、17=0x444F01。
+        尾 0x444F7A：旗标[帧+0x12] → BGM 表 {7,8,9,0xA,0xB,0xC,0xD,0xE,1,2,4,3,6}
+        按 [0x28]（9/0xA→0）→ 0x401F69(0x4AB514, …)；旗标[帧+0x13] →
+        亮度/对比度重算调色板（0x44CDF0×2）。"""
         seg = _adjust_magic_div(int(getattr(self.inp, "y", 0)) & 0xFFFFFFFF)
-        e.aux = seg
+        bl = 1 if seg != e.aux else 0
+        e.aux = seg                                  # [+0x20] = 段
         st = e.t
-        # 系统键 0x20..0x2F：态 4/5/6 分别写 0xF/0xF0/0xF00 字段（0x444AE5..0x444B5E）
-        key = self.inp.rec.key
-        if 0x20 <= key <= 0x2F and st in (4, 5, 6):
-            mask = {4: 0xF, 5: 0xF0, 6: 0xF00}[st]
-            val = key - 0x20
-            self.disp_cfg.write(mask, val)           # 0x45B0E0(0x4AB5B8, mask, val)
-            # 0x444B32..0x444B5E：读回三字段 → 0x4018C0(inp, …) 重绑输入预设
-            f3 = self.disp_cfg.field(0xF00)
-            f2 = self.disp_cfg.field(0xF0)
-            f1 = self.disp_cfg.field(0xF)
-            self.inp.rebind_cfg(f3, f2, f1)
-        # C/X（0x4AB596/97）→ 出页旗标（0x444B7F 的可观察结果）
-        if self.inp.rec.b0:
-            self.flags.set(0x200)                    # → 页3
-        elif self.inp.rec.b1:
+        if st == 0:                                  # 0x444A86
+            f = self.spawn_flash(-0xFF, 0, 8)        # rec{0,-0xFF,typ,8}→淡入
+            f.disp = None
+            e.t = 1
+            return True
+        if st in (1, 3):                             # 0x444AD2
+            e.p["dwell"] = e.p.get("dwell", 0) + 1   # [0x24]++（0x444ADC inc eax 前）
+            if e.p["dwell"] >= 0x20:
+                e.t = st + 1                         # 0x444ADD ++[0x1C]
+            return True
+        if st == 2:                                  # 0x444AE5 系统键字段调
+            key = self.inp.rec.key
+            if 0x20 <= key <= 0x2F:
+                mask = {4: 0xF, 5: 0xF0, 6: 0xF00}.get(seg, 0xF)
+                self.disp_cfg.write(mask, key - 0x20)   # 0x45B0E0
+                f3 = self.disp_cfg.field(0xF00)
+                f2 = self.disp_cfg.field(0xF0)
+                f1 = self.disp_cfg.field(0xF)
+                self.inp.rebind_cfg(f3, f2, f1)         # 0x4018C0
+            return True
+        if st == 4:                                  # 0x445415
             self.flags.set(0x10000)                  # → 页3
-        e.t += 1
+            e.alive = False
+            return False
+        if st == 5:                                  # 0x445431
+            self._adjust_apply(seg != 0)             # 0x40182A(段!=0)
+            e.t = 2
+            return True
+        # 态 6/7 及一切 >7：走 C/X 行表（0x444B7F：edi=段，ja → 尾）
+        if self.inp.rec.b0 or self.inp.rec.b1:
+            self._adjust_row(seg)
+        self._adjust_tail()
         return True
 
-    def _adjust_tile(self, e: UiEntity) -> None:
-        """0x401910（0x4F000001）：随自机镜像漂移的网格块。复刻侧按 ctor 的
-        [0x1C]=[0x20]=自机Y<<5 固定铺位（深部行为待逐条转写），恒存活。"""
-        return True
+    def _adjust_row(self, row: int) -> None:
+        """0x44547C 18 行表（C=按住沿/X=按住沿均可，原码不区分按哪个键）。"""
+        if row == 0:                                 # 0x444B99
+            self.keys.bits |= 0x200                  # 鍛錬 ON（0x45AF30）
+        elif row == 1:                               # 0x444BAD
+            cur = self.keys.field(0x18)
+            nxt = {0: 1, 1: 3}.get(cur, 0)
+            self.keys.field_write(0x18, nxt)         # 0x45B0E0(0x4AB5B0, 0x18, nxt)
+            b0 = 1 if self.keys.test(8) else 0       # 0x45AFF0(8)
+            b1 = 1 if self.keys.test(0x10) else 0    # 0x45AFF0(0x10)
+            self.load_wave(0, 0)                     # 0x401C80(0x4AB4B0, …) 等效
+        elif row == 2:                               # 0x444C0D
+            self.keys.bits &= ~4
+            self.p4_stat[0x4AB514] = self.p4_stat.get(0x4AB514, 0)   # 0x4011F9 占位
+        elif row == 3:                               # 0x444C3A
+            self.keys.bits |= 0x400
+        elif row == 7:                               # 0x444F14
+            pass                                     # （未逐条：亮度行确认）
+        elif row == 8:                               # 0x444ECF 亮度→对比度连算
+            b = self.disp_cfg.field(0x1FC0000)
+            c = b * 4 - 0xC8
+            self.disp_cfg.field_write(0xFE000000, c & 0xFFFFFFFF)
+            self._adjust_apply_pal()
+        elif row == 9:                               # 0x444C4E BGM 序号
+            self._adjust_bgm_i += 1                  # 0x444C66 inc [0x2C]
+        elif row == 10:                              # 0x444CCA 对比度 ±2
+            cur = self.disp_cfg.field(0xFE000000)
+            cur = cur + (2 if self.inp.rec.b0 else -2)
+            if cur == 0x64:
+                cur = 0
+            elif cur == 0x7F:
+                cur = 0x63
+            self.disp_cfg.field_write(0xFE000000, cur & 0xFFFFFFFF)
+            self._adjust_pal_dirty = True
+        elif row == 16:                              # 0x444E91 BGM 行
+            if self.keys.test(0x80):
+                v = self._adjust_bgm_i + 1
+                self._adjust_bgm_i = 0 if v >= 0xD else v
+                self._adjust_bgm_dirty = True
+        elif row == 17:                              # 0x444F01
+            if self.keys.test(0x80):
+                self._adjust_apply_pal()
+        # 行 4/5/6 = 尾直跳（无动作）；行 11..15 未逐条（笔记）
+
+    def _adjust_tail(self) -> None:
+        """0x444F7A：BGM 切换旗标 → 0x401F69(0x4AB514, 表[bgm])；调色板旗标 → 重载。"""
+        if self._adjust_bgm_dirty:
+            tbl = (7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 1, 2, 4, 3, 6)
+            i = self._adjust_bgm_i
+            if i in (9, 0xA):
+                i = 0
+            if 0 <= i < len(tbl):
+                self.midi_play(tbl[i])               # 0x401F69(0x4AB514, …) 占位
+            self._adjust_bgm_dirty = False
+        if self._adjust_pal_dirty:
+            self._adjust_apply_pal()
+            self._adjust_pal_dirty = False
+
+    def _adjust_apply(self, nonzero: bool) -> None:
+        """0x40182A（段!=0 时 0x458D60 场景重置族的调用）占位。"""
+        if nonzero:
+            self.scene_reset()
+
+    def _adjust_apply_pal(self) -> None:
+        """0x444F60：亮度/对比度字段 ×4-0xC8 → 0x44CDF0(2, …) 两次重载。"""
+        b = self.disp_cfg.field(0x1FC0000)
+        c = self.disp_cfg.field(0xFE000000)
+        self.pal = self._load_pal(2, (b * 4 - 0xC8, c * 4 - 0xC8))
+        self.pal_now = self.pal
 
     # ---- 0x43E7B1/0x43EB6E 态尾：详绘 + 驻留计数（[0x20] 门 → 输入态激活） ----
     def _rank_tail(self, e: UiEntity, seg: int, bl: int) -> None:
