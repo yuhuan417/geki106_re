@@ -1,4 +1,0 @@
-; func 0x460e80  (2 insns)
-
-0x00460e80  mov     eax, dword ptr [ecx + 0x34]
-0x00460e83  ret     

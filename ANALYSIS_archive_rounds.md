@@ -750,7 +750,7 @@ ctor `0x428C70`，分派表`0x42997C/0x4299B8`。
 `.text`内嵌数据会让线性反汇编失步；地址字节扫描与指令边界回退应互相校验。
 `R.dis(a,b)`仍是从a线性解码，a必须是已知指令边界；
 任意截段可从`R.insns`中的已解码指令筛选，不能把失步输出当新机制。
-栈上表和多个push交错时使用`esp_flow.py`跟踪实际栈基点。
+栈上表和多个push交错时，按调用约定和指令栈变化核对实际栈基点。
 
 | 资料 | 用途／读取边界 |
 |---|---|
@@ -760,9 +760,8 @@ ctor `0x428C70`，分派表`0x42997C/0x4299B8`。
 | `remake/build_p4_tables.py`、`remake/build_p4_str.py` | 类型、数表、字形／字符串数据 |
 | `remake/build_opng_script.py` | 开场脚本结构化 |
 | `grod_decode.py`、`huff_decode.py`、`ggd2png.py`、`layer_decode.py` | 格式解析器 |
-| `docs/p4_listings/`、`behaviors.asm` | 原始函数转储，地址边界须核对 |
-| `docs/README.md` | 当前文档导航与实现状态；专题规格、反汇编转储和截图按主题索引 |
-| `RESOURCE_MAP.md`、`RESOURCE_MAP_archive.md` | 历史资源索引，编号和用途按主文档第5章校正 |
+| `docs/README.md` | 当前文档导航与实现状态；专题规格按主题索引 |
+| `RESOURCE_MAP.md` | 资源索引，编号和用途按主文档第5章校正 |
 
 只保留一份完整数值表，正文引用其位置；实现进度以当前源码及实际验证报告为准。
 不得从代码里已有的补丁或容错倒推出exe也有相同逻辑。

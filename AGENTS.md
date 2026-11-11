@@ -1,7 +1,7 @@
 # AGENTS.md — 《撃破伝》逆向重制项目文档导航
 
 本目录 `/home/yuhuan/geki106_re/` 是游戏 `../geki106/`（Windows XP 同人弹幕射击《撃破伝》v1.06）
-的逆向工程工作区。**最终目标：用 Godot 100% 复刻原作逻辑。**
+的逆向工程工作区。**当前主实现为 pygame，最终目标是 1:1 复刻原作逻辑。**
 
 ## 铁律（历代会话确立，必须遵守）
 
@@ -27,8 +27,7 @@
 - 提交信息写"做了什么 + 依据的地址/结论"，例如 `页3：按 0x427710 实现淡入（a=-256→0）`。
 - 里程碑打 tag：`git tag pages1-3`（现有 tag 作为历史里程碑，实现状态以当前源码和验证为准）。
 - 提交前可先跑无头验证：`python3 remake/pygame/run.py --frames 300 --headless --fixed`。
-- 大件不入库（`.gitignore`）：`remake/godot/assets/`（编译产物）、`remake/godot/.godot/`（导入缓存）、
-  `.godot_home/`、`__pycache__/`。需要时用 `python3 remake/build_assets.py` 重建。
+- 大件不入库（`.gitignore`）：构建缓存、`.godot_home/`、`__pycache__/`。
 
 ### 冻结区：页1/2/3/13（用户明确要求，2026-10-29 起）
 
@@ -57,9 +56,7 @@
 | `ANALYSIS.md` | 16 个主题章：运行流程、对象与旗标、资源、渲染、VM、背景槽、敌机、游戏帧与碰撞、音频、成绩回放、补丁、验证、未解、页1/2/3/13；附录为使用规则与地址速查 | **机制主文档，每次会话先读** |
 | `ANALYSIS.md` §15 | 只列尚未闭合的问题，已解决项归回对应主题 | 接续工作的入口 |
 | `ANALYSIS_archive_rounds.md` | 页出口、资源格式、页2时间表、菜单选机、武器、敌机/Boss、背景与结算的详细参数 | **已整理技术资料，沿用旧文件名** |
-| `RESOURCE_MAP.md`、`RESOURCE_MAP_archive.md` | 历史资源索引；resource.rom 实为98项，RT_STRING为152条；用途按主文档§5校正 | 查资源时核对 |
-| Git 提交 `45ebde2` | 2026-11-06 整理前的两份完整文档；旧轮次号只用于历史检索 | 历史过程 |
-| `behaviors.asm` | 18 个敌机行为函数反汇编转储（`dump_behaviors.py` 生成） | 数据 |
+| `RESOURCE_MAP.md` | 资源索引；resource.rom 实为98项，RT_STRING为152条；用途按主文档§5校正 |
 | `remap_tables.json` | 调色板重映射表 A/B（0x4987F4/0x4988F4 提取） | 数据 |
 
 ## 目录地图
@@ -67,29 +64,22 @@
 - `extracted/` — 全部已解包资源：`midi/`(20 首 SMF)、`wave/`(24 SE)、`ggd_png/`(GGD 转 PNG)、
   `script_txt/`(32 个脚本文本)、`data/`(res_77..89 原始层)、`stage_bg/`、`replay/`、
   `glyphs/`、`resource_dec.bin`(GROD 解包整体)
-- `resources/`、`analysis/` — 历史中间产物（空/杂项）
 - `re_dis.py` — 递归下降反汇编器（可复用：xrefs/writes_to/dis/跳表播种）
-- `dis1.py..dis17.py`、`xref.py`、`xref2.py`、`p4_refs.py` 等 — 一次性反汇编脚本（模式见上）
+- `xref.py`、`xref2.py` — 原始字节交叉引用工具
 - `grod_decode.py` / `huff_decode.py` / `layer_decode.py` / `ggd2png.py` / `script_dump.py` /
   `extract_everything.py` — 各格式的独立解包器（格式定义见 ANALYSIS.md §5）
 
 ## 重制版（`remake/`）
 
-- `remake/geki/` — Python 参考实现：`assets.py`(全格式解码核心)、`scriptvm.py`(VM+发射器)、
-  `layeranim.py`、`audio.py`、`game.py`
-- `remake/godot/` — Godot 工程：`scripts/main.gd`(主场景)、`script_vm.gd`、`emitter.gd`、
-  `behaviors.gd`、`replay.gd`、`audio.gd`；`assets/` 已编译资产（bgm OGG/sfx WAV/ggd PNG/
-  glyphs/JSON 脚本等）
-- `remake/build_assets.py` / `build_glyphs.py` — 资产编译器（extracted → godot/assets）
-- `remake/build_pages_data.py` — 页1-3 数据表提取（RT_STRING 152 条 + 调色板 + 层尺寸 + 页2 时间轴
+- `remake/geki/` — Python 参考实现与资源解码器
+- `remake/pygame/` — 当前主实现与运行入口
+- `remake/build_pages_data.py` — pygame 页数据提取器（RT_STRING 152 条 + 调色板 + 层尺寸 + 页2 时间轴
   + 页1 时间轴/换色/文字表 + 旗标位）→ `remake/pages_data.json`
-- `remake/pygame/` — **页1/2/3/13 复刻（13 = 选择画面，见 ANALYSIS.md §16.4）**：`geki.py` = 640×480 8bpp
+- `remake/pygame/` — 当前 pygame 复刻：`geki.py` = 640×480 8bpp
   索引画布 + 层管理 + 0x44D330 文字 + 输入记录 + 60Hz 帧门 + 页机/页1-3；`run.py` = 运行器
   （固定 640×480、1:1 无缩放、`--headless/--fixed/--shot/--mute`）；`audio.py` = 音频
   （`0x450140` 波形槽 / `0x450440` 旋律变调 / `0x44F600` BGM，见 ANALYSIS §11）
-- `remake/replicate_page_bg.py` — 页2 背景机制复刻（§14 验证脚手架）
-- Godot 移植注意：GDScript `match` 对 JSON 浮点 op 需 int() 归一化；headless 下
-  `get_texture().get_image()` 返回 null 要判空；`blend_rect` 要求源/目标格式一致
+- 页2 背景机制结论见 `ANALYSIS.md`
 
 ## 与 `../geki106/`（原游戏目录）的关系
 

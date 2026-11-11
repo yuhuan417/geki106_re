@@ -1,3 +1,0 @@
-; func 0x45b010  (1 insns)
-
-0x0045b010  ret     4

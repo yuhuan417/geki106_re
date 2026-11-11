@@ -1,7 +1,0 @@
-; func 0x435660  (5 insns)
-
-0x00435660  jne     0x437055
-0x00435666  lea     eax, [ecx - 0x42000001]
-0x0043566c  cmp     eax, 4
-0x0043566f  ja      0x437055
-0x00435675  jmp     dword ptr [eax*4 + 0x437074]

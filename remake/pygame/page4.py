@@ -1100,7 +1100,7 @@ class Ent:
 #   ctor 分派：0x4355E0 里 `[+0x14] & 0xFF000000 == 0x42000000` → 跳表 0x437074（5 项）
 #   0x42000001..05 → 0x43567C / 0x4356E5 / 0x43571C / 0x43578A / 0x4358B4
 #   行为 0x437940 / 0x437B00 / 0x437C30 / 0x437DB0 / 0x437E50
-#   清单 docs/p4_listings/07_beh42_cases.txt、08_beh_437940/437b00/437c30/437db0/437e50.txt
+#   各分支定案见 docs/p4_beh_29high_notes.md；原始逐轮 listing 已清理
 # ---------------------------------------------------------------------------
 T42_RECT = {0x42000001: (0, 0, 0x17, 0x17),      # 0x4356A8 0x45A750(&r,0,0,0x17,0x17)
             0x42000002: (0, 0x18, 0x5F, 0x77),   # 0x435EFD 0x45A750(&r,0,0x18,0x5F,0x77)
@@ -12063,7 +12063,7 @@ class Page4Mixin:
     def _p4_block_data() -> dict:
         """`remake/p4_block.json` 的**其它**数据（目前只有 `vm_chains`）。
 
-        参数块常量已改由 `p4_block_tables.py`（从反汇编机械提取）提供，见 `p4_block()`。
+        参数块常量由 `p4_block_tables.py` 提供；生成器从原始 exe 机械提取，见 `p4_block()`。
         """
         global _P4_BLOCK
         if _P4_BLOCK is None:
@@ -12074,8 +12074,8 @@ class Page4Mixin:
         return _P4_BLOCK
 
     # ---- 0x4505B0 参数块 -----------------------------------------------
-    # 常量表由 `remake/gen_p4_block.py` 从 `docs/p4_listings/01_enter_4505B0.txt`
-    # （递归下降反汇编）机械提取 ⇒ `remake/p4_block_tables.py`。不要手改那个文件。
+    # 常量表由 `remake/build_p4_block.py` 从原始 exe 提取 ⇒
+    # `remake/p4_block_tables.py`。不要手改生成文件。
     #
     # 块基址 B = esp+0x10；`mov [esp+X],imm` 的块偏移 = X-0x10-pend（pend = 已压参数个数）。
     # 三条分支（si=关 [0x4AB5C8]、bp=周目 word[0x4AB5CA]）：

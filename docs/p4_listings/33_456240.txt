@@ -1,7 +1,0 @@
-; func 0x456240  (5 insns)
-
-0x00456240  mov     eax, dword ptr [esp + 4]
-0x00456244  mov     edx, dword ptr [esp + 8]
-0x00456248  mov     dword ptr [ecx + 0x18], eax
-0x0045624b  mov     dword ptr [ecx + 0x14], edx
-0x0045624e  ret     8

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""从 geki106.exe 提取"页1-3"用到的静态数据，生成 godot/assets/pages_data.json。
+"""从 geki106.exe 提取 pygame 页机使用的静态数据，生成 remake/pages_data.json。
 
 数据来源（全部为反汇编实证，见 ANALYSIS.md §16）：
   * RT_STRING 字符串表            → GGD 文件名（LoadStringA 用，0x44BE10 内）

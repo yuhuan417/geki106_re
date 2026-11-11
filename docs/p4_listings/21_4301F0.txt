@@ -1,9 +1,0 @@
-; func 0x4301f0  (7 insns)
-
-0x004301f0  push    esi
-0x004301f1  mov     esi, ecx
-0x004301f3  call    0x402063   ; → 0x4303c0
-0x004301f8  mov     ecx, esi
-0x004301fa  call    0x4011d1   ; → 0x430800
-0x004301ff  pop     esi
-0x00430200  ret     

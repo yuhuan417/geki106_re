@@ -14,5 +14,4 @@ GDI 实测把它映射成 **ＭＳ ゴシック（MS Gothic）**（`remake/tools
 3. `/mnt/c/Windows/Fonts/msgothic.ttc`、`C:/Windows/Fonts/msgothic.ttc` ← 本机实际命中的
 4. Noto Serif CJK（兜底）
 
-页1 版权页用第 3 项时与宿主 GDI **逐像素一致（IoU 1.0000）**，见
-`remake/pygame/shots/p1/gdi_vs_remake.png`。
+页1 版权页用第 3 项时曾与宿主 GDI 逐像素一致（IoU 1.0000）。

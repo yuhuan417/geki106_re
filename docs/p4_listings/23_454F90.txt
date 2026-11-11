@@ -1,4 +1,0 @@
-; func 0x454f90  (2 insns)
-
-0x00454f90  mov     dword ptr [ecx], 0x499030
-0x00454f96  jmp     0x4019ce   ; → 0x455350

@@ -1,60 +1,29 @@
-# 撃破伝 v1.06 资源速查（定稿，配合 ANALYSIS.md）
+# 撃破伝 v1.06 资源索引
 
-## 容器与编码
-| 格式 | 编码 | 解码位置 |
-|---|---|---|
-| resource.rom | GROD106A + 自定义 LZ + u24 偏移表(98 项) | exe 0x45B6E0 |
-| BGM #1-20 | 静态 Huffman → 标准 SMF | exe 0x44F0B0（码表 0x498C48/0x498E48） |
-| 关卡底 #83-89 | 字典 RLE 位流 → 640×480×8bpp | exe 0x45BC00 |
-| 存档/回放 | GRCD/GRPD106A + 同款 LZ | exe 0x45C020 |
-| GGD 图形 | GGPD + w/h + 8bpp（垂直翻转存储） | exe 0x455870 |
+资源编号与解析结论以 [ANALYSIS.md §5](ANALYSIS.md#5-资源与文件格式) 为准。本表只列可确认的容器映射；
+RT_STRING 文件名映射见 `remake/pages_data.json:string_table`，不得与 GROD 资源 ID 混用。
 
-## resource.rom 条目
+## `resource.rom`
+
+容器为 `GROD106A`，解包后共98项，ID从1开始。
+
 | ID | 内容 |
 |---|---|
-| 1-20 | BGM（标准 MIDI） |
-| 21-44 | 音效（s16 PCM） |
-| 45-76 | 关卡脚本（VM 记录流；46-52=Stg1-7，66-72=二周目） |
-| 77 | 背景天空滚动流（2068 帧） |
-| 78 | 特效尺寸表（74 条，等级 4-12） |
-| 79-82 | 射击命中特效动画 |
-| 83-89 | 过关画面底图 |
-| 90-97 | 内置演示回放 |
-| 98 | 构建日期戳 |
+| 1–20 | MIDI 音乐 |
+| 21–44 | PCM 音效 |
+| 45–76 | 流程脚本 |
+| 77 | 标题矩形记录流 |
+| 78 | 场景快照描述 |
+| 79 | 选机人像 mosaic 数据 |
+| 80–82 | 标题图集字形条数据 |
+| 83–89 | 阶段背景数据 |
+| 90–97 | 内置回放 |
+| 98 | 构建注释 |
 
-## GGD 文件（文件名来自 PE 字符串资源表，LoadStringA→池 0x4AA0B4）
-| 文件 | 内容 |
+## 相关实现
+
+| 路径 | 用途 |
 |---|---|
-| bm_otc0/1/2 | 三战机背景图：撃/凛/漢 |
-| bm_mn | 主菜单整图 |
-| bm_tr | 选关菜单文字 |
-| bm_st1/2/3 | 设置菜单文字（st1=彩虹撃测试图） |
-| bm_psel/psel2 | 选机/选关界面（psel2 含天空渐变色号） |
-| bm_sX | 每关敌人字形位图 |
-| bm_sXl0-l9 | 敌字形 10 级缩放序列 |
-| bm_cm32 / cm48 | 子弹字形 32px×80 / 48px 字形格 |
-| bm_ota0-3 / otb0-1 | 天空图案源（层 7-10 换装） |
-| bm_op + opl0-9 | 开场动画字形缩放序列 |
-| bm_pal/pald/pals | 调色板 ×3 |
-
-## 渲染机制
-1. 关卡底 #83-89（纯色/过关图）→ 层 3
-2. 天空 = 序列引擎色带逐行填充（0x4562A0）+ #77 滚动流（层 7-10 → 屏）
-3. 实体/楼墙/HUD = 系统字体实时 TextOut（0x44D330，ＭＳ明朝，随机器字体可变）
-4. GGD 字形位图 = setup106 安装期以系统字体预渲染（font.txt 候选）
-5. 脚本 VM 驱动关卡流程；发射器 = state/delta 积分器
-
-## 已产出工具
-| 文件 | 用途 |
-|---|---|
-| remake/geki/assets.py | 全格式解码（GROD/Huffman/RLE/GGD/调色板） |
-| remake/build_assets.py | 资产编译器 → Godot 格式 |
-| remake/build_glyphs.py | 字形切割 |
-| remake/godot/ | Godot 4.3 重制工程（可运行） |
-| remake/replicate_page_bg.py（上级目录） | 页2 背景机制复刻 |
-| kanji_compose.py | 汉字精灵拼装实验 |
-| layer_decode.py / dec83.py | #83-89 解码 |
-| behaviors.asm | 18 行为函数反汇编存档 |
-| remap_tables.json | 调色板重映射表 |
-| api_audit.json | API 调用点审计 |
-| geki106/geki106_win11.exe | WIN11 补丁版（3 补丁，24 字节） |
+| `remake/geki/assets.py` | GROD、Huffman、GGD、图层 RLE 与调色板解码 |
+| `grod_decode.py`、`huff_decode.py`、`layer_decode.py`、`ggd2png.py` | 独立格式解码工具 |
+| `remake/pages_data.json` | 提取后的 RT_STRING、调色板与页数据 |

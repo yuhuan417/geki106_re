@@ -566,7 +566,7 @@ class TextRenderer:
                          "C:/Windows/Fonts/msmincho.ttc",
                          "C:/Windows/Fonts/msgothic.ttc",
                          "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-                         str(REMAKE / "godot/assets/fonts/NotoSansCJK-Regular.ttc")):
+                         str(REMAKE / "fonts/NotoSansCJK-Regular.ttc")):
                 if Path(cand).exists():
                     font_path = cand
                     break

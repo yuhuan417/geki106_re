@@ -1,9 +1,0 @@
-; func 0x45f9d0  (7 insns)
-
-0x0045f9d0  mov     eax, dword ptr [ecx + 0x20]
-0x0045f9d3  mov     edx, dword ptr [ecx + 0x18]
-0x0045f9d6  push    eax
-0x0045f9d7  push    edx
-0x0045f9d8  call    0x40233d   ; → 0x45e7a0
-0x0045f9dd  and     eax, 0xffff
-0x0045f9e2  ret     
