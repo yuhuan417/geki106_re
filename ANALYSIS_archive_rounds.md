@@ -761,7 +761,7 @@ ctor `0x428C70`，分派表`0x42997C/0x4299B8`。
 | `remake/build_opng_script.py` | 开场脚本结构化 |
 | `grod_decode.py`、`huff_decode.py`、`ggd2png.py`、`layer_decode.py` | 格式解析器 |
 | `docs/p4_listings/`、`behaviors.asm` | 原始函数转储，地址边界须核对 |
-| `docs/p4_*.md`、`docs/handoff_p4.md` | 分专题历史笔记；与本次整理冲突时回查exe，不沿用旧定性 |
+| `docs/README.md` | 当前文档导航与实现状态；专题规格、反汇编转储和截图按主题索引 |
 | `RESOURCE_MAP.md`、`RESOURCE_MAP_archive.md` | 历史资源索引，编号和用途按主文档第5章校正 |
 
 只保留一份完整数值表，正文引用其位置；实现进度以当前源码及实际验证报告为准。
