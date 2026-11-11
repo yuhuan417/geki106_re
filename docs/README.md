@@ -23,6 +23,7 @@
 | [p4_step_0x451110.md](p4_step_0x451110.md) | 页4/11 帧驱动、碰撞、输入与合成顺序 |
 | [p4_enter_0x4505B0.md](p4_enter_0x4505B0.md) | 页4/11 阶段进场与参数块 |
 | [p4_vm_0x460350.md](p4_vm_0x460350.md) | 流程 VM、操作码与发射器 |
+| [p4_stage_flow.md](p4_stage_flow.md) | VM 冻结门（0x56CC84）、关卡跳转、继续与结局选择 |
 | [p4_bg_composite.md](p4_bg_composite.md) | 页4 背景槽、带状体与层合成 |
 | [p4_stage_0x45EB40_0x460930.md](p4_stage_0x45EB40_0x460930.md) | 成绩、命数及场景快照对象 |
 | [p4_ent23_fields.md](p4_ent23_fields.md) | 实体公共头与 0x23 族构造字段 |
