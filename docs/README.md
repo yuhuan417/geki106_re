@@ -25,6 +25,7 @@
 | [p4_vm_0x460350.md](p4_vm_0x460350.md) | 流程 VM、操作码与发射器 |
 | [p4_stage_flow.md](p4_stage_flow.md) | VM 冻结门（0x56CC84）、关卡跳转、继续与结局选择 |
 | [p4_weapon_chain.md](p4_weapon_chain.md) | 武器与捕获整链：挂舱/锁定弹/捕获回调/伤害编码 |
+| [p4_replay_save.md](p4_replay_save.md) | 回放/存档持久化：GROD LZ、GRPD/GRCD 头与往返 |
 | [p4_bg_composite.md](p4_bg_composite.md) | 页4 背景槽、带状体与层合成 |
 | [p4_stage_0x45EB40_0x460930.md](p4_stage_0x45EB40_0x460930.md) | 成绩、命数及场景快照对象 |
 | [p4_ent23_fields.md](p4_ent23_fields.md) | 实体公共头与 0x23 族构造字段 |
