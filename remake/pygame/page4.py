@@ -284,7 +284,10 @@ ENT23_INIT = {
     0x2300000F: {"beh": 0x40138E, "vtup": True, "r1sh": (0x24, 4)},   # 0x40DBA4
     0x23000012: {"beh": 0x4015B4, "imm": {}},
     0x23000013: {"beh": 0x40231A, "imm": {}},
-    0x23000015: {"beh": 0x4017EE, "imm": {}},
+    # 0x23000015（0x40DD27）：[+0x24]=rec0<<4、[+0x28]=rec1<<4 —— 8.4 位置累加器
+    # 初值（2026-11-12 修：缺这两条 ⇒ 行为 0x40F880 首帧 x=(0+8)>>4=0，boss 瞬移到
+    # (0,0) 邻域 ⇒ "第一关 boss 看不见"）。
+    0x23000015: {"beh": 0x4017EE, "r01sh4": ((0x24, 0), (0x28, 1))},
     0x23000016: {"beh": 0x401D48, "imm": {}},
     0x23000017: {"beh": 0x401951, "imm": {}},
     0x23000018: {"beh": 0x4013BB, "imm": {}},
@@ -843,6 +846,10 @@ class Ent:
         if "r0m" in info:                              # [off] = rec[0] - m
             off, m = info["r0m"]
             self.d32(off, (a - m) & 0xFFFFFFFF)
+        if "r01sh4" in info:                           # 0x40DD3E：rec[0]<<4 / rec[1]<<4
+            o1, o2 = info["r01sh4"]
+            self.d32(o1, (a << 4) & 0xFFFFFFFF)
+            self.d32(o2, (b << 4) & 0xFFFFFFFF)
         if "r01sh8" in info:                           # 0x410C47：rec[0]<<3 / rec[1]<<3
             o1, o2 = info["r01sh8"]
             self.d32(o1, (a << 3) & 0xFFFFFFFF)
@@ -12091,7 +12098,12 @@ class Page4Mixin:
             _sys.path.insert(0, _r)
         from p4_block_tables import BLOCK_SIZE, LITERALS, TABLES
 
-        si = int(self.stage_no) & 0xFFFF          # [0x4AB5C8]
+        # 0x4505E4 `mov esi,[0x4AB5C8]`：si 取**整个 dword**（分支判 `cmp si,8` 用的是
+        # 全 32 位 ⇒ 页13 的 0x20000 落分支 C(bp=2)→链 0（全周目主链）——2026-11-12 修：
+        # 旧实现 &0xFFFF 把 si 截成 0 ⇒ 落分支 A → 链 11（永远第 1 关）。
+        self.stage_no = int(getattr(self, "theatre", 0)) & 0xFFFFFFFF   # 0x4AB5C8 全 dword
+        self.loop_no = (self.stage_no >> 16) & 0xFFFF                   # word[0x4AB5CA] 周目
+        si = self.stage_no                        # [0x4AB5C8]（全 dword）
         bp = int(self.loop_no) & 0xFFFF           # word[0x4AB5CA]
         blk = bytearray(BLOCK_SIZE)
 
@@ -12107,14 +12119,26 @@ class Page4Mixin:
                 else:
                     put(off, val)
 
+        # 0x450605..0x450644：四个位段回读 —— **在分支之前**（两条路径共用）。
+        # 2026-11-12 修：旧实现把这段放在分支尾部 ⇒ 旁路（普通局）早退时块内
+        # 0x18(选机)/0x1B(bit9)/0x1C(鍛錬)/0x1D(操作器) 全 0，p4_write_state 再把它们
+        # 写回状态字 ⇒ **选机恒 0（永远撃）、操作器位被清 ⇒ 键盘预设 7..14（kb=0）
+        # 永远生效、鍛錬位被清**。实机 rp_last.dat 头 +0x18=选机、+0x1B..0x1D=三旗标
+        # （+0x19=0x64 继续门、+0x1A=6 命数）证实这段在两条路径都执行。
+        blk[0x18] = (self.keys.bits >> 14) & 3         # 0x450638/0x450644 0x45AFC0(…,0xC000)
+        blk[0x1B] = 1 if self.keys.test(0x200) else 0  # 0x450605/0x450611 0x45AFF0(…,0x200)
+        blk[0x1C] = 1 if self.keys.test(1) else 0      # 0x45060A/0x450615 0x45AFF0(…,1)
+        blk[0x1D] = 1 if self.keys.test(2) else 0      # 0x45061A/0x450625 0x45AFF0(…,2)
+
         # 0x450648 `0x45B030(0x4AB5B0,1)`：0x45B030 = **位清零测试**（bits&mask==0 → 1，
         # 实测 0x45B03B neg/sbb/inc 序列）⇒ bit0 **未**置（通常游戏）走 A_flag：
         # a3=6（残撃 5 可见）、a4=0x64（开场点击门开）。鍛錬（bit0 置）才走分支 A。
         # 旧实现 test(1) 反向 ⇒ 普通周目命数不显示（2026-11-06 修正）。
         if not self.keys.test(1):
             literals("A_flag")
-            # 0x450651 `push ebx`(ebx=0) ⇒ `0x45AFC0(0x4AB5B0, 0)`：mask=0 恒返回 0
-            # ⇒ neg/sbb/and 0x9F/add 0x64 的链条恒得 al = 0x64（与任何位无关）。
+            # 0x450651 `push ebx`(ebx=0)=0x45AFC0 的 mask 实参（ret 4 消费）⇒ 之后
+            # esp=S-0xE8：[esp+0x29]=B+0x19=0x64、[esp+0x2A]=B+0x1A=6、
+            # [esp+0x22/24/26]=B+0x12/14/16(word 0)——与实机 rp_last.dat 头 +0x19/+0x1A 吻合。
             blk[0x19] = 0x64
             return blk
 
@@ -12140,11 +12164,6 @@ class Page4Mixin:
             blk[0x19] = 0                              # 0x450A1D mov byte[esp+0x29],bl
             blk[0x1A] = TABLES["0x3c"][4 + bp] & 0xFF  # 0x450A14 mov dl,byte[esp+eax+0x44]
 
-        # 0x450605..0x450644：四个位段回读（这 4 条写时已压入下一次调用的实参 ⇒ 块偏移 -4）
-        blk[0x18] = (self.keys.bits >> 14) & 3         # 0x450638/0x450644 0x45AFC0(…,0xC000)
-        blk[0x1B] = 1 if self.keys.test(0x200) else 0  # 0x450605/0x450611 0x45AFF0(…,0x200)
-        blk[0x1C] = 1 if self.keys.test(1) else 0      # 0x450615/0x450621 0x45AFF0(…,1)
-        blk[0x1D] = 1 if self.keys.test(2) else 0      # 0x450625/0x450634 0x45AFF0(…,2)
         return blk
 
     @staticmethod
@@ -17685,11 +17704,21 @@ class Page4Mixin:
         self.p4_n43c += 1
         return e
 
+    def _p4_type0_drift(self, e: "Ent") -> bool:
+        """type 0（0x61000001 群生门的生成体）：原作 ctor 落默认尾（+0x40 = 堆残留，
+        实机靠堆复用继承旧行为）。复刻按最常见模式近似：匀速左移、出屏（x<-0x20）死。
+        无显示节点（prop 表无 type 0 ⇒ 0x43AC30 不建节点）＝不可见、半径 0＝不可命中。
+        存在意义：占住 0x430860 的队列计数，让 0x427510 门（VM 冻结）在群生期间保持。"""
+        e.d32(0x04, (e.s32(0x04) - 3) & 0xFFFFFFFF)
+        return e.s32(0x04) > 0xFFFFFFE0          # 有符号 x > -32
+
     def p4_call_behaviour(self, e: "Ent") -> bool:
         """`0x446450 = jmp [ent+0x40]`：按行为指针分派。未实现的行为先返回"存活"并计数，
         绝不假装完成——实现一个就在 `P4_BEH` 里登记一个。"""
         if not isinstance(e.beh, int):
             return True   # 字符串行为（UiEntity）由 tick_ui 分派，不走 p4_call_behaviour
+        if e.beh == 0 and e.g32(0x14) == 0:       # type 0（0x61000001 群生体）：漂移近似
+            return self._p4_type0_drift(e)
         fn = P4_BEH.get(e.beh)
         if fn is None:
             # 0x41 族拖尾/粒子（0x401B95→0x430550）等 mixin 方法

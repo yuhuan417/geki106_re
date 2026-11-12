@@ -2219,7 +2219,11 @@ class Pages(Page4Mixin):
                 e.aux, e.a3, e.a4 = int(x), int(y), int(a3)
                 e.t = 0                         # [+0x28] 帧计数
             elif type_word == 0x61000002:
-                e.beh = "seq_gate"              # 行为 0x427510：两队列清空 → sysf|=2 死
+                # ctor 0x42729A：`push 2; 0x45AF30(0x56CC84)` —— 生成即 **冻结 VM**（bit2 置）；
+                # 行为 0x427510 在两队列清空且 0x56CCB8 bit15 清时 `0x45AF60(…,2)` 解冻并死。
+                # 2026-11-12 修：旧实现极性反了（清空时置位）⇒ VM 在战斗后假死、关卡无法推进。
+                e.beh = "seq_gate"
+                self.sysf.bits |= 2
             elif type_word == 0x61000003:
                 # init 0x4272B1：[+0x1C]=0；一次性 0x45B0A0(0x56CCB8, rec3, rec0!=0)，行为 0x430520 首帧死
                 e.beh = "stat_bits"
@@ -2234,6 +2238,20 @@ class Pages(Page4Mixin):
                 e.a3 = int(x)
                 e.a4 = -256
                 e.t = 8
+            elif type_word == 0x61000001:
+                # ctor 0x427259：`push 0x8000; 0x45AF30(0x56CCB8)`（bit15 置 → 0x427510 门
+                # 保持关闭）；[+0x20]=rec0(掩码)、[+0x24]=rec1(生成数)、[+0x28]=rec3(生成型)。
+                # 行为 0x427450：`(counter & rec0)==0` 时往 0x4AD43C 生成 rec3 型敌机
+                # （x=664、y=60+rand%360），共 rec1 个；完毕清 bit15 并死。
+                # 2026-11-12 落地：此前落 "fade_in" 未实现 ⇒ 关1 群生段缺失。
+                e.beh = "crowd_spawn"
+                self.sysb8.bits = (self.sysb8.bits | 0x8000) & 0xFFFFFFFF
+                self.p4_stat[0x56CCB8] = self.sysb8.bits
+                e.aux = 0                  # counter（[ent+0x1C]）
+                e.a3 = int(x) & 0xFFFFFFFF  # [+0x20] 掩码 = rec0
+                e.a4 = int(y) & 0xFFFFFFFF  # [+0x24] 剩余生成数 = rec1
+                e.p["spawn_type"] = int(a3)  # [+0x28] 生成型 = rec3
+                e.p["spawned"] = 0
             else:
                 e.beh = "fade_in"
                 self.log(f"ui 0x61 type 0x{type_word:X} 未实现")
@@ -2400,6 +2418,8 @@ class Pages(Page4Mixin):
                 self._bgmvol(e)
             elif e.beh == "seq_gate":
                 self._seq_gate(e)
+            elif e.beh == "crowd_spawn":
+                self._crowd_spawn(e)
             elif e.beh == "stat_bits":
                 self._stat_bits(e)
             elif e.beh == "check_1000":
@@ -4068,8 +4088,24 @@ class Pages(Page4Mixin):
                   for x in q if getattr(x, "alive", True))
         n43 = sum(1 for x in getattr(self, "p4_q43c", []) if getattr(x, "alive", True))
         if n49 + n43 == 0 and not self.sysb8.test(0x8000):
-            self.sysf.bits |= 2
-            e.alive = False
+            self.sysf.bits &= ~2                   # 0x42753F..0x42754B 0x45AF60(0x56CC84,2) 解冻
+            e.alive = False                        # 0x42754B xor al,al（行为返回 0 = 摘链）
+
+    def _crowd_spawn(self, e: UiEntity) -> None:
+        """0x427450（0x61000001 群生门）：`counter(+0x1C)++`；`(counter & rec0)==0` 时
+        0x430400(0x298, rand%0x168+0x3C, rec3, 0) 入 0x4AD43C；生成 rec1 个后
+        `0x45AF60(0x56CCB8,0x8000)`（bit15 清）并死（0x4274BF..0x4274D4）。"""
+        counter = (e.aux + 1) & 0xFFFFFFFF
+        e.aux = counter
+        if (counter & e.a3) == 0 and e.a4 > 0:
+            y = (self.p4_rand_mod(0x168)[1] + 0x3C)   # 0x427468 rand%0x168+0x3C（余数）
+            self._p4_ent43c(int(e.p.get("spawn_type", 0)) & 0xFFFFFFFF,
+                            0x298, y, 0, 0)
+            e.a4 = (e.a4 - 1) & 0xFFFFFFFF
+            if e.a4 == 0:
+                self.sysb8.bits = (self.sysb8.bits & ~0x8000) & 0xFFFFFFFF
+                self.p4_stat[0x56CCB8] = self.sysb8.bits   # 0x4274BF bit15 清
+                e.alive = False                            # 0x4274CE 死
 
     def _stat_bits(self, e: UiEntity) -> None:
         """0x4272B1（0x61000003）：一次性 `0x45B0A0(0x56CCB8, rec3, rec0!=0)`；行为 0x430520 首帧死。
@@ -4209,8 +4245,125 @@ class Pages(Page4Mixin):
 
     # 0x4258F0（0x5F000006 的行为）：只改节点可见位 [node+0x1C]
     def _stage_title12(self, e: UiEntity) -> None:
-        """0x5F000014（页12 的关卡标题）：静态显示，由页12 的 step 控制生命周期。"""
+        """0x5F000014 → 行为 0x426340：**鍛錬选关机九态机**（2026-11-12 落地）。
+
+        状态（跳表 0x4267B0，`[ent+0x1C]`）：
+        ```
+        0=0x426367  生成面板 + 0x61000005(-255→0) 淡入；[+0x24]=2、态=8
+        8=0x426463  0x449E10(stage,0xB5) 显示更新 + 0x61000005(-255→0,+16)；
+                    [+0x24]=0x10、态=1；按 stage 与 7 比较写 [flags+4] 矩形
+        1/3/5=0x426556  [ent+0x24] 到 0 → 0x44E470(320,240) 指针归中 → 态+1
+        2=0x426585  输入：指针 |x-320|>0x50 → 关卡 ±(x≥320?1:-1)，界 = (0x70000!=0)+0xF00000，
+                    <0→界-1、≥界→0，写 word[0x4AB5C8]、态=7；
+                    |y-240|>0x50 → 周目 ±(y≥0xA0?1:-1)，界 = 关卡<8 ? 4+bit31 : min(0x70000,4)，
+                    回绕，写 word[0x4AB5CA]；居中：btn0 沿 → 态=3（0x61000005(-16)、[+0x24]=0x10）；
+                    btn1 沿 → 态=5
+        7=0x42640C  0x61000005(-255,-255,0) 压暗；[+0x24]=2、态=8
+        3=0x426556  同 1 → 态 4
+        4=0x42678E  `0x45AF30(0x4AB5C0, 0x10000)` —— 选定完毕，页12 收尾去页4/页15
+        5=0x426556  同 1 → 态 6
+        6=0x426795  `0x45AF30(0x4AB5C0, 0x200)` —— 取消，回页3
+        ```
+        界限：关卡 0..((0x4AB5B0 的 0x70000 字段!=0) + 0xF00000 字段) - 1（回绕）；
+        周目 = 关卡<8 ? 0..(4+bit31)-1 : 0..min(0x70000,4)-1（`0x42664C..0x426695`）。
+        """
+        import random as _r
+        st = e.a3
+        # 态 2 的输入分支（0x426585）
+        if st == 2:
+            px, py = int(self.inp.x) & 0xFFFFFFFF, int(self.inp.y) & 0xFFFFFFFF
+            moved = False
+            if abs(px - 0x140) > 0x50:                       # 0x42658B..0x426596 横向
+                f7 = self.keys.field(0x70000)                # 0x42659F..0x4265AE 0x45AFC0(…,0x70000)
+                fF = self.keys.field(0xF00000)               # 0x4265B0..0x4265BE 0x45AFC0(…,0xF00000)
+                limit = (1 if f7 else 0) + fF                # 0x4265CB esi = (f7!=0)+fF
+                stage = self.theatre & 0xFFFF                # word[0x4AB5C8]（0x4265D5 mov edx,…）
+                stage += 1 if px >= 0x140 else -1            # 0x4265DB..0x4265E2 setge/dec/and/inc
+                if stage < 0:
+                    stage = limit - 1                        # 0x4265E9 lea eax,[esi-1]
+                elif stage >= limit:                         # 0x4265EC cmp ax,si / jl
+                    stage = 0                                # 0x4265F1 xor eax,eax
+                if stage == 8:
+                    self.theatre = (self.theatre & 0xFFFF0000)  # 0x426612 word[0x4AB5CA]=0
+                self.theatre = (self.theatre & 0xFFFF0000) | (stage & 0xFFFF)
+                self.p4_stat[0x4AB5C8] = self.theatre        # 0x4265F4/0x42661B word 写回
+                st = 7                                       # 0x4265FA/0x426622 mov dword[ebx+0x1C],7
+                moved = True
+            elif abs(py - 0xF0) > 0x50:                      # 0x426634..0x426646 纵向
+                if (self.theatre & 0xFFFF) < 8:              # 0x42664C cmp word[0x4AB5C8],8
+                    bit31 = self.keys.test(0x80000000)       # 0x426656..0x426666 0x45AFC0(…,0x80000000)
+                    lim = 4 + (1 if bit31 else 0)            # 0x42666B add eax,4
+                else:                                        # 0x426670..0x426695
+                    f7 = self.keys.field(0x70000)
+                    lim = min(f7, 4)                         # 0x42667F cmp eax,4 / jae
+                lp = (self.theatre >> 16) & 0xFFFF           # word[0x4AB5CA]（0x4266B0 add cx,…）
+                delta = 1 if py >= 0xA0 else -1              # 0x4266A2 cmp esi,0xA0 / setge
+                lp += delta
+                if lp < 0:
+                    lp = lim - 1                             # 0x4266BC lea ecx,[eax-1]
+                elif lp >= lim:                              # 0x4266C2 cmp edx,eax / jl
+                    lp = 0                                   # 0x4266C6 xor ecx,ecx
+                self.theatre = (self.theatre & 0xFFFF) | ((lp & 0xFFFF) << 16)
+                self.p4_stat[0x4AB5C8] = self.theatre        # 0x4266C8 word[0x4AB5CA] 写回
+                self.inp.set_pos(0x140, 0xF0)                # 0x4266CF 0x44E470 指针归中
+                return True                                  # 0x4266E5 mov al,1（保持存活）
+                self.inp.set_pos(0x140, 0xF0)                # 0x4266CF 0x44E470 指针归中
+                return True                                  # 0x4266E5 mov al,1（保持存活）
+            elif self.inp.rec.e0:                            # 0x4266EF byte[0x4AB596]
+                e.a3 = 3                                     # 0x44670E mov dword[ebx+0x1C],3
+                e.a4 = 0x10                                  # 0x42673A [+0x24]=0x10
+                self.spawn_flash(-255, -255, 0x10)           # 0x4266F8 淡入门
+                return True
+            elif self.inp.rec.e1:                            # 0x42674C byte[0x4AB597]
+                e.a3 = 5
+                e.a4 = 0x10
+                self.spawn_flash(-255, -255, 0x10)
+                return True
+            if moved:
+                e.a3 = 7                                     # 0x4265FA/0x426622 态=7（压暗）
+                e.a4 = 2                                     # 0x42644A？—— 7 态 [+0x24]=2 → 态 8
+            return True
+        # 态 4：选定 → 0x10000（0x42678E push 0x10000 / 0x45AF30）
+        if st == 4:
+            self.flags.set(0x10000)
+            return True
+        # 态 6：取消 → 0x200（0x426795 push 0x200 / 0x45AF30）
+        if st == 6:
+            self.flags.set(0x200)
+            return True
+        # 态 1/3/5（0x426556）：[ent+0x24] 到 0 → 0x44E470(320,240) 归中 → 态+1
+        if st in (1, 3, 5):
+            if e.a4 == 0:
+                self.inp.set_pos(0x140, 0xF0)                # 0x426563 0x4013DE(0x4AB454,0x140,0xF0)
+                e.a3 = st + 1                                # 0x426578 inc eax
+            else:
+                e.a4 -= 1                                    # 0x42656E dec（[ent+0x24] 倒数）
+            return True
+        # 态 7（0x42640C）：压暗保持，[+0x24]=2 → 态 8
+        if st == 7:
+            self.spawn_flash(-255, -255, 0)                  # 0x42640C..0x426444（保持压暗）
+            if e.a4 == 0:
+                e.a4 = 2                                     # 0x42644A [+0x24]=2
+                e.a3 = 8                                     # 0x426451 [ebx+0x1C]=8
+            else:
+                e.a4 -= 1
+            return True
+        # 态 8（0x426463）：0x449E10(stage,0xB5) 显示更新 + 0x61000005(-255→0,+16)、[+0x24]=0x10、态=1
+        if st == 8:
+            stage = self.keys.field(0xFFFF)
+            self.spawn_flash(-255, 0, 0x10)                  # 0x42647F..0x4264BA 淡入
+            e.a4 = 0x10                                      # 0x4264BF [+0x24]=0x10
+            e.a3 = 1                                         # 0x4264C6 [ebx+0x1C]=1
+            e.p["disp_stage"] = stage                        # 0x4264CD/0x4264D3 stage→矩形
+            return True
+        # 态 0（0x426367）：面板生成 + 淡入 → [+0x24]=2、态=8
+        if st == 0:
+            self.spawn_flash(-255, 0, 8)                     # 0x42639B 0x61000005(-255,0,8)
+            e.a4 = 2                                         # 0x42644A？—— 0x426449 处 [+0x24]=2
+            e.a3 = 8                                         # 0x42644A/0x426451 [ebx+0x1C]=8
+            return True
         e.t += 1
+        return True
 
     def _menu_row(self, e: UiEntity) -> None:
         """0x4258F0：可见 = 列位相同 且 (行 != 选中 或 选中项闪烁)。
