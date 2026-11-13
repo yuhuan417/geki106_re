@@ -767,14 +767,25 @@ class Input:
                 ddy = (c * inv * ddy) >> 12
             dx, dy = ddx, ddy
             self.mouse_tx, self.mouse_ty = tx, ty
+        # 0x44E8C0..0x44E952：键盘 ±1000 **加进**（鼠标）位移，再按合成值的**符号**取
+        # 方向、幅值 = 预设步长；任一轴为 0 ⇒ 该轴不动（旧版三元把 0 轴也推 −s ⇒
+        # 单方向键走出对角线）。定步预设且**任一轴为零**（cardinal）→ 步长 1.5×
+        # （0x44E920 test bl[+0x4E] / 0x44E928 test edx / 0x44E92E test eax / 0x44E930
+        # sar+add——合成 (s·1.5, 0)/(0, s·1.5) 与斜向 (s, s) 的欧氏速度相等）。
         kdx = -1000 if keys.get("left") else (1000 if keys.get("right") else 0)
         kdy = -1000 if keys.get("up") else (1000 if keys.get("down") else 0)
-        if cfg["kb"] and (kdx or kdy):
+        if cfg["kb"]:
+            dx += kdx
+            dy += kdy
             s = cfg["step"]
-            if cfg["fixed"] and kdx and kdy:
-                s += s >> 1                     # 0x44E930 斜向 1.5×（仅定步预设）
-            dx += s if kdx > 0 else -s          # 0x44E93A 符号取自按键、幅值=预设步长
-            dy += s if kdy > 0 else -s
+            if cfg["fixed"] and (dx == 0 or dy == 0):
+                s += s >> 1                     # 0x44E930 sar 1 + add = 1.5×
+            if dx != 0:                         # 0x44E936
+                dx = s if dx > 0 else -s        # 0x44E93A..0x44E940
+            if dy != 0:                         # 0x44E944
+                dy = s if dy > 0 else -s        # 0x44E948..0x44E94E
+            # （0x44E973 byte[edi+0xC]=1 的"本帧有位移"旗标、0x44E979 的
+            #   ([esi+0x20]&byte[esi+0x4F]) 混合预设抑制门：复刻侧暂无对应读者，未接。）
         l, t, rt, b = cfg["bounds"]
         if self.x + dx > rt:
             dx = rt - self.x
@@ -2020,34 +2031,36 @@ class Pages(Page4Mixin):
         e.a3 = 0                                     # [+0x1C] 态
         e.aux = 0                                    # [+0x24]
         import random as _r
-        mode = self.keys.field(0xC000)               # 0x436A8D 0x45AFC0(0x4AB5B0,0xC000)
         y = 0
-        while y <= 0x230:                            # 0x452515..0x452537
+        while y <= 0x230:                            # 0x452515..0x452537（y 内层步 0x50）
             x = 0
-            while x <= 0x2D0:
-                g = self.spawn(self.trailq, 0x4F000001, x, y,
-                               _r.randrange(0x7FFFFFFF) & 3)   # 0x4AD4CC（0x401686）
-                g.beh = "adjust_tile"                # 0x4381B0
-                g.a3 = (y << 5) & 0xFFFFFFFF         # [0x20] = 自机Y<<5（此处=铺位行）
-                g.a4 = 0x20                          # [0x24] = 步进
-                g.aux = 0                            # [0x28] 计数
-                g.p["bound"] = (y << 5) + 0x60       # [0x1C] 反弹界（自机Y<<5 近似）
-                g.p["x0"] = x
-                # 0x436A5D ctor：层 0、rect = (0, mode*48, 0x2F, mode*48+0x2F)
-                g.disp = DisplayNode(0, [0, mode * 48, 0x2F, mode * 48 + 0x2F],
-                                     [x - 0x18, y - 0x18])
+            while x <= 0x2D0:                        # x 外层步 0x78（0x4524FE..0x452537）
+                prm = _r.randrange(0x7FFFFFFF) & 3   # 0x4524B9 rand & 3
+                g = self.spawn(self.trailq, 0x4F000001, x, y, prm)   # 0x4AD4CC（0x401686）
+                g.beh = "adjust_tile"                # 0x401910 → 0x4381B0
+                # ctor case 0x4369E6（0x4F000001，ebx=0）：
+                g.d32(0x1C, 0)                       # [0x1C] = 0（反弹界）
+                g.d32(0x20, 0)                       # [0x20] = 0（y 累加器，32.5 定点）
+                g.d32(0x24, 1 if prm & 1 else 0xFFFFFFFF)   # [0x24] = (param&1)?+1:−1
+                g.d32(0x28, 1 if prm & 2 else 0xFFFFFFFF)   # [0x28] = (param&2)?+1:−1（帧计数初值）
+                g.disp = DisplayNode(0, [0, 0, 0x78, 0x50],          # 层 0（ebx）、rect (0,0,0x78,0x50)
+                                     [x - 0x3C, y - 0x28])           # dst = (x−0x3C, y−0x28)
                 x += 0x78
             y += 0x50
         self.timer.set_period(0)
 
     def page6_step(self) -> bool:
-        """`0x4525E0`：与页5 step 同构（0x4562A0 在 0x458F80 合成前）。"""
+        """`0x4525E0`：… → 0x4562A0 色带 → 0x458F80 合成（0x43A350 tick 0x4AD4CC
+        → 0x430840 渲 → 0x44B0D0(4FC) → 0x445A30(52C) → 渲）→ 旗标测试。
+        旧版漏了 0x4AD4CC 的行为遍 ⇒ 調整砖块冻结在出生帧（白块满屏）。"""
         self.keys.update(self.inp.rec)
         self.key_command(self.inp.rec.key)
         self.begin_frame()
         self.band_draw()
+        self.tick_ui(self.trailq)                    # 0x458F80 第一道 0x43A350(0x4AD4CC)
         self.tick_ui(self.ui4fc)
         self.tick_ui(self.ui52c)
+        self.trailq = [e for e in self.trailq if e.alive]
         self.ui4fc = [e for e in self.ui4fc if e.alive]
         self.ui52c = [e for e in self.ui52c if e.alive]
         self.draw()
@@ -2706,6 +2719,38 @@ class Pages(Page4Mixin):
         e2.disp = DisplayNode(13, [l, t, l + 24 * h - 1, t + 23], [dx, dy])
 
     # ---- 0x444A30（0x6F00000A 調整总控）态机（2026-11-11 转写） ----------------
+    def _adjust_tile(self, e: UiEntity) -> None:
+        """0x4381B0（0x4F000001 調整网格砖，ctor case 0x4369E6）：
+
+        ```
+        0x4381B3 [0x20] += [0x24]                ; y 累加器（32.5 定点）±step/帧
+        0x4381B9 ++[0x28]                        ; 帧计数
+        0x4381C2 if ((计数 & 3) == 0):           ; 每 4 帧
+        0x4381CB   dl = ([0x1C] >= [0x20])       ; setge：界(0) ≥ 累加器
+        0x4381D5   [0x24] += dl ? -1 : +1        ; neg/sbb/and 0xFFFFFFFE/inc ⇒ ∓1
+        0x4381E0 [0x8] = [0x20] >> 5             ; y 像素 = 累加器 sar 5
+        0x4381E9 node dst = (x−0x18, y−0x18)     ; 0x45A690([0x4]−0x18, y−0x18)
+        0x43820A return [0x28] < 0x6D6           ; 计数 ≥ 1750 → 摘链
+        ```
+        （|step| 每 4 帧 +1、方向恒离界 ⇒ 砖块加速漂离后 ~29 秒自灭；x 恒为出生值。）
+        """
+        acc = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF   # 0x4381BC
+        e.d32(0x20, acc)
+        cnt = (e.s32(0x28) + 1) & 0xFFFFFFFF             # 0x4381BE
+        e.d32(0x28, cnt)
+        acc_s = acc - 0x100000000 if acc & 0x80000000 else acc
+        if (cnt & 3) == 0:                               # 0x4381C2 test dl,3
+            step = e.s32(0x24)
+            step += -1 if e.s32(0x1C) >= acc_s else 1    # 0x4381D2 setge
+            e.d32(0x24, step & 0xFFFFFFFF)               # 0x4381DD
+        y = acc_s >> 5                                   # 0x4381E3 sar 5（算术）
+        e.d32(8, y & 0xFFFFFFFF)                         # 0x4381E6 [0x8] = y
+        if e.disp is not None:                           # 0x4381E9..0x438204
+            e.disp.dst[0] = (e.s32(4) - 0x18) & 0xFFFFFFFF
+            e.disp.dst[1] = (y - 0x18) & 0xFFFFFFFF
+        if cnt >= 0x6D6:                                 # 0x43820A setl
+            e.alive = False
+
     def _adjust_root(self, e: UiEntity) -> None:
         """0x444A30：帧头 edi = (指针Y*0x4BDA12F7)>>36（÷54.05 段）；bl = 段!=[+0x20]。
         态跳表 0x445464：0=0x444A86（0x61000005 闪光 rec{0,-0xFF,typ,8}、++[0x1C]）、
@@ -3458,7 +3503,7 @@ class Pages(Page4Mixin):
         # 并把它写进自机镜像 `0x56CC8C/0x56CC90` ⇒ 页13 的"自机位置"= 机体大字的位置
         # (0xA0,0x78)=(160,120)。0x12 特效的追踪/贴线行为都读这个镜像。
         _mx, _my = int(x), int(y)
-        self.mirror["x"], self.mirror["y"] = _mx, _my
+        self.p4_player_pos = (_mx, _my)           # 0x4461D1：同一地址 [0x56CC8C/90]（setter 同步 mirror/p4_stat）
         self.log(f"0x4461DF 自机镜像 := ({_mx},{_my})")
         n = e.p["slot"]
         e.disp = DisplayNode(0, [0, 0x30 * n, 0x2F, 0x30 * n + 0x2F],
@@ -4206,7 +4251,9 @@ class Pages(Page4Mixin):
                     # 于是 sar(y,7)=0..3，配上 a4 的 bit2 → sel 稳定落在 4..7。
                     k1 = self.keys.test(1)
                     k2 = self.keys.test(2)
-                    sel = (4 if k1 else 6) + (1 if k2 else 0)
+                    # 0x4256DB..0x425729：base = 4 + (bit0(鍛錬)?2:0) ⇒ 鍛錬=1 → 6/7 行、
+                    # 鍛錬=0 → 4/5 行（state4 回写 (s>>1)&1=鍛錬、s&1=操作器，恰好自洽）
+                    sel = (6 if k1 else 4) + (1 if k2 else 0)
                     self.inp.set_pos(0, sel * 128 - 0x1C0)
                     self.log(f"page3 state2：確認於「遊戲開始」→ 切左列 sel={sel} y={sel*128-0x1C0}")
             else:

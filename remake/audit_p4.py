@@ -1368,8 +1368,11 @@ def main():
           and img[0x43C53B - ib:0x43C541 - ib] == bytes([0x0F, 0x87, 0x8C, 0x03, 0x00, 0x00])
           and img[0x43C557 - ib:0x43C55D - ib] == bytes([0x0F, 0x85, 0x65, 0x04, 0x00, 0x00]), "")
     class _ZK:
+        bits = 0                     # 0x4AB5B0 位图（p4_45af30/60/aff0 现在直接读写它）
+
         def test(self, b):
             return False
+
         def field(self, mask):
             return 0
     class _IN2:
@@ -1386,7 +1389,8 @@ def main():
             self.calls = []
             self.p4_stat = dict(stat or {})
             self.keys = _ZK()
-            self.p4_player_pos = None
+            self.keys.bits = self.p4_stat.get(0x4AB5B4, 0)   # 0x4AB5B0 位图统一镜像
+            self.mirror = {"x": 0, "y": 0}      # p4_player_pos property 的真身
             self.inp = _IN2()
         def _p4_q(self, n):
             return n
@@ -1523,8 +1527,11 @@ def main():
     _sn_w0 = _st.unpack_from("<7I", _sn_buf, 0)
     _sn_w1 = _st.unpack_from("<7I", _sn_buf, 0x20)
     class _KN:
+        bits = 0                     # 0x4AB5B0 位图（统一镜像后 p4_45aff0/afc0 直读）
+
         def test(self, b):
             return False
+
         def field(self, mask):
             return 0
     class _IN:
@@ -1538,7 +1545,8 @@ def main():
         def __init__(self):
             self.p4_stat = {}
             self.keys = _KN()
-            self.p4_player_pos = None
+            self.keys.bits = 0
+            self.mirror = {"x": 0, "y": 0}      # p4_player_pos property 的真身
             self.inp = _IN()
     class _Nd2:
         src = None
@@ -1549,7 +1557,7 @@ def main():
     _pn_e.node = _Nd2()
     _pn.p4_445ece(_pn_e, (0x11, 0x22, 0, 0))
     _pn2 = _PN()
-    _pn2.p4_stat[0x4AB5B0 + 4] = 0
+    _pn2.keys.bits = 0
     _pn2_e = page4.Ent(0, 0, 0x1, 0)
     _pn2_e.node = _Nd2()
     _pn2.p4_445ece(_pn2_e, (0, 0, 0, 1))
@@ -1565,9 +1573,9 @@ def main():
     _cd_r5b = _cd.p4_445c00(_cd_e5b, (0, 0, 0, 0))
     _cd_e7 = page4.Ent(0, 0, 0x7, 0)
     _cd. p4_445c00(_cd_e7, (0, 0, 0, 0))
-    _cd_bit = _cd.p4_stat.get(0x4AB5B0 + 4, 0)
+    _cd_bit = _cd.keys.bits
     _cd2 = _PN()
-    _cd2.p4_stat[0x4AB5B0 + 4] = 2
+    _cd2.keys.bits = 2
     _cd2_e5 = page4.Ent(0, 0, 0x5, 0)
     _cd2.p4_445c00(_cd2_e5, (0, 0, 0, 0))
     _av = _PN()
@@ -2544,7 +2552,7 @@ def main():
             self.btn0 = False
             self.paints = []
             self.fills = []
-            self.p4_player_pos = None
+            self.mirror = {"x": 0, "y": 0}      # p4_player_pos property 的真身
         def _p4_q(self, n):
             return self.qs.setdefault(n, [])
         def spawn(self, queue, type_word, x=0, y=0, a3=0, a4=0):
@@ -2938,7 +2946,7 @@ def main():
     check("0x445ECE 尾段：0x45A750 是四 dword 打包（out=(a,b,c,d)）；"
           "矩形 = (0, op*0x30, 0x2F, op*0x30+0x2F)；dst=(x-0x18,y-0x18)；"
           "frame=0；随后 0x446470(e,0,1)；[0x56CC8C]=rec[0]",
-          _pn_e.node.src == (0, 0, 47, 47)
+          _pn_e.node.rect == (0, 0, 47, 47)
           and _pn_e.node.dst == (0x40 - 0x18, 0x50 - 0x18)
           and _pn_e.node.frame == 0
           and _pn.p4_player_pos == (0x11, 0x22), "")
@@ -2946,7 +2954,7 @@ def main():
     _pl_e = page4.Ent(0, 0, 0x1, 0)
     _pl.p4_445ece(_pl_e, (0, 0, 0, 1))
     _pl2 = _Z()
-    _pl2.p4_stat[0x4AB5B0 + 4] = 2          # bit2 已置位 ⇒ edx = 4
+    _pl2.keys.bits = 2          # bit2 已置位 ⇒ edx = 4
     _pl2_e = page4.Ent(0, 0, 0x1, 0)
     _pl2.p4_445ece(_pl2_e, (0, 0, 0, 0))
     check("0x445ECE 自机构造器：半径 0xA、alive=0、HP=1、索引 {0,5,6,7}、"
@@ -3078,7 +3086,7 @@ def main():
           and len(_cv_hits2) == 1 and _cv_z2.p4_stat[0x5001 + 0x28] == 2
           and _cv_p2.g32(0x10) == 1, "")
     check("0x45AF30 = |= bits；0x45AF60 = &= ~bits（都返回新值）",
-          _bor1 == 0x1F00 and _bo.p4_stat[0x4AB5B0 + 4] == 0x1E00 and _bor2 == 0x1E00
+          _bor1 == 0x1F00 and _bo.keys.bits == 0x1E00 and _bor2 == 0x1E00
           and img[0x45AF37 - ib:0x45AF3C - ib] == bytes([0x0B, 0xD0, 0x89, 0x51, 0x04])
           and img[0x45AF67 - ib:0x45AF6C - ib] == bytes([0xF7, 0xD0, 0x23, 0xD0, 0x89]), "")
     _m1 = page4.Ent(0x40, 0x50, 0x10008431, 0)
