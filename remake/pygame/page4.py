@@ -12314,8 +12314,12 @@ class Page4Mixin:
 
     @staticmethod
     def _p4_or_andnot(obj, mask: int, value: int) -> None:
-        """`0x45B0A0`：`[+4] = ([+4] and-not mask) or (mask and value)`。"""
-        obj.bits = (obj.bits & ~mask) | (mask & int(value))
+        """`0x45B0A0`：**布尔** or / and-not —— `test value,value; jz andnot 分支`
+        （0x45B0A0..0x45B0CA 实证）：value 非 0 → `|= mask`，0 → `&= ~mask`。
+        旧实现按位域对齐（`(bits & ~mask) | (mask & value)`）⇒ value=1 的 mask>1 位
+        全被丢、value=0 也动位 —— `p4_write_state` 曾把 bit1（操作器）每次进场清掉
+        ⇒ 键盘预设 7..14（kb=0）恒生效（页4 方向键全灭）。"""
+        obj.bits = ((obj.bits | mask) if int(value) != 0 else (obj.bits & ~mask)) & 0xFFFFFFFF
 
     # ---- 0x458D60 -------------------------------------------------------
     def p4_engine(self, a1: int, a2: int, a3: int, a4: int) -> None:

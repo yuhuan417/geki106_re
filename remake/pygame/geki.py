@@ -820,6 +820,11 @@ class Input:
         # 该值同时是键盘方向键的"整档幅值"（§10.3.2：只取符号、幅值 = 预设速度）
         # 与鼠标单帧位移半径（`dx²+dy² > 半径²` 时限幅）。
         self.speed = int(self.preset_rec[4]) if len(self.preset_rec) > 4 else 0
+        # 菜单预设（0x498A88 行 0..5）回到**菜单管线**（kbd_move 按下沿整档）：
+        # exe 的 0x44E620 是同一装载函数，页1-3/5/13 每次进场都会重载预设 ——
+        # 旧复刻只进不出（set_preset4 置 p4_cfg 后无人清），页4 ESC 回页3 后
+        # 键盘沿用战斗预设（kb=0 行 7..14）⇒ 方向键全灭。这里 set_preset 即清。
+        self.p4_cfg = None
 
     def build(self, keys, mouse_buttons, mouse_delta=(0, 0), keycode: int = 0) -> Record:
         b0 = bool(mouse_buttons[0]) or keys.get("shot", False)
@@ -1539,7 +1544,9 @@ class Pages(Page4Mixin):
         self.layers.color_key(13, 0)
         if not ok:
             self.flags.set(2)                       # 0x45210E：0x45AF30(2)
-        # 0x45211A：0x44E620(0x4AB454, 0,0,0,0)   虚拟指针归零
+        # 0x45211A：0x44E620(0x4AB454, 0, 0, 0)   装预设 0 + 虚拟指针归零
+        #（set_preset 会把 p4_cfg 清回菜单管线 —— 页4 ESC 回来时键盘才活着）
+        self.inp.set_preset(0)
         self.inp.set_pos(0, 0)
         # 0x45212C：0x44EDA0(0x4AB454, 0)         输入模式 0
         self.inp.set_mode(0)
@@ -1816,7 +1823,9 @@ class Pages(Page4Mixin):
         self.scene_reset()                            # 0x4537A2 → 0x458D60
         st = self.p4_stat
         m = self.spawn(self.ui4fc, 0x5F000014)        # 0x4537A8..0x4537D3
-        m.beh = "stage_text"                          # 舞台文字显示（第一幕　市街 等）
+        # ⚠ 不可覆写 beh：spawn 的 ctor 分派（idx 18）已置 "stage_title12"
+        #（行为 0x426340 九态选关机，兼管 0x449E10 舞台文字更新）。
+        # 旧代码在这里改成 "stage_text"（无此分派）⇒ 状态机失联，鍛錬停在「第一幕 市街」。
         entry = self.p4_45c740_entry(0)               # 0x4537DC 0x45C740(0x4AB5CC, 0, &buf)
         st["45c740_buf"] = entry
         self.stream_reset()                           # 0x4537E8 0x401C99 → 0x45FB80
@@ -2927,11 +2936,14 @@ class Pages(Page4Mixin):
             self.scene_reset()
 
     def _adjust_apply_pal(self) -> None:
-        """0x444F60：亮度/对比度字段 ×4-0xC8 → 0x44CDF0(2, …) 两次重载。"""
-        b = self.disp_cfg.field(0x1FC0000)
-        c = self.disp_cfg.field(0xFE000000)
-        self.pal = self._load_pal(2, (b * 4 - 0xC8, c * 4 - 0xC8))
-        self.pal_now = self.pal
+        """0x444F60：亮度/对比度字段 ×4-0xC8 → 0x44CDF0(2, 对比, 亮度) → 0x44B790
+        施加（`fade_palette(pal, a=亮度, b=对比)`，0x45B790 公式见其 docstring）。
+        旧实现调了不存在的 `_load_pal(2, …)` 两参签名 ⇒ 調整画面按 C 即崩。"""
+        b = self.disp_cfg.field(0x1FC0000)      # 亮度 7 位（0x1FC0000）
+        c = self.disp_cfg.field(0xFE000000)     # 对比 7 位（0xFE000000）
+        base = self._load_pal(2)
+        self.pal = base
+        self.pal_now = fade_palette(base, b * 4 - 0xC8, c * 4 - 0xC8)
 
     # ---- 0x43E7B1/0x43EB6E 态尾：详绘 + 驻留计数（[0x20] 门 → 输入态激活） ----
     def _rank_tail(self, e: UiEntity, seg: int, bl: int) -> None:
