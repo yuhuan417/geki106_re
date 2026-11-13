@@ -2014,22 +2014,26 @@ class Pages(Page4Mixin):
 
     # ---- 页6：調整（设置画面）——0x4523C0/0x4525E0/0x452660（2026-11-11 全序列）----
     def page6_enter(self) -> None:
-        """`0x4523C0` 全序列：0x44CDF0(2, 0, 0) 调色板2（参 0,0）→ 层 11/12/13 ←
-        资源 0/1/2（ストリーム注意書き / bm_pal / bm_pald）+ 0x44CE60 色键 0 →
-        0x44E620(预设 1 @(0,0)) → 0x44EDA0(0) → 0x458D60 场景重置 →
-        0x6F00000A @(0,0) prm=0 入 52C（調整总控 0x444A30）→ 0x4F000001 网格
+        """`0x4523C0` 全序列：0x44CDF0(2, 0, 0, -256) 调色板2 →
+        **层 0 ← 资源 0xB(bm_st1)、层 1 ← 0xC(bm_st2)、层 2 ← 0xD(bm_st3)** +
+        0x44CE60 色键 0 ×3 → 0x44E620(预设 1 @(0,0)) → 0x44EDA0(0) → 0x458D60 场景重置 →
+        0x6F00000A @(0,0) prm=0 入 52C（調整总控 0x444A30，ctor 0x43D9DD：
+        [+0x2C]=0x45AFC0(0x4AB5B8,0x3F000)）→ 0x4F000001 网格
         （x=0 步 0x78 ≤0x2D0、y=0 步 0x50 ≤0x230、prm=rand&3）入 0x4AD4CC →
         SetPeriod(0)（失败旗标 0x40）。"""
         self.flags.clear()
         self.screen_fill = -1
+        # 0x4523D7..0x45244A（2026-11-13 读定案）：调色板 2（bm_pald，淡入参 -256）→
+        # **层 0 ← 资源 0xB(bm_st1)、层 1 ← 0xC(bm_st2)、层 2 ← 0xD(bm_st3)** ——
+        # push 序：先 push 资源号、再 push 层号（0x4523E0 push 0xB / 0x4523E2 push 0），
+        # 即 0x44C640(mgr, 层, 资源)；随后 0x44CE60(0,0)/(1,0)/(2,0) 三次色键 0。
+        # 旧实现绑层 11/12/13 ← 资源 0/1/2（把 push 序读反）⇒ 砖块的层 0 没有内容。
+        # bm_st1 = 120×80 撃破伝 logo 恰好一块 ⇒ 56 块砖 = logo 墙漂离（exe 調整的本貌）。
         self.pal = self._load_pal(2)
         self.pal_now = self.pal
-        # 资源 0 = 开发者注意文本（非 GGD）→ 0x44C640(11, 0) 为"清层"语义（成功）；
-        # 层 12/13 ← bm_pal/bm_pald（亮度/对比度预览条）。
-        self.layers.create(11, 640, 480) if 11 not in self.layers.tab else None
-        if not self.layers.load(12, 1) or not self.layers.load(13, 2):
+        if not self.layers.load(0, 11) or not self.layers.load(1, 12) or not self.layers.load(2, 13):
             self.flags.set(FLAG_LAYER_FAIL)          # 0x45244C 0x45AF30(2)
-        for n in (11, 12, 13):
+        for n in (0, 1, 2):
             self.layers.color_key(n, 0)              # 0x44CE60
         self.inp.set_pos(0, 0)                       # 0x44E620(1, 0, 0, 0)
         self.inp.set_preset4(1, (0, 0))
