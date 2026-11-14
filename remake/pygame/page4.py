@@ -21,6 +21,7 @@ import collections
 import json
 import math
 import os
+import struct
 
 _P4_BLOCK: dict | None = None
 
@@ -91,10 +92,34 @@ class ScriptBank:
         return int.from_bytes(self.d[o:o + 3], "little")
 
     def get(self, sid: int) -> bytes:
-        """`0x45DDA0(id)`..`0x45DDE0(id)`。"""
+        """`0x45DDA0(id)`..`0x45DDE0(id)`。
+
+        调试：`P4_BOSS_AT=<帧>`（仅流 46）在**第一条 t>该值的记录前**插入一条与原
+        Boss 记录同构的 op2 `(712,240,0x23000015,0)`——游标序先到先执行、后续记录
+        不受阻塞；其余字节一律不动，原时间线（含 t=8520 的原 Boss 记录）原样保留。
+        只改内存副本，不动 resource_dec.bin。"""
         o = self._u24(sid)
         e = self._u24(sid + 1) if sid < self.n else len(self.d)
-        return self.d[o:e]
+        buf = self.d[o:e]
+        at = os.environ.get("P4_BOSS_AT")
+        if at and sid == 46:
+            at = int(at, 0)
+            buf = bytearray(buf)
+            cur, ins = 0, len(buf)
+            while cur + 4 <= len(buf):
+                op = int.from_bytes(buf[cur:cur + 2], "little")
+                t = int.from_bytes(buf[cur + 2:cur + 4], "little")
+                if op == 0 or t > at:            # 插入点：首条 t>at 之前（不阻塞后续）
+                    ins = cur
+                    break
+                if op == 9:
+                    n = int.from_bytes(buf[cur + 0xC:cur + 0x10], "little")
+                    cur += 0x10 + n * 4
+                else:
+                    cur += ScriptVM.SIZES.get(op, 0x14)
+            buf[ins:ins] = struct.pack("<2H4I", 2, at, 712, 240, 0x23000015, 0)
+            buf = bytes(buf)
+        return buf
 
 
 class ScriptVM:
