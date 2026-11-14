@@ -852,6 +852,9 @@ class Ent:
                 if "r1sh" in info:        # 0x40DB72/0x40DBA4：[off] = rec[1] << n
                     off, n = info["r1sh"]
                     self.d32(off, (b << n) & 0xFFFFFFFF)
+                if "r01sh4" in info:      # 0x40DD3E：[(off, rec_idx), …] → [off] = rec[idx]<<4
+                    for off, idx in info["r01sh4"]:
+                        self.d32(off, ((a if idx == 0 else b) << 4) & 0xFFFFFFFF)
                 if "vtup" in info and isinstance(d, tuple):
                     self.d32(0x1C, d[0] & 0xFFFFFFFF)
                     self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)
