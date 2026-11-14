@@ -12286,12 +12286,15 @@ class Page4Mixin:
             _sys.path.insert(0, _r)
         from p4_block_tables import BLOCK_SIZE, LITERALS, TABLES
 
-        # 0x4505E4 `mov esi,[0x4AB5C8]`：si 取**整个 dword**（分支判 `cmp si,8` 用的是
-        # 全 32 位 ⇒ 页13 的 0x20000 落分支 C(bp=2)→链 0（全周目主链）——2026-11-12 修：
-        # 旧实现 &0xFFFF 把 si 截成 0 ⇒ 落分支 A → 链 11（永远第 1 关）。
+        # 0x4505E4 `mov esi,[0x4AB5C8]`：esi 取整个 dword。**分支极性（2026-11-14 勘误）**：
+        # 0x450686 `cmp si,8` / 0x450690 `cmp bp,3` 是 **16 位**比较（0x20000 低半=0 → A 分支），
+        # 而组号 `0x4506F1 lea ecx,[esi*4+0xb]` 用 **32 位 esi** ⇒ 0x20000*4+0xB = 0x8000B，
+        # 经 load_chain 的 &0xFFFF = **链 11**（关 N = 11+4N，与 0x499798 链表逐项吻合）。
+        # 2026-11-12 的"全 32 位分支"把 0x20000 送进 C ⇒ 链 0（八关连打）⇒ 无 Boss/无幕间牌。
         self.stage_no = int(getattr(self, "theatre", 0)) & 0xFFFFFFFF   # 0x4AB5C8 全 dword
         self.loop_no = (self.stage_no >> 16) & 0xFFFF                   # word[0x4AB5CA] 周目
-        si = self.stage_no                        # [0x4AB5C8]（全 dword）
+        si32 = self.stage_no                      # [0x4AB5C8]（组号 lea 用 32 位）
+        si = si32 & 0xFFFF                        # 分支用 16 位 si
         bp = int(self.loop_no) & 0xFFFF           # word[0x4AB5CA]
         blk = bytearray(BLOCK_SIZE)
 
@@ -12328,6 +12331,12 @@ class Page4Mixin:
             # esp=S-0xE8：[esp+0x29]=B+0x19=0x64、[esp+0x2A]=B+0x1A=6、
             # [esp+0x22/24/26]=B+0x12/14/16(word 0)——与实机 rp_last.dat 头 +0x19/+0x1A 吻合。
             blk[0x19] = 0x64
+            # 组号：exe 普通周目在 A_flag 早退路径不写 +0x10，靠 p4_enter 同深度栈残留
+            # 等效携带 `esi*4+0xB`（链索引步长 4：关1=11、关2=15…与 0x499798 链表吻合；
+            # 32 位 lea 经 load_chain 的 &0xFFFF 取低半）。复刻无栈残留可依赖 ⇒ 显式写入
+            # （旧实现缺这条 ⇒ +0x10 恒 0 ⇒ VM 装链 0=八关连打 ⇒ 无 Boss/无幕间牌，
+            # 流 46 直接跳流 47 —— 2026-11-14 修）。
+            put(0x10, ((si32 * 4 + 0x0B) & 0xFFFF))
             return blk
 
         name = "A" if (si < 8 and bp <= 3) else ("B" if si < 8 else "C")
@@ -12335,7 +12344,7 @@ class Page4Mixin:
 
         if name == "A":
             idx = si + bp * 8
-            put(0x10, si * 4 + 0x0B)                   # 0x4506F1/0x450700 lea ecx,[esi*4+0xB]
+            put(0x10, (si32 * 4 + 0x0B) & 0xFFFF)      # 0x4506F1 lea ecx,[esi*4+0xb]（32 位 esi）
             put(0x12, TABLES["0xa4"][idx])             # 0x450833/0x450908 → [esp+0x22]
             v = TABLES["0x64"][idx]                    # 0x450903/0x45090D → [esp+0x24]
             put(0x14, v)
