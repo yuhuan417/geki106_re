@@ -788,9 +788,20 @@ class Ent:
             self.node.dst = (self.s32(0x04) - 0x18, self.s32(0x08) - 0x18)
             self.node.active = 1
             return
-        prop = ENT_PROP_FAM.get(typ) or ENT_PROP.get(typ & 0xFF)   # 0x43AC30：表址按族
+        # 0x43A7F0 定案（2026-11-14）：基构造器按 `type & 0x2F000000` 分派 prop/节点路径——
+        # 0x21→专用 ctor（上方提前 return）、0x23→0x4013D9、0x24→0x401D52、0x25→0x4010F5、
+        # 0x26→0x4014FB、0x27→0x401F19、0x28→0x401C58、0x29→0x402243、0x2A→0x4017D0、
+        # 0x2B→内联(0x40=0x4020A4、byte[+0x10]=1、+0xC=0x10)、0x2C→0x40227A、0x2D→0x401361，
+        # **其余（含 0x22/0x2E/0x2F 与 0x2F 掩码外的
+        # 自机 1、伴随机 0x1000001/5/8、0x51/0x42/0x0B 族）一律跳 0x43AAF4 直接返回**：
+        # 无 prop、无节点、[+0xC]/[+0x18]/[+0x58]/byte[+0x10] 全 0（0x430440 的 rep stosd）。
+        # 旧写法 `ENT_PROP.get(typ & 0xFF)` 把 0x23 的字节索引表套给了低字节偶然命中的
+        # 其它类型——伴随机 0x1000001/5/8 各得一个 active 敌机节点（dst=(−24,−24) 且其行为
+        # 从不移动节点）⇒ 进关卡左上角 (0,0) 钉死几个 48×48 图块不消失。
+        prop = ENT_PROP_FAM.get(typ)
+        if prop is None and (typ & 0xFF000000) == 0x23000000:
+            prop = ENT_PROP.get(typ & 0xFF)        # 0x498000：0x23 族字节索引表
         if prop is not None:
-            # ⚠ 原文在 0x23 分支内，但各族表按 type&0xFF 索引（0x43AC30 对所有族调用）
             if True:
                 self.d32(0x0C, prop[0])           # 半径
                 self.d32(0x18, prop[1])           # 存活门
