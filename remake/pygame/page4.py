@@ -12536,6 +12536,8 @@ class Page4Mixin:
                   f"vmframe={self.vm.frame} "
                   f"zero_beh_types={sorted({e.g32(0x14) for e in self.p4_q43c if e.g32(0x40) == 0})[:8]} "
                   f"boss={[(e.s32(4), e.s32(8), e.s32(0x18), e.s32(0x1C), tuple(e.node.dst) if e.node else None, e.node.active if e.node else None) for e in self.p4_q43c if e.g32(0x14) == 0x23000015]} "
+                  f"fade={getattr(self, 'fade_a', None)}/{getattr(self, 'fade_b', None)} "
+                  f"flashes={[(x.aux, x.a3, x.a4) for x in self.ui52c if getattr(x, 'beh', '') == 'flash']} "
                   f"q4cc={[(hex(e.g32(0x14)), e.beh, e.node.dst if e.node else None) for e in self._p4_q('ui4cc') if hasattr(e,'tick')][:6]} "
                   f"q4cc_types={dict(collections.Counter(hex(e.g32(0x14)) for e in self._p4_q('ui4cc') if hasattr(e,'tick')))} "
                   f"miss={(getattr(self, 'p4_beh_missing_types', {}) and
