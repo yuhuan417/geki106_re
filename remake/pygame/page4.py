@@ -13664,7 +13664,11 @@ class Page4Mixin:
         e.d32(0x40, thunk)
         e.beh = thunk
         real = P4_41_BEH_THUNK.get(thunk)
-        if real is not None and real in P4_BEH:
+        if real is not None:
+            # 无条件解到真址：0x430550 等是 Pages 类方法（p4_call_behaviour 的
+            # getattr(type(self), "_beh_%X") 回退按名命中），不要求在 P4_BEH。
+            # 旧 `real in P4_BEH` 守卫失败时 e.beh 留在 thunk ⇒ 分派两找不到
+            # ⇒ 按未实现永久存活 ⇒ 波纹/拖尾冻结在轨迹上不消失（2026-11-14 修）。
             e.beh = real
         e.d32(0x1C, c1c)
         e.d32(0x20, c120)
@@ -13814,6 +13818,21 @@ class Page4Mixin:
         self.p4_45eff0(ta, sub.s32(0x04), sub.s32(0x08), drv.g32(0x14))     # 0x43D373
         self.p4_se_pan(8, (sub.s32(0x04) - 0x140) << 4)          # 0x43D38C
 
+    def _p4_41000008(self, x: int, y: int, a3: int) -> None:
+        """`0x428F72`（0x41000008 捕獲波纹 ctor）：层 1（bm_cm32）、
+        rect = `(32*a3, 128+32*选机, 32*a3+0x1F, 0x9F+32*选机)`（选机行 + 拍数列）、
+        `[+0x1C]=5`（相位长）、`[+0x20]=5-a3`（寿命）、
+        `[+0x24]=0x45AFC0(0x800)`（闪烁字段，0x430550 的 blink 位）。"""
+        g = self.p4_spawn41(x, y, 0x41000008)
+        if g is None:
+            return
+        g.d32(0x20, 5 - a3)                      # 0x428F94
+        g.d32(0x24, self.p4_afc0(0x800) & 0xFFFFFFFF)     # 0x428FA8
+        if g.node is not None:
+            g.node.layer = 1                     # 0x428FB8
+            s = self.p4_afc0(0xC000) & 3
+            g.node.rect = (32 * a3, 128 + 32 * s, 32 * a3 + 0x1F, 0x9F + 32 * s)
+
     def _beh_429F20(self, e) -> bool:
         """`0x429F20`（0x41400507 狙击攻击驱动器；ctor 0x429889）：
         `[+0x28]=-1` 待机，`[0x56CC94]` 触发 → `[0x56CCA0]--` 进入攻击；
@@ -13830,9 +13849,7 @@ class Page4Mixin:
             if n == 4:                                   # 0x42A212
                 self._p4_41400507_dtor(e)
                 return False
-            g = self.p4_spawn41(e.s32(0x04), e.s32(0x08), 0x41000008)   # 0x42A22C
-            if g is not None:
-                g.d32(0x20, 5 - n)                       # 0x428F94 寿命 = 5-拍数
+            self._p4_41000008(e.s32(0x04), e.s32(0x08), n)   # 0x42A22C（寿命 5-n）
             return True
         alive = True
         if not sub.alive or owner is None or not getattr(owner, "alive", True):
@@ -13862,9 +13879,7 @@ class Page4Mixin:
         y = e.s32(0x08) + (e.s32(0x24) >> 1)
         e.d32(0x04, x & 0xFFFFFFFF)
         e.d32(0x08, y & 0xFFFFFFFF)
-        g = self.p4_spawn41(x, y, 0x41000008)            # 0x42A037..0x42A082
-        if g is not None:
-            g.d32(0x20, 5)                               # 第 5 槽补 0 ⇒ 寿命 5
+        self._p4_41000008(x, y, 0)                       # 0x42A037..0x42A082（寿命 5）
         for comp, sv in ((0x04, 0x20), (0x08, 0x24)):    # 0x42A087..0x42A0EA 收敛
             ev = e.s32(sv)
             if e.s32(comp) < sub.s32(comp):
