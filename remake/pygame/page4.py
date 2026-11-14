@@ -16513,17 +16513,25 @@ class Page4Mixin:
         return False
 
     def _p4_lock_detach(self, e) -> None:
-        """0x42E4C3/0x42E5F0/0x42E781：松键或自机亡 → [0x24]=0、byte[0x10]=0（准星脱离）。"""
+        """0x42E4C3/0x42E5F0/0x42E781：松键或自机亡 → [0x24]=0、byte[0x10]=0（准星脱离）。
+        [0x24] 是四个锁定行为（0x42E460 族）的**分支条件**（0x42E463 test [esi+0x24]），
+        清零后下一帧走收缩支直至自灭；p["sub"] 是 [0x24] 的复刻侧解引用，一并清。"""
         e.d32(0x24, 0)
+        e.p["sub"] = None
         if hasattr(e, "m"):
             e.m[0x10] = 0
         else:
             e.raw[0x10] = 0
 
     def _beh_42E460(self, e) -> bool:
-        """`0x42E460`（撃/鼠标；v4=0x42EA70 同）：吸附指针 + 矩形动画；松键/父亡脱离。"""
-        sub = e.p.get("sub")
-        if sub is not None and sub.alive:
+        """`0x42E460`（撃/鼠标；v4=0x42EA70 同）：吸附指针 + 矩形动画；松键/父亡脱离。
+
+        分支条件 = **[+0x24]（父指针字段）!= 0**（0x42E463 `test [esi+0x24]` / je 0x42E4D2
+        收缩支）——脱离（0x42E4C3）清 [+0x24] 后下一帧走收缩至 l==0x90 自灭。
+        旧实现误用 Python 侧 e.p["sub"] 当分支条件：脱离只清 raw[0x24] 不清 p["sub"]
+        ⇒ 松键后永远走扩张支，展开的大"狙"字不消失（2026-11-14 用户实测）。"""
+        sub = e.p.get("sub") if e.s32(0x24) else None   # 0x42E463
+        if sub is not None:
             nd = e.node
             if nd is not None:
                 px, py = self.p4_ptr()
@@ -16545,10 +16553,11 @@ class Page4Mixin:
         速度 ebx = 11 + 3×(父[0x1C]&1)（0x42E568 neg/sbb/and/add），
         [0x4AB5A4]/[0x4AB5A8] 任一非 0 → sar 1；位移 inv=0x45AA80(Δ)（倒数 4096/|Δ|，
         单值），y += inv*Δy*spd>>12 → x += inv*Δx*spd>>12（0x42E595..0x42E5C6），
-        节点 +0x14 同加 (Δx,Δy)（0x45A6B0）。无目标只做矩形动画。"""
-        sub = e.p.get("sub")
-        if sub is None or not sub.alive:
-            return not self._p4_lock_rect(e, False)         # 0x42E4D2 同款反逻辑
+        节点 +0x14 同加 (Δx,Δy)（0x45A6B0）。无目标只做矩形动画。
+        分支条件 = [+0x24] != 0（0x42E526 test / je 0x42E602 收缩支），同 0x42E460。"""
+        sub = e.p.get("sub") if e.s32(0x24) else None   # 0x42E526
+        if sub is None:
+            return not self._p4_lock_rect(e, False)         # 0x42E602 → 0x4012E4(e,0)
         bx, by = 0x2710, 0                                  # 0x43BD56/58 初值 (0x2710, 0)
         found = False
         cx, cy = e.s32(4), e.s32(8)
@@ -16585,10 +16594,11 @@ class Page4Mixin:
     def _beh_42E660(self, e) -> bool:
         """`0x42E660`（漢/鼠标；v6=0x42EC70 同）：绕自机横摆——pos=自机+[0x1C]，
         自机 0x48 邻域内有敌（0x401280）则 [0x1C] ±2 朝敌钳 ±0x30，否则衰减 ∓2；
-        dst=(x−0x90, y−0x30)；矩形动画；父亡脱离（无松键门）。"""
-        sub = e.p.get("sub")
-        if sub is None or not sub.alive:
-            return not self._p4_lock_rect(e, False)         # 0x42E4D2 同款反逻辑
+        dst=(x−0x90, y−0x30)；矩形动画；父亡脱离（无松键门）。
+        分支条件 = [+0x24] != 0（0x42E666 test / je 0x42E793 收缩支），同 0x42E460。"""
+        sub = e.p.get("sub") if e.s32(0x24) else None   # 0x42E666
+        if sub is None:
+            return not self._p4_lock_rect(e, False)         # 0x42E793 → 0x4012E4(e,0)
         sx, sy = self.p4_stat.get(0x56CC8C, 0), self.p4_stat.get(0x56CC90, 0)
         off = e.s32(0x1C)
         e.d32(4, sx & 0xFFFFFFFF)
@@ -16617,10 +16627,12 @@ class Page4Mixin:
         """`0x42E810`（选机3/鼠标；v7=0x42EE20 同）：螺旋收敛——[0x20] 计数，
         绕自机 r=200×(0x78−t)/0x78 角 40t 旋转（40159B cos/401A50 sin，8.8）；
         t≥0x5A → byte[0x10]=1（可碰撞）；松键/父亡 → [0x24]=0、[0x1C]=−(0x78−t)×5/60；
-        脱离后 [0x1C] 每帧 −1，≤ −0x50 自灭。无矩形动画。"""
-        sub = e.p.get("sub")
+        脱离后 [0x1C] 每帧 −1，≤ −0x50 自灭。无矩形动画。
+        分支条件 = [+0x24] != 0（0x42E816 test / je 0x42E959 甩出支），同 0x42E460；
+        父存活只影响脱离判定（0x42E8F0 读 byte[父+0x34]），不影响分支。"""
+        sub = e.p.get("sub") if e.s32(0x24) else None   # 0x42E816
         t = e.s32(0x20)
-        if sub is not None and sub.alive:
+        if sub is not None:
             sx, sy = self.p4_stat.get(0x56CC8C, 0), self.p4_stat.get(0x56CC90, 0)
             r = 200 * (0x78 - t)
             ang = 40 * t
