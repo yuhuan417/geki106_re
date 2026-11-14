@@ -2279,7 +2279,11 @@ class Pages(Page4Mixin):
                 e.p["spawn_type"] = int(a3)  # [+0x28] 生成型 = rec3
                 e.p["spawned"] = 0
             else:
-                e.beh = "fade_in"
+                # 未实现的 0x61 型：空转兜底。旧版落 "fade_in"（0x427710 淡入）——
+                # 0x61000004 落进来时每帧 fade_to(-256→0) 把整屏压黑再渐亮
+                # （2026-11-14 实测"怒击破黑屏"根因；已改由 page4.p4_spawn_61000004
+                #   走 0x427580 真行为）。这里保留空转，防止其它未知型再劫持调色板。
+                e.beh = "default"
                 self.log(f"ui 0x61 type 0x{type_word:X} 未实现")
         elif hi == 0x5F000000:
             idx = type_word - 0x5F000002

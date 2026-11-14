@@ -12898,6 +12898,9 @@ class Page4Mixin:
         if typ == 0x61000005:
             self.spawn_flash(x, y, prm)            # init 0x42730B：[+0x1C]=x [+0x20]=y [+0x24]=prm
             return
+        if typ == 0x61000004:
+            self.p4_spawn_61000004(x, y, prm)      # ctor 0x4272DD / 行为 0x427580（prm 有符号语义）
+            return
         if (typ & 0xFFFFFF00) == 0x61000000:       # 0x61 族其余型（含 0x423BC5 的 0x61000007 淡出）
             self.spawn(self._p4_q("ui52c"), typ, x, y, prm)
             return
@@ -13753,6 +13756,81 @@ class Page4Mixin:
         self._p4_q("ui4cc").append(e)
         return e
 
+    def p4_spawn_61000004(self, x: int, y: int, rec3: int):
+        """0x61000004 大敌击破波纹（ctor 0x4272DD / 行为 0x40193D→0x427580）入 0x4AD52C。
+
+        命中结算（0x43CA3B / 0x43D2F5 / 0x43C25A）对半径 0x30 且非六例外的靶生成：
+        `0x430400(rec,[a+4],[a+8],0x61000004,0x30) → 0x445AA0(0x4AD52C,&rec)`。
+        ctor 0x4272DD：`[+0x1C]=0`（t 计数）、`[+0x20]=abs(rec3)`（持续帧）、
+        `[+0x24]=(rec3>0)`（音效门）；基础 ctor 0x430450 已放 [+4]=x、[+8]=y。
+        无显示节点（纯生成器，视觉全靠 0x4AD4CC 的火花/核心）。
+        旧复刻把它落进 geki.spawn 的 0x61 兜底 `beh="fade_in"` ⇒ 每帧
+        fade_to(-256→0) 把整屏压黑再渐亮（2026-11-14 用户实测黑屏根因）。"""
+        e = Ent(int(x), int(y), 0x61000004, 0)
+        e.d32(0x14, 0x61000004)
+        e.d32(0x40, 0x40193D)                          # 0x4272E1 行为槽（thunk → 0x427580）
+        e.beh = 0x427580
+        e.d32(0x1C, 0)                                 # 0x4272E8 t=0
+        e.d32(0x20, abs(int(rec3)) & 0xFFFFFFFF)       # 0x4272EF..0x4272F7 cdq/xor/sub = abs
+        e.d32(0x24, 1 if int(rec3) > 0 else 0)         # 0x4272FA..0x427305 setg
+        self._p4_q("ui52c").append(e)                  # 0x445AA0 → 0x4AD52C
+        return e
+
+    def _beh_427580(self, e) -> bool:
+        """`0x427580`（0x61000004 击破波纹驱动，thunk 0x40193D）。
+
+        ```
+        0x427583 t=++[+0x1C]
+        0x427598 0x401C08→0x43A520(0x4AD4CC, x=[+4], y=[+8], t, dur=[+0x20], flag=[+0x24])
+        0x4275B3 if (t != dur) return 1
+        0x4275C3 0x4015BE→0x43A700(0x4AD4CC, x, y, dur, flag==1)；return 0（自灭）
+        ```
+        0x43A520 每帧（0x430400 记录 = {x,y,type,rec3}，rand 均为 `rand%2dur-dur`）：
+          t&1==1 → 路径 A：4 次 rand，0x41000004 火花 @(x+o1,y+o2)、
+                   rec3=(vx,vy)=((o1+o3+2)>>2,(o2+o4+2)>>2)（0x428D59 ctor 解引用
+                   [rec+0xC] 当 (vx,vy) 指针——移植侧 spark_spawn 直收速度对）
+          t&7==4 → 路径 B：2 次 rand，0x41000001 核心 @(x+o6,y+o5)、rec3=0
+          t&0xF==8 且 flag → SE4 声像 (x-0x140)<<4（0x43A677..0x43A688）
+        0x43A700 终结：dur>>3 次（每次 2 rand）0x41000001 @(x+o2,y+o1)、rec3=0；
+        flag → SE11 声像（0x43A7A0..0x43A7B5）。0x41000001 ctor 0x428CA5 内部
+        rand%3 选爆炸行 ⇒ 移植侧 spawn 后补 p4_rand_mod(3) 改 rect（同 0x43CA94）。"""
+        x = e.s32(0x04)
+        y = e.s32(0x08)
+        dur = e.s32(0x20)
+        flag = e.g32(0x24)
+        t = (e.s32(0x1C) + 1) & 0xFFFFFFFF             # 0x427589 inc（先于两段生成）
+        e.d32(0x1C, t)
+        m2 = 2 * dur
+        if t & 1:                                      # 0x43A52F test al,1（路径 A）
+            o1 = self.p4_rand_mod(m2)[1] - dur
+            o2 = self.p4_rand_mod(m2)[1] - dur
+            o3 = self.p4_rand_mod(m2)[1] - dur
+            o4 = self.p4_rand_mod(m2)[1] - dur
+            self.spark_spawn(x + o1, y + o2,
+                             (o1 + o3 + 2) >> 2, (o2 + o4 + 2) >> 2)   # 0x43A5AE
+        if (t & 7) == 4:                               # 0x43A5F6 and 7 / cmp 4（路径 B）
+            o5 = self.p4_rand_mod(m2)[1] - dur
+            o6 = self.p4_rand_mod(m2)[1] - dur
+            g = self.p4_spawn41(x + o6, y + o5, 0x41000001)           # 0x43A62F
+            if g is not None:
+                _, r3 = self.p4_rand_mod(3)                           # ctor 0x428CCF
+                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+        if (t & 0xF) == 8 and flag:                    # 0x43A668 and 0xF / cmp 8
+            self.p4_se_pan(4, (x - 0x140) << 4)        # 0x43A685 SE#4 声像
+        if t == dur:                                   # 0x4275B3（终结帧）
+            n = dur >> 3                               # 0x43A70E sar 3
+            for _ in range(n):                         # 0x43A723..0x43A792 循环
+                o1 = self.p4_rand_mod(m2)[1] - dur
+                o2 = self.p4_rand_mod(m2)[1] - dur
+                g = self.p4_spawn41(x + o2, y + o1, 0x41000001)       # 0x43A758
+                if g is not None:
+                    _, r3 = self.p4_rand_mod(3)                       # ctor 0x428CCF
+                    g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+            if flag:
+                self.p4_se_pan(11, (x - 0x140) << 4)   # 0x43A7AE SE#11 声像
+            return False                               # 0x4275D4 自灭
+        return True                                    # 0x4275D8
+
     def _beh_430550(self, e) -> bool:
         """`0x401B95` → `0x430550`：拖尾共享行为（0x41000015/16/17/18 共用）。
 
@@ -13875,8 +13953,7 @@ class Page4Mixin:
         ta = sub.g32(0x14)
         if sub.g32(0x0C) == 0x30 and ta not in (0x24000011, 0x2300000E, 0x27000011,
                                                 0x29000013, 0x2C00000B, 0x2C00000A):
-            self.spawn(self._p4_q("ui52c"), 0x61000004,
-                       sub.s32(0x04), sub.s32(0x08), 0x30)       # 0x43D2F5
+            self.p4_spawn_61000004(sub.s32(0x04), sub.s32(0x08), 0x30)   # 0x43D2F5
         else:
             g = self.p4_spawn41(sub.s32(0x04), sub.s32(0x08), 0x41000001)   # 0x43D32F
             if g is not None:
@@ -14044,8 +14121,7 @@ class Page4Mixin:
                 if a.s32(0x0C) == 0x30 and a.s32(0x14) not in (
                         0x24000011, 0x2300000E, 0x27000011,
                         0x29000013, 0x2C00000B, 0x2C00000A):     # 0x43C220/0x43C228..
-                    self.spawn(self._p4_q("ui52c"), 0x61000004,
-                               a.s32(0x04), a.s32(0x08), 0x30)   # 0x43C25A..0x43C285
+                    self.p4_spawn_61000004(a.s32(0x04), a.s32(0x08), 0x30)  # 0x43C25A
                 else:
                     self.spawn(self._p4_q("ui4cc"), 0x41000001,
                                a.s32(0x04), a.s32(0x08))          # 0x43C28C..0x43C2C1
@@ -15697,8 +15773,7 @@ class Page4Mixin:
         ta = a.g32(0x14)
         if a.g32(0x0C) == 0x30 and ta not in (0x24000011, 0x2300000E, 0x27000011,
                                               0x29000013, 0x2C00000B, 0x2C00000A):
-            self.spawn(self._p4_q("ui52c"), 0x61000004,
-                       a.s32(0x04), a.s32(0x08), 0x30)         # 0x43CA5A
+            self.p4_spawn_61000004(a.s32(0x04), a.s32(0x08), 0x30)   # 0x43CA5A
         else:
             g = self.p4_spawn41(a.s32(0x04), a.s32(0x08), 0x41000001)   # 0x43CA94
             if g is not None:
@@ -18296,6 +18371,10 @@ class Page4Mixin:
             # 0x61000005：init 0x42730B（`[+0x1C]=a` 当前、`[+0x20]=b` 目标、`[+0x24]=d` 步进）
             # 链路 0 的载荷是 (-255, 0, 0x61000005, 16) = 16 帧淡入，正是开场把画面点亮的那条
             self.spawn_flash(a, b, d)
+        elif op == 5 and c == 0x61000004:
+            # ctor 0x4272DD / 行为 0x427580（击破波纹驱动）：VM 记录 dword ⇒ 转有符号
+            _s4 = lambda v: v - 0x100000000 if v & 0x80000000 else v
+            self.p4_spawn_61000004(_s4(a), _s4(b), _s4(d))
         elif op == 5 and (c & 0xFFFFFF00) == 0x61000000:
             # 0x61 族其余型（跳表 0x4273C0，索引 = type-0x61000001）：
             #   0x61000007 init 0x42735E / 行为 0x427690 = BGM 主音量渐变
