@@ -18229,7 +18229,7 @@ class Page4Mixin:
                 # [0x1C] = 生成y<<7（相位=生成高度）、[0x20] = [0x56CC90]-生成y
                 # （频率=自机当时 y）——大 从生成高度出发、纵向渐变到自机当时高度
                 _e2.d32(0x1C, (b << 7) & 0xFFFFFFFF)                     # 0x40DB54
-                _e2.d32(0x20, (self.p4_player_mirror_y() - b) & 0xFFFFFFFF)   # 0x40DB5D
+                _e2.d32(0x20, (self.p4_player_y() - b) & 0xFFFFFFFF)     # 0x40DB5D
             self.p4_q43c.append(_e2)               # 0x43BDC0 → 0x43A7F0
             self.p4_n43c += 1
         elif op == 1:
