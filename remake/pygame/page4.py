@@ -1623,12 +1623,12 @@ def _beh_23000005_06(self, e) -> bool:
     e.d32(0x08, (e.s32(0x08) + e.s32(0x28)) & 0xFFFFFFFF)      # 0x40E6B0
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
-    return True
-
-    def p4_child_alive(self, ptr: int) -> bool:
-        """`[[+0x1C]+0x34]`：链接体（父/子）存活标志 —— 句柄 → self.p4_links 取对象读 [0x34]。"""
-        linked = getattr(self, "p4_links", {}).get(ptr)
-        return linked is not None and linked.m[0x34] != 0
+    # 0x40E6DB 尾：HP==0 → 灭；`0x401D02`（→0x430640）屏外 且 相位≥0x14A → 灭
+    if e.g32(0x18) == 0:                               # 0x40E6DE test eax
+        return False
+    if not self.p4_430640(e) and e.s32(0x20) >= 0x14A:  # 0x40E6E4 / 0x40E6ED
+        return False
+    return True                                        # 0x40E6F6
 
 
 def _beh_23000009(self, e) -> bool:
@@ -2463,8 +2463,32 @@ def _beh_411200(self, e) -> bool:
 
 
 def _beh_411040(self, e) -> bool:
-    """`0x411040`（0x24000003，×18）：[0x20]=−32 匀速左移，[0x24]=rec3（火口）。"""
-    return _beh_411990(self, e)
+    """`0x411040`（0x24000003 攻，×18；ctor 0x410A20 case2：[0x20]=-32、[0x24]=rec3）两段式：
+
+    [0x24]==0 俯冲段：每帧 `[e+0x18]=-1`（不可击破）、y += [0x20] 后 [0x20]++（加速）、
+      x -= 0xC，并 `0x430400(rec, x-0xC, y, 0x24000003, 1)` 自我复制入 0x4AD43C
+      （param=1 = 火口残留）；`return x > -0x18`（0x4110AF setg）。
+    [0x24]!=0 火口段：`[0x1C]++` 每帧，`(t&7)==0` 时 rect 滑 0x30（口部动画），
+      `t==0x38` 自灭。"""
+    if e.s32(0x24) == 0:                             # 0x411052 俯冲段
+        e.d32(0x18, 0xFFFFFFFF)                      # 0x411049
+        acc = e.s32(0x20)
+        y = (e.s32(0x08) + acc) & 0xFFFFFFFF         # 0x411061
+        e.d32(0x20, (acc + 1) & 0xFFFFFFFF)          # 0x411063 inc
+        x = (e.s32(0x04) - 0xC) & 0xFFFFFFFF         # 0x41105E
+        self._p4_ent43c(0x24000003, x, y, 1)         # 0x411080 自我复制（火口）
+        e.d32(0x04, x)
+        e.d32(0x08, y)
+        return e.s32(0x04) > -0x18                   # 0x4110AF setg
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF               # 0x4110B6 火口段
+    e.d32(0x1C, t)
+    if (t & 7) == 0:                                 # 0x4110BF test al,7
+        if t == 0x38:                                # 0x4110C3
+            return False                             # 0x4110C8
+        if e.node is not None:                       # 0x4110DE 0x45A790(0x30,0,0x30,0)
+            e.node.rect = (e.node.rect[0] + 0x30, e.node.rect[1],
+                           e.node.rect[2] + 0x30, e.node.rect[3])
+    return True                                      # 0x4110E6
 
 
 def _beh_411120(self, e) -> bool:
@@ -18201,6 +18225,11 @@ class Page4Mixin:
         if op == 2:
             _e2 = Ent(a, b, c, d)
             _e2._pages = self
+            if c == 0x2300000D:                    # 0x40DB48（0x23 ctor case12，大）
+                # [0x1C] = 生成y<<7（相位=生成高度）、[0x20] = [0x56CC90]-生成y
+                # （频率=自机当时 y）——大 从生成高度出发、纵向渐变到自机当时高度
+                _e2.d32(0x1C, (b << 7) & 0xFFFFFFFF)                     # 0x40DB54
+                _e2.d32(0x20, (self.p4_player_mirror_y() - b) & 0xFFFFFFFF)   # 0x40DB5D
             self.p4_q43c.append(_e2)               # 0x43BDC0 → 0x43A7F0
             self.p4_n43c += 1
         elif op == 1:
