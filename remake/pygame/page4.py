@@ -818,12 +818,18 @@ class Ent:
                 thunk = info["beh"]
                 self.d32(0x40, thunk)                  # 原版存 thunk
                 self.beh = ENT23_BEH_THUNK.get(thunk, thunk)   # 复刻侧按真实地址分派
-                for off, val in info["imm"].items():
+                for off, val in info.get("imm", {}).items():
                     self.d32(off, val & 0xFFFFFFFF)
                 if "d_to" in info:
                     self.d32(info["d_to"], d & 0xFFFFFFFF)
                 if info.get("d20"):       # 0x40D98E：`[+0x20] = (b<=0xF0) ? -1 : 1`
                     self.d32(0x20, 0xFFFFFFFF if b <= 0xF0 else 1)
+                if "r1sh" in info:        # 0x40DB72/0x40DBA4：[off] = rec[1] << n
+                    off, n = info["r1sh"]
+                    self.d32(off, (b << n) & 0xFFFFFFFF)
+                if "vtup" in info and isinstance(d, tuple):
+                    self.d32(0x1C, d[0] & 0xFFFFFFFF)
+                    self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)
         self._apply_family_init(typ, a, b, d)          # 0x24-0x2D 各族（ENT24_INIT 等）
 
     def _deref_link(self, h: int):
