@@ -2052,6 +2052,10 @@ class Pages(Page4Mixin):
                 g = self.spawn(self.trailq, 0x4F000001, x, y, prm)   # 0x4AD4CC（0x401686）
                 g.beh = "adjust_tile"                # 0x401910 → 0x4381B0
                 # ctor case 0x4369E6（0x4F000001，ebx=0）：
+                # ★ spawn 不代写 raw[4]/raw[8]（fx12_spawn 同款陷阱）——不补写则 56 块砖
+                #   全部叠在 (0,0)（2026-11-14 实测"調整只剩一块砖"根因之一）
+                g.d32(0x04, x & 0xFFFFFFFF)          # [0x4] = rec0（基础 ctor 0x430475）
+                g.d32(0x08, y & 0xFFFFFFFF)          # [0x8] = rec4（0x43047A）
                 g.d32(0x1C, 0)                       # [0x1C] = 0（反弹界）
                 g.d32(0x20, 0)                       # [0x20] = 0（y 累加器，32.5 定点）
                 g.d32(0x24, 1 if prm & 1 else 0xFFFFFFFF)   # [0x24] = (param&1)?+1:−1
@@ -2737,36 +2741,42 @@ class Pages(Page4Mixin):
 
     # ---- 0x444A30（0x6F00000A 調整总控）态机（2026-11-11 转写） ----------------
     def _adjust_tile(self, e: UiEntity) -> None:
-        """0x4381B0（0x4F000001 調整网格砖，ctor case 0x4369E6）：
+        """0x438110（0x4F000001 調整网格砖，ctor case 0x4369E6，行为槽 = **0x401924**）：
 
         ```
-        0x4381B3 [0x20] += [0x24]                ; y 累加器（32.5 定点）±step/帧
-        0x4381B9 ++[0x28]                        ; 帧计数
-        0x4381C2 if ((计数 & 3) == 0):           ; 每 4 帧
-        0x4381CB   dl = ([0x1C] >= [0x20])       ; setge：界(0) ≥ 累加器
-        0x4381D5   [0x24] += dl ? -1 : +1        ; neg/sbb/and 0xFFFFFFFE/inc ⇒ ∓1
-        0x4381E0 [0x8] = [0x20] >> 5             ; y 像素 = 累加器 sar 5
-        0x4381E9 node dst = (x−0x18, y−0x18)     ; 0x45A690([0x4]−0x18, y−0x18)
-        0x43820A return [0x28] < 0x6D6           ; 计数 ≥ 1750 → 摘链
+        0x43811C [0x1C] += [0x24]                ; offx += stepx（±1/帧）
+        0x438126 [0x20] += [0x28]                ; offy += stepy（±1/帧）
+        0x438128 if (offx >= 0x3C)  offx -= 0x78 ; 半格回绕（无缝水波）
+        0x43813B if (offx < -0x3C)  offx += 0x78
+        0x438146 if (offy >= 0x28)  offy -= 0x50
+        0x438154 if (offy < -0x28)  offy += 0x50
+        0x43815F node dst = ([0x4]+offx−0x3C, [0x8]+offy−0x28)
+        0x438183 return 1                        ; 恒永生
         ```
-        （|step| 每 4 帧 +1、方向恒离界 ⇒ 砖块加速漂离后 ~29 秒自灭；x 恒为出生值。）
-        """
-        acc = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF   # 0x4381BC
-        e.d32(0x20, acc)
-        cnt = (e.s32(0x28) + 1) & 0xFFFFFFFF             # 0x4381BE
-        e.d32(0x28, cnt)
-        acc_s = acc - 0x100000000 if acc & 0x80000000 else acc
-        if (cnt & 3) == 0:                               # 0x4381C2 test dl,3
-            step = e.s32(0x24)
-            step += -1 if e.s32(0x1C) >= acc_s else 1    # 0x4381D2 setge
-            e.d32(0x24, step & 0xFFFFFFFF)               # 0x4381DD
-        y = acc_s >> 5                                   # 0x4381E3 sar 5（算术）
-        e.d32(8, y & 0xFFFFFFFF)                         # 0x4381E6 [0x8] = y
-        if e.disp is not None:                           # 0x4381E9..0x438204
-            e.disp.dst[0] = (e.s32(4) - 0x18) & 0xFFFFFFFF
-            e.disp.dst[1] = (y - 0x18) & 0xFFFFFFFF
-        if cnt >= 0x6D6:                                 # 0x43820A setl
-            e.alive = False
+        旧版误用 0x4381B0（那是 **0x4F000002**（thunk 0x401910，读自机坐标）的行为：
+        累加器漂移 + 1750 帧自灭）⇒ 砖块飞出屏、調整页只剩一块砖（2026-11-14 实测）。"""
+        offx = (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF  # 0x43811C
+        e.d32(0x1C, offx)
+        offy = (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF  # 0x438126
+        e.d32(0x20, offy)
+        ox = offx - 0x100000000 if offx & 0x80000000 else offx
+        if ox >= 0x3C:                                   # 0x438128 jge→jl
+            ox -= 0x78
+            e.d32(0x1C, ox & 0xFFFFFFFF)                 # 0x438132
+        elif ox < -0x3C:                                 # 0x43813B jge
+            ox += 0x78
+            e.d32(0x1C, ox & 0xFFFFFFFF)                 # 0x438140
+        oy = offy - 0x100000000 if offy & 0x80000000 else offy
+        if oy >= 0x28:                                   # 0x438146
+            oy -= 0x50
+            e.d32(0x20, oy & 0xFFFFFFFF)                 # 0x43814B
+        elif oy < -0x28:                                 # 0x438154
+            oy += 0x50
+            e.d32(0x20, oy & 0xFFFFFFFF)                 # 0x438159
+        if e.disp is not None:                           # 0x43815F..0x438180
+            e.disp.dst[0] = (e.s32(0x04) + ox - 0x3C) & 0xFFFFFFFF
+            e.disp.dst[1] = (e.s32(0x08) + oy - 0x28) & 0xFFFFFFFF
+        # 0x438183 return 1（永生，无死亡路径）
 
     def _adjust_root(self, e: UiEntity) -> None:
         """0x444A30：帧头 edi = (指针Y*0x4BDA12F7)>>36（÷54.05 段）；bl = 段!=[+0x20]。
