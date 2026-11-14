@@ -10931,10 +10931,14 @@ def p4_laser(self, e, variant: str) -> bool:
 
     | 变体 | btn1 门 | `[0x56CC98]` 屏蔽 | 入口置 `[0x56CC94]` | 结算参数 | 释放时 `[ebp+0x30]` 下限 |
     |---|---|---|---|---|---|
-    | `0x446C50` | 有 | 无 | 无 | `(1,1)` 开火 / 无 0 号 | 0x1E（仅当 `[0x56CC9C]==0`） |
-    | `0x446D30` | 有 | 有 | 无 | `(1,1)` 开火 / `(0,1)` 释放 | 0x1E |
-    | `0x446E20` | 无（用 `[+0x20]==0`） | 无 | `=[0x56CC98]!=[0x56CCA0]` | `(0,1)` | 0x3C（仅当 `[0x56CC98]==[0x56CCA0]`） |
-    | `0x446F10` | 有 | 有 | `=1` | `(1,1)` 开火 / `(0,1)` 释放 | 无 |
+    | `0x446C50` 鼠标撃 | 有 | 无 | 无 | `(1,1)` 开火 / 无 0 号 | 0x1E（仅当 `[0x56CC9C]==0`） |
+    | `0x446D30` 鼠标凛 | 有 | 有 | 无 | `(1,1)` 开火 / `(0,1)` 释放 | 0x1E |
+    | `0x446E20` 鼠标漢 | 无（用 `[+0x20]==0`） | 无 | `=[0x56CC98]!=[0x56CCA0]` | `(0,1)` | 0x3C（仅当 `[0x56CC98]==[0x56CCA0]`） |
+    | `0x446F10` 鼠标槽3 | 有 | 有 | `=1` | `(1,1)` 开火 / `(0,1)` 释放 | 无 |
+    | `0x447000` 键盘撃 | 有 | 无 | 无 | `(1,1)` 开火 + `0x45F530(0)` 清连击 / `(0,1)` 释放 | 0x1E（仅当 `[0x56CC9C]==0`） |
+    | `0x447110` 键盘凛 | 有 | 有 | 无 | `(1,1)` 开火 / `(0,1)` 释放 | 0x1E |
+    | `0x447200` 键盘漢 | 无（用 `[+0x20]==0`） | 无 | `=[0x56CC98]!=[0x56CCA0]` | `(0,1)` 开火 / `(0,1)` 释放沿（无门） | 0x3C（仅当 `[0x56CC98]==[0x56CCA0]`） |
+    | `0x447320` 键盘槽3 | 有 | 有 | `=1` | `(1,1)` 开火 / `(0,1)` 释放 | 无 |
     """
     sub = e.p.get("sub")                     # 0x446C5E ebp = [ebx+0x1C]
     s98 = self.p4_stat.get(0x56CC98, 0)
@@ -10957,6 +10961,14 @@ def p4_laser(self, e, variant: str) -> bool:
         if sub is not None and sub.s32(0x30) < v:                # 0x446CE1 / 0x446DD3 / 0x446EC3
             sub.d32(0x30, v)
 
+    def preset(a: int, b: int) -> None:
+        """裸 `0x401AA5 → 0x446470(sub, a, b)`（预设切换，**不发**光束）。"""
+        if sub is None:
+            return
+        import page4 as _p4m
+        _p4m.p4_446470(self, sub, a, b)
+        self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
+
     if variant == "e20":
         # 0x446E20..0x446E3A：先算 [0x56CC94] = ([0x56CC98] != [0x56CCA0])
         self.p4_stat[0x56CC94] = 1 if s98 != sa0 else 0
@@ -10969,6 +10981,55 @@ def p4_laser(self, e, variant: str) -> bool:
                 raise_floor(0x3C)                                # 0x446EBE
         return bool(sub is not None and sub.g32(0x34))            # 0x446ECA
 
+    if variant == "kb_e20":                                       # 0x447200（键盘漢）
+        self.p4_stat[0x56CC94] = 1 if s98 != sa0 else 0           # 0x44720E..0x44721A
+        if e.g32(0x20) == 0:                                      # 0x447220
+            fire(0, 1)                                            # 0x447263
+            e.d32(0x20, 1)                                        # 0x44726E
+        if self.p4_btn1_edge() and self.p4_stat.get(0x56CCA0, 0):  # 0x44727C..0x447288
+            self.p4_stat[0x56CC94] = 1                            # 0x447290
+            if self.p4_stat.get(0x56CC98, 0) == self.p4_stat.get(0x56CCA0, 0):
+                raise_floor(0x3C)                                 # 0x4472A7
+        if self.p4_btn1_release():                                # 0x4472BE：仅释放沿，
+            preset(0, 1)                                          # 0x4472C7（无 [+0x20]/sub 亡门）
+        return bool(sub is not None and sub.g32(0x34))            # 0x4472D2
+
+    if variant == "kb_c50":                                       # 0x447000（键盘撃）
+        if self.p4_btn1_edge():                                   # 0x4AB597
+            fire(1, 1)                                            # 0x447052
+            # 0x44705E 0x40164F→0x45F530(0x4CD4A0,0)：ax=0 ⇒ byte[+0x2A]=0 清连击
+            self.p4_stat[0x4CD4A0 + 0x2A] = 0
+            e.d32(0x20, 1)                                        # 0x447064
+        if e.g32(0x20):                                           # 0x44706C
+            if self.p4_btn1_release() or (sub is not None and not sub.g32(0x34)):
+                preset(0, 1)                                      # 0x447089
+                if self.p4_stat.get(0x56CCA0, 0):                 # 0x44708E
+                    if (not self.p4_stat.get(0x56CC9C, 0)
+                            and sub is not None and sub.s32(0x30) < 0x1E):
+                        sub.d32(0x30, 0x1E)                       # 0x4470AC
+                    self.p4_stat[0x56CC94] = 1                    # 0x4470AF
+                e.d32(0x20, 0)                                    # 0x4470B6
+        return bool(sub is not None and sub.g32(0x34))            # 0x4470BD
+
+    if variant in ("kb_d30", "kb_f10"):                           # 0x447110 / 0x447320
+        if variant == "kb_f10":
+            self.p4_stat[0x56CC94] = 1                            # 0x447331 入口置位
+        btn = self.p4_btn1_edge()
+        if self.p4_stat.get(0x56CC98, 0):                         # 0x44712A / 0x447341 屏蔽
+            btn = False
+        if btn:
+            fire(1, 1)                                            # 0x44716B / 0x447385
+            e.d32(0x20, 1)
+        if e.g32(0x20):                                           # 0x447179 / 0x447393
+            if self.p4_btn1_release() or (sub is not None and not sub.g32(0x34)):
+                preset(0, 1)                                      # 0x447196 / 0x4473B0
+                if self.p4_stat.get(0x56CCA0, 0):                 # 0x44719B / 0x4473B5
+                    self.p4_stat[0x56CC94] = 1                    # 0x4471A4 / 0x4473BE
+                    if variant == "kb_d30" and sub is not None and sub.s32(0x30) < 0x1E:
+                        sub.d32(0x30, 0x1E)                       # 0x4471B7（kb_f10 无 raise）
+                e.d32(0x20, 0)                                    # 0x4471BA / 0x4473C5
+        return bool(sub is not None and sub.g32(0x34))            # 0x4471C1 / 0x4473CC
+
     btn = self.p4_btn1_edge()                                    # 0x4AB597 按下沿
     if variant in ("d30", "f10") and s98:                        # 0x446D43 / 0x446F2A
         btn = False
@@ -10980,8 +11041,7 @@ def p4_laser(self, e, variant: str) -> bool:
     if e.g32(0x20):                                              # 0x446CB0 / 0x446D99 / 0x446F83
         if self.p4_btn1_release() or (sub is not None and not sub.g32(0x34)):
             if variant in ("d30", "f10"):
-                # 0x446DB0 / 0x446F9A：0 号结算（0x401AA5）
-                self.p4_stat[0x446470] = self.p4_stat.get(0x446470, 0) + 1
+                preset(0, 1)                                     # 0x446DB0 / 0x446F9A 0x446470(sub,0,1)
             if self.p4_stat.get(0x56CCA0, 0):                     # 0x446CC7 / 0x446DBB / 0x446FA5
                 if variant == "c50":
                     if not self.p4_stat.get(0x56CC9C, 0):         # 0x446CD0
@@ -11006,6 +11066,26 @@ def _beh_446D30(self, e) -> bool:
 def _beh_446E20(self, e) -> bool:
     """`0x446E20`：激光族变体（无按键门，按 `[+0x20]` 状态一次性开火）。见 `p4_laser`。"""
     return p4_laser(self, e, "e20")
+
+
+def _beh_447000(self, e) -> bool:
+    """`0x447000`：激光族键盘撃（开火附加 0x45F530(0) 清连击、释放回预设）。见 `p4_laser`。"""
+    return p4_laser(self, e, "kb_c50")
+
+
+def _beh_447110(self, e) -> bool:
+    """`0x447110`：激光族键盘凛（`[0x56CC98]` 屏蔽 + 释放回预设 + raise 0x1E）。见 `p4_laser`。"""
+    return p4_laser(self, e, "kb_d30")
+
+
+def _beh_447200(self, e) -> bool:
+    """`0x447200`：激光族键盘漢（一次性开火 + 按住锁定 + 释放沿回预设）。见 `p4_laser`。"""
+    return p4_laser(self, e, "kb_e20")
+
+
+def _beh_447320(self, e) -> bool:
+    """`0x447320`：激光族键盘槽3（入口置位 + 屏蔽 + 释放回预设、无 raise）。见 `p4_laser`。"""
+    return p4_laser(self, e, "kb_f10")
 
 
 P4_447640_TYPES = (0x11FFA321, 0x11FFA321, 0x1180A322, 0x1140A323,
@@ -11994,6 +12074,12 @@ P4_BEH: dict[int, object] = {
     0x446D30: _beh_446D30,
     0x446E20: _beh_446E20,
     0x446F10: _beh_446F10,
+    # type5 狙击发射器键盘 4 变体（0x445E47 行为表 idx4..7，thunk 0x40189D/0x401438/
+    # 0x401ECE/0x401FC3 → 真址）——2026-11-14 反汇编 0x447000..0x4473D4 逐条落地。
+    0x447000: _beh_447000,
+    0x447110: _beh_447110,
+    0x447200: _beh_447200,
+    0x447320: _beh_447320,
     # 0x24 族高频行为
     0x411990: _beh_411990, 0x410E10: _beh_410E10,
     0x416A50: _beh_416A50, 0x416940: _beh_416940,
