@@ -12494,6 +12494,11 @@ class Page4Mixin:
         故 **bit0 置 → 0x2E/0x58 分支；bit0 清 → cmd 0/9 分支**（与 §10.7 一致）。
         返回值被 `0x451110` 丢弃（`docs/p4_step_0x451110.md` 更正 2）。
         """
+        # 0x460376：VM 的 +0x38 旗标子对象 = 0x56CC84（sysf），0x45B030(…,0) 任一位置位
+        # ⇒ 整段停走（时钟与游标都不动，解冻后按时间戳继续）。置位点：0x2=0x61000002
+        # 演出等待门、0x4=0x51000001 结算计数、0x10=0x51000002 继续总控 ctor（t=8550
+        # Boss 出现后冻结时间线）、0x20/0x40=二面 boss/庆典、0x80=继续总控出口残留。
+        self.vm.flags = 1 if self.sysf.bits else 0
         if not self.vm_step_frame():              # 0x450FE5 0x402149 → 0x460350
             return
         cmd = self.vm_command()                   # 0x450FF2 0x40111D → 0x460800
