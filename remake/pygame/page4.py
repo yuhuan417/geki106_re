@@ -14008,7 +14008,10 @@ class Page4Mixin:
             if self.p4_stat.get(0x56CC94, 0):            # 0x429F79 释放事件
                 self.p4_stat[0x56CCA0] = (self.p4_stat.get(0x56CCA0, 0) - 1) & 0xFFFFFFFF
                 e.d32(0x28, (t28 + 1) & 0xFFFFFFFF)      # 0x429F93
-            return alive
+            if not alive:
+                self._p4_41400507_dtor(e)                # 0x43A4B9 摘链即调 vtable dtor
+                return False
+            return True
         if t28 == 0:                                     # 拍 0（0x429FAD）
             fr = self.p4_frame_no()
             if fr > sub.g32(0x50):                       # 0x429FB9 jae：[+0x50]>=frame → 本拍跳过
@@ -14019,7 +14022,10 @@ class Page4Mixin:
                     e.d32(0x08, self.p4_stat.get(0x56CC90, 0))
                 self.p4_se_pan(7, (self.p4_stat.get(0x56CC8C, 0) - 0x140) << 4)   # 0x42A008
                 e.d32(0x28, 1)                           # 0x42A00F
-            return alive
+            if not alive:
+                self._p4_41400507_dtor(e)                # 同上
+                return False
+            return True
         # 拍 ≥1（0x42A029）：逼近
         x = e.s32(0x04) + (e.s32(0x20) >> 1)             # 0x42A033 sar
         y = e.s32(0x08) + (e.s32(0x24) >> 1)
@@ -14041,6 +14047,7 @@ class Page4Mixin:
                 self.spark_spawn(x, y,
                                  (self.p4_rand() & 0x1F) - 0xF,
                                  (self.p4_rand() & 0x1F) - 0xF)
+            self._p4_41400507_dtor(e)                    # 0x43A4B9 摘链即调 dtor（[0x56CC98]--）
             return False                                 # 0x42A1F4 自灭
         return True                                      # 0x42A272 未命中
 
