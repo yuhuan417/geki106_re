@@ -91,35 +91,10 @@ class ScriptBank:
         return int.from_bytes(self.d[o:o + 3], "little")
 
     def get(self, sid: int) -> bytes:
-        """`0x45DDA0(id)`..`0x45DDE0(id)`。
-
-        调试：`P4_BOSS_AT=<帧>` 把第一关组（流 45/46）的全部记录按**有效执行时间**
-        等比压缩（E=max(E,t)——流内 t 会回退表示"到游标即执行"，直接等比会破坏该
-        语义），使 0x23000015（王）落到第 at 帧（原 E=8520）。例 `P4_BOSS_AT=600`：
-        开场约 1 秒、Boss 约 10 秒进场。只改内存副本，不动 resource_dec.bin。"""
+        """`0x45DDA0(id)`..`0x45DDE0(id)`。"""
         o = self._u24(sid)
         e = self._u24(sid + 1) if sid < self.n else len(self.d)
-        buf = self.d[o:e]
-        at = os.environ.get("P4_BOSS_AT")
-        if at and sid in (45, 46):
-            at = int(at, 0)
-            buf = bytearray(buf)
-            cur = 0
-            eff = 0                              # 有效执行时间（游标序，单调）
-            while cur + 4 <= len(buf):
-                op = int.from_bytes(buf[cur:cur + 2], "little")
-                t = int.from_bytes(buf[cur + 2:cur + 4], "little")
-                eff = max(eff, t)
-                buf[cur + 2:cur + 4] = (eff * at // 8520).to_bytes(2, "little")
-                if op == 0:                      # NEXT-STREAM：本流终止
-                    break
-                if op == 9:
-                    n = int.from_bytes(buf[cur + 0xC:cur + 0x10], "little")
-                    cur += 0x10 + n * 4
-                else:
-                    cur += ScriptVM.SIZES.get(op, 0x14)
-            buf = bytes(buf)
-        return buf
+        return self.d[o:e]
 
 
 class ScriptVM:
