@@ -767,23 +767,21 @@ class Input:
                 ddy = (c * inv * ddy) >> 12
             dx, dy = ddx, ddy
             self.mouse_tx, self.mouse_ty = tx, ty
-        # 0x44E8C0..0x44E952：键盘 ±1000 **加进**（鼠标）位移，再按合成值的**符号**取
-        # 方向、幅值 = 预设步长；任一轴为 0 ⇒ 该轴不动（旧版三元把 0 轴也推 −s ⇒
-        # 单方向键走出对角线）。定步预设且**任一轴为零**（cardinal）→ 步长 1.5×
-        # （0x44E920 test bl[+0x4E] / 0x44E928 test edx / 0x44E92E test eax / 0x44E930
-        # sar+add——合成 (s·1.5, 0)/(0, s·1.5) 与斜向 (s, s) 的欧氏速度相等）。
-        kdx = -1000 if keys.get("left") else (1000 if keys.get("right") else 0)
-        kdy = -1000 if keys.get("up") else (1000 if keys.get("down") else 0)
+        # 0x44E8C0..0x44E952：键盘 ±1000 只作为**键盘分量**取符号、幅值=预设步长
+        # （定步且任一键盘轴为零 ⇒ 步长 1.5×，0x44E930）；0x44E97E 的指针更新是
+        # **[edi](鼠标分量) += edx(键盘±步长)** ——鼠标分量原样保留、两者相加。
+        # 旧实现把鼠标+键盘合成值整体替换成 ±步长 ⇒ 鼠标最小位移=整步 54px
+        # （調整页"碰一下跑好几项"的根因，2026-11-15）。
         if cfg["kb"]:
-            dx += kdx
-            dy += kdy
+            kx = -1000 if keys.get("left") else (1000 if keys.get("right") else 0)
+            ky = -1000 if keys.get("up") else (1000 if keys.get("down") else 0)
             s = cfg["step"]
-            if cfg["fixed"] and (dx == 0 or dy == 0):
+            if cfg["fixed"] and (kx == 0 or ky == 0):
                 s += s >> 1                     # 0x44E930 sar 1 + add = 1.5×
-            if dx != 0:                         # 0x44E936
-                dx = s if dx > 0 else -s        # 0x44E93A..0x44E940
-            if dy != 0:                         # 0x44E944
-                dy = s if dy > 0 else -s        # 0x44E948..0x44E94E
+            if kx != 0:                         # 0x44E936..0x44E940
+                dx += s if kx > 0 else -s
+            if ky != 0:                         # 0x44E944..0x44E94E
+                dy += s if ky > 0 else -s
             # （0x44E973 byte[edi+0xC]=1 的"本帧有位移"旗标、0x44E979 的
             #   ([esi+0x20]&byte[esi+0x4F]) 混合预设抑制门：复刻侧暂无对应读者，未接。）
         l, t, rt, b = cfg["bounds"]
