@@ -2933,21 +2933,28 @@ class Pages(Page4Mixin):
         return True
 
     def _adjust_row(self, e: UiEntity, row: int) -> None:
-        """0x44547C 18 行表（C=按住沿/X=按住沿均可，原码不区分按哪个键）。"""
+        """0x44547C 18 行表（C=按住沿/X=按住沿均可，原码不区分按哪个键）。
+        行 0/2/3/12/13/14 = **0x45AF90 XOR** 切换（旧实现写成 OR ⇒ 按两次切不回来，
+        2026-11-15 用户实测）。"""
         if row == 0:                                 # 0x444B99
-            self.keys.bits |= 0x200                  # 鍛錬 ON（0x45AF30）
+            self.keys.bits ^= 0x200                  # 自動爆破切替（0x45AF90 XOR）
         elif row == 1:                               # 0x444BAD
             cur = self.keys.field(0x18)
             nxt = {0: 1, 1: 3}.get(cur, 0)
             self.keys.set_field(0x18, nxt)         # 0x45B0E0(0x4AB5B0, 0x18, nxt)
-            b0 = 1 if self.keys.test(8) else 0       # 0x45AFF0(8)
-            b1 = 1 if self.keys.test(0x10) else 0    # 0x45AFF0(0x10)
-            self.load_wave(0, 0)                     # 0x401C80(0x4AB4B0, …) 等效
+            a = 1 if self.keys.test(8) else 0        # 0x45AFF0(8)
+            b = 1 if self.keys.test(0x10) else 0     # 0x45AFF0(0x10)
+            # 0x401C80→0x450580(0x4AB4B0, a, b)：音效管理器 byte[0x5C]=a、byte[0x5D]=b
+            self.p4_stat[0x4AB4B0 + 0x5C] = a & 0xFF
+            self.p4_stat[0x4AB4B0 + 0x5D] = b & 0xFF
         elif row == 2:                               # 0x444C0D
-            self.keys.bits &= ~4
-            self.p4_bgm_field = 4                    # 0x44FEE0(0x4AB514, 4): byte[0x50]=4
+            self.keys.bits ^= 4                      # 0x45AF90 XOR
+            v = 1 if self.keys.test(4) else 0        # 0x45AFF0(4)
+            # 0x4011F9→0x44FEE0(0x4AB514, v)：MIDI 管理器 byte[0x50] = v
+            self.p4_stat[0x4AB514 + 0x50] = v & 0xFF
+            self._adjust_bgm_dirty = True            # 0x444C30 [esp+0x12]=1
         elif row == 3:                               # 0x444C3A
-            self.keys.bits |= 0x400
+            self.keys.bits ^= 0x400                  # 0x45AF90 XOR
         elif row == 7:                               # 0x444F14 説明行/表示切替
             # [ent+0x30] ^= 1（0x444F23）＋ 态=5（0x444F26 ⇒ 0x444360 メニュー再生成）
             # ＋ 0x4013DE(0x4AB454, 0, 0)（ポインタ/preset リセット）。
@@ -2973,15 +2980,15 @@ class Pages(Page4Mixin):
             else:                                    # b1：0x3F000 字段写入 + 设备应用
                 self.disp_cfg.set_field(0x3F000, self._adjust_dev_i & 0xFFFFFFFF)
                 # 0x401DF2→0x44FDD0 / 0x40110E→0x44F390(0x4AB514, dev)＝MIDI 切替（音频后端无枚举）
-        elif row == 10:                              # 0x444CCA 对比度 ±2
+        elif row == 10:                              # 0x444CCA 对比度 ±1
             cur = self.disp_cfg.field(0xFE000000)
-            cur = cur + (2 if self.inp.rec.b0 else -2)
+            cur = cur + (1 if self.inp.rec.b0 else -1)   # 0x444CD9..0x444CE7 ±1
             if cur == 0x64:
                 cur = 0
             elif cur == 0x7F:
                 cur = 0x63
             self.disp_cfg.set_field(0xFE000000, cur & 0xFFFFFFFF)
-            self._adjust_pal_dirty = True
+            self._adjust_pal_dirty = True            # 0x444D43 [esp+0x13]=1
         elif row == 16:                              # 0x444E91 BGM 行
             if self.keys.test(0x80):
                 v = self._adjust_bgm_i + 1
@@ -3002,23 +3009,23 @@ class Pages(Page4Mixin):
                 self.pal_now = self.pal
                 e.t = 3
                 self._adjust_cursor()
-        elif row == 11:                              # 0x444D4D 亮度 ±2
+        elif row == 11:                              # 0x444D4D 亮度 ±1
             cur = self.disp_cfg.field(0x1FC0000)
-            cur = cur + (2 if self.inp.rec.b0 else -2)
+            cur = cur + (1 if self.inp.rec.b0 else -1)   # 0x444D5C..0x444D6F ±1
             if cur == 0x64:
                 cur = 0
             elif cur == 0x7F:
                 cur = 0x63
             self.disp_cfg.set_field(0x1FC0000, cur & 0xFFFFFFFF)
-            self._adjust_pal_dirty = True
-        elif row == 12:                              # 0x444DD0 背景 CG 开关
-            self.keys.bits |= 0x40
+            self._adjust_pal_dirty = True            # 0x444DC6 [esp+0x13]=1
+        elif row == 12:                              # 0x444DD0 切替 XOR 0x40
+            self.keys.bits ^= 0x40                   # 0x45AF90 XOR（旧版 OR ⇒ 切不回来）
             self.layers.cg40 = 1 if self.keys.test(0x40) else 0   # 0x44DCD0 byte[0x86]
-        elif row == 13:                              # 0x444DF8 前景 CG 开关
-            self.keys.bits |= 0x20
+        elif row == 13:                              # 0x444DF8 切替 XOR 0x20
+            self.keys.bits ^= 0x20                   # 0x45AF90 XOR
             self.layers.cg20 = 1 if self.keys.test(0x20) else 0   # 0x44DCB0 byte[0x85]
-        elif row == 14:                              # 0x444E20
-            self.keys.bits |= 0x800
+        elif row == 14:                              # 0x444E20 切替 XOR 0x800
+            self.keys.bits ^= 0x800                  # 0x45AF90 XOR
         elif row == 15:                              # 0x444E34 操作器切换
             cur = self.keys.field(0x3000)
             nxt = {0: 1, 1: 3}.get(cur, 0)
@@ -3072,36 +3079,53 @@ class Pages(Page4Mixin):
     # ---- 页6 調整メニュー表示体（0x444360 → 0x4AD4FC、0x5F000008..D 群）--------
 
     def _p6_spawn_menu(self, reentry: int) -> None:
-        """0x444360（調整メニュー生成，arg = [ent+0x30]!=0）：0x4018B6(0x4AD4FC) 清队列 →
-        0x5F000008(-1) 説明塊 → 0x5F000009 ×9（行ラベル prm 0..8）→ 0x5F00000A(0x60,0x200) /
-        0x5F00000D(0x80,0x140,0x18) / 0x5F00000A(0xA0,4) / 0x5F00000A(0xC0,0x400) →
-        0x5F00000C/B (0xE0,0xF) → C/B (0x100,0xF0) → C (0x120,0xF00)。
-        再入（arg!=0）：08 の prm=9＝底部説明行（0x425960）、09 の prm=9..17＝第2窃块ラベル、
-        末尾 bit0x80 時 0x5F00000C @ x=[0x28] prm=0x80（跳選桁、ライブ値 = [0x28]）。
-        旧复刻状态 0 只生成了闪光 ⇒ 菜单全体缺失（2026-11-15 用户截图定案）。"""
+        """0x444360（調整メニュー生成，arg = [ent+0x30]!=0）。0x4018B6(0x4AD4FC) 清队列后：
+
+        初回（arg=0）0x444382..0x4445E4＋尾 0x44489D：
+          08(-1) 説明塊 → 08(0) 説明行（0x425960、tbl[seg+0]）→ 09×9 (prm 0..8) 行ラベル →
+          0A(0x60,0,0x200) 自動爆破 / 0D(0x80,0x140,0x18) 画像要素 / 0A(0xA0,0,4) 音楽 /
+          0A(0xC0,0,0x400) → 0C/0B (0,0xE0,0xF) → C/B (0,0x100,0xF0) → C/B (0,0x120,0xF00)
+          キー桁（攻撃/光撃/捕獲）。
+        再入（arg!=0）＝**他設定ページ** 0x4445E9..0x4448C5：
+          08(9) 説明行 → 09×9 (prm 9..17＝第2窃块) →
+          0C(rec0=&[ent+0x2C] ライブ,0x60) デバイス桁 / 0B →
+          0C/0B (0,0x80,0xFE000000) 彩度 → 0C/0B (0,0xA0,0x1FC0000) 明度 →
+          0A(0xC0,0x40,0x40) / 0A(0xE0,0x80,0x20) / 0A(0x100,0,0x800) /
+          0D(0x120,0x160,0x3000) → bit0x80 時 0C(rec0=&[ent+0x28]) 跳選桁。
+        旧实现：初回に 08(0) 説明行が漏れ、デバイス桁を初回でも生成 ⇒ 0A 行と重複
+        （2026-11-15 用户实测"右侧文字重叠"）。"""
         self.ui4fc.clear()                               # 0x4018B6(0x4AD4FC)
-        self.spawn(self.ui4fc, 0x5F000008, 0, 0, -1)
-        if reentry:
-            self.spawn(self.ui4fc, 0x5F000008, 0, 0, 9)  # 底部説明行
-        for i in range(9):
-            self.spawn(self.ui4fc, 0x5F000009, 0, 0, i if not reentry else 9 + i)
-        self.spawn(self.ui4fc, 0x5F00000A, 0x60, 0, 0x200)
-        self.spawn(self.ui4fc, 0x5F00000D, 0x80, 0x140, 0x18)
-        self.spawn(self.ui4fc, 0x5F00000A, 0xA0, 0, 4)
-        self.spawn(self.ui4fc, 0x5F00000A, 0xC0, 0, 0x400)
-        self.spawn(self.ui4fc, 0x5F00000C, 0, 0xE0, 0xF)
-        self.spawn(self.ui4fc, 0x5F00000B, 0, 0xE0, 0xF)
-        self.spawn(self.ui4fc, 0x5F00000C, 0, 0x100, 0xF0)
-        self.spawn(self.ui4fc, 0x5F00000B, 0, 0x100, 0xF0)
-        self.spawn(self.ui4fc, 0x5F00000C, 0, 0x120, 0xF00)
-        # 0x44465A：MIDI デバイス桁（0x5F00000C、rec0 = ＆[ent+0x2C]＝ライブ値ポインタ）。
-        # ★ rec0 はポインタ値のまま ctor の dst.y に入る ⇒ dst=(0x198, 巨大値) ⇒ 画面外
-        #   （原作の挙動どおり非表示。0x20 非 NULL マーカーとして 0x40000000 を採用）
-        g = self.spawn(self.ui4fc, 0x5F00000C, 0x40000000, 0x60, 0)
+        self.spawn(self.ui4fc, 0x5F000008, 0, 0, -1)     # 0x444382 説明塊
+        self.spawn(self.ui4fc, 0x5F000008, 0, 0, 0)      # 0x4443A7 説明行
+        for i in range(9):                               # 0x4443BA..0x444412
+            self.spawn(self.ui4fc, 0x5F000009, 0, 0, i)
+        if not reentry:
+            # ---- 初回ページ 0x444414..0x4445E4＋尾 ----
+            self.spawn(self.ui4fc, 0x5F00000A, 0x60, 0, 0x200)     # 0x444414 自動爆破
+            self.spawn(self.ui4fc, 0x5F00000D, 0x80, 0x140, 0x18)  # 0x44444B 画像要素
+            self.spawn(self.ui4fc, 0x5F00000A, 0xA0, 0, 4)         # 0x444485 音楽
+            self.spawn(self.ui4fc, 0x5F00000A, 0xC0, 0, 0x400)     # 0x4444BC
+            for y, m in ((0xE0, 0xF), (0x100, 0xF0), (0x120, 0xF00)):
+                self.spawn(self.ui4fc, 0x5F00000C, 0, y, m)   # 0x4444F6 キー桁 10 の位
+                self.spawn(self.ui4fc, 0x5F00000B, 0, y, m)   # 0x44453C キー桁 1 の位
+            return
+        # ---- 他設定ページ 0x4445E9..0x4448C5 ----
+        self.spawn(self.ui4fc, 0x5F000008, 0, 0, 9)            # 0x4445F3 説明行
+        for i in range(9):                                     # 0x444600..0x444658
+            self.spawn(self.ui4fc, 0x5F000009, 0, 0, 9 + i)
+        g = self.spawn(self.ui4fc, 0x5F00000C, 1, 0x60, 0)     # 0x44465A デバイス桁
         g.p["live"] = lambda: int(getattr(self, "_adjust_dev_i", 0))
-        if reentry and self.keys.test(0x80):
-            # 0x44486A：跳選桁（rec0 = ＆[ent+0x28]）——同様に dst 画面外で非表示
-            g = self.spawn(self.ui4fc, 0x5F00000C, 0x40000000, 0x140, 0x80)
+        self.spawn(self.ui4fc, 0x5F00000B, 1, 0x60, 0)         # 0x44469F
+        self.spawn(self.ui4fc, 0x5F00000C, 0, 0x80, 0xFE000000)   # 0x4446B7 彩度
+        self.spawn(self.ui4fc, 0x5F00000B, 0, 0x80, 0xFE000000)   # 0x444700
+        self.spawn(self.ui4fc, 0x5F00000C, 0, 0xA0, 0x1FC0000)    # 0x444713 明度
+        self.spawn(self.ui4fc, 0x5F00000B, 0, 0xA0, 0x1FC0000)    # 0x44475C
+        self.spawn(self.ui4fc, 0x5F00000A, 0xC0, 0x40, 0x40)      # 0x44476F
+        self.spawn(self.ui4fc, 0x5F00000A, 0xE0, 0x80, 0x20)      # 0x4447A6
+        self.spawn(self.ui4fc, 0x5F00000A, 0x100, 0, 0x800)       # 0x4447E0
+        self.spawn(self.ui4fc, 0x5F00000D, 0x120, 0x160, 0x3000)  # 0x44481A
+        if self.keys.test(0x80):                                  # 0x444866
+            g = self.spawn(self.ui4fc, 0x5F00000C, 1, 0x140, 0)   # 0x44486A 跳選桁
             g.p["live"] = self._adjust_bgm_i_getter()
 
     def _adjust_bgm_i_getter(self):
