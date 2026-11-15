@@ -773,8 +773,25 @@ class Input:
         # 旧实现把鼠标+键盘合成值整体替换成 ±步长 ⇒ 鼠标最小位移=整步 54px
         # （調整页"碰一下跑好几项"的根因，2026-11-15）。
         if cfg["kb"]:
-            kx = -1000 if keys.get("left") else (1000 if keys.get("right") else 0)
-            ky = -1000 if keys.get("up") else (1000 if keys.get("down") else 0)
+            # ±1000 の符号源：入力レコードのエッジ（1 押し = 1 ステップ）。
+            # fixed=1（戦闘プリセット）は押しっぱなし連続移動、fixed=0（調整 preset 1）
+            # は押下**エッジ**で 1 ステップ（ユーザ実機観察：按一下键盘走一项）。
+            held_l = bool(keys.get("left"))
+            held_r = bool(keys.get("right"))
+            held_u = bool(keys.get("up"))
+            held_d = bool(keys.get("down"))
+            if cfg["fixed"]:
+                edge_l, edge_r = held_l, held_r
+                edge_u, edge_d = held_u, held_d
+            else:
+                edge_l = held_l and not self._prevdir.get("left")
+                edge_r = held_r and not self._prevdir.get("right")
+                edge_u = held_u and not self._prevdir.get("up")
+                edge_d = held_d and not self._prevdir.get("down")
+            self._prevdir.update(left=held_l, right=held_r,
+                                 up=held_u, down=held_d)
+            kx = -1000 if edge_l else (1000 if edge_r else 0)
+            ky = -1000 if edge_u else (1000 if edge_d else 0)
             s = cfg["step"]
             if cfg["fixed"] and (kx == 0 or ky == 0):
                 s += s >> 1                     # 0x44E930 sar 1 + add = 1.5×
