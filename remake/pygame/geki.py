@@ -2313,6 +2313,75 @@ class Pages(Page4Mixin):
                 e.a4 = 0                          # [ent+0x20] 当前选中（ebp 落点）
                 e.aux = 0                         # [ent+0x24] 停留计数
                 e.p["sel"] = 0                    # [ent+0x28] 确认时的选中项
+            elif idx == 6:                        # 0x5F000008 ctor 0x4246AE：説明塊/説明行（層2 = bm_st3）
+                # rec3<0 ⇒ 行为 0x430520（[0x1C]-- 减到 0 死；-1 ⇒ 永生）+ 固定窗
+                # (0,0x270,0x17F,0x2B7) dst (0xC,0xC)＝操作説明塊。
+                # rec3>=0 ⇒ 行为 0x425960（説明行：rect 每帧按 (seg+[0x1C]) 查表重算）、
+                # dst (0x80,0x190)＝底部説明行（0x444360 再入時 prm=9）。
+                if int(a3) < 0:
+                    e.beh = 0x430520
+                    e.d32(0x1C, int(a3) & 0xFFFFFFFF)
+                    e.disp = DisplayNode(2, [0, 0x270, 0x17F, 0x2B7], [0xC, 0xC])
+                else:
+                    e.beh = 0x425960
+                    e.d32(0x1C, int(a3) & 0xFFFFFFFF)
+                    e.disp = DisplayNode(2, [0, 0, 0x17F, 0x17], [0x80, 0x190])
+                e.node = e.disp
+                e.disp.active = 1
+            elif idx == 7:                        # 0x5F000009 ctor 0x424771：メニュー行ラベル（層1 = bm_st2）
+                # [0x1C]=rec3%9（点滅比較行）、[0x20]=0（点滅カウンタ）、
+                # rect = ((rec3/9)*128, (rec3%9)*32, +127, +31)＝bm_st2 の 128×32 窃、
+                # dst = (0x88, (rec3%9)*32+0x60)、行為 0x425AD0（懸停 16 幀点滅）。
+                # rec3>=0x10 且 0x4AB5B0 bit0x80 清 ⇒ rect 整体 -0x80（第二窃块）。
+                prm = int(a3)
+                col = prm % 9
+                row = prm // 9
+                e.beh = 0x425AD0
+                e.d32(0x1C, col & 0xFFFFFFFF)
+                e.d32(0x20, 0)
+                l, t = row * 128, col * 32
+                if prm >= 0x10 and not self.keys.test(0x80):
+                    l -= 0x80
+                    t -= 0x80
+                e.disp = DisplayNode(1, [l, t, l + 127, t + 31], [0x88, col * 32 + 0x60])
+                e.node = e.disp
+                e.disp.active = 1                 # 0x42481F byte[node+0x1C] = 1
+            elif idx == 8:                        # 0x5F00000A ctor 0x424868：ON/OFF 行（層1）
+                # [0x1C]=rec3（0x4AB5B0 ビットマスク）、[0x20]=rec1(y)＝窃基準、
+                # rect (0x100,0,0x13F,0)（t/b 行為每帧重算＝有/窓セル切替）、
+                # dst = (0x198, x)、行為 0x425B20。
+                e.beh = 0x425B20
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF)
+                e.d32(0x20, int(y) & 0xFFFFFFFF)
+                e.disp = DisplayNode(1, [0x100, 0, 0x13F, 0], [0x198, int(x)])
+                e.node = e.disp
+                e.disp.active = 1
+            elif idx == 9:                        # 0x5F00000B ctor 0x4248CE：キー桁 1 の位（層1）
+                # [0x1C]=rec3（0x4AB5B8 フィールドマスク）、[0x20]=0（ライブ値ポインタ＝NULL）、
+                # rect (0,0,0,0)（行為每帧重算）、dst = (0x1B8, y)、行為 0x425B70、初期不可視。
+                e.beh = 0x425B70
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF)
+                e.d32(0x20, 0)
+                e.disp = DisplayNode(1, [0, 0, 0, 0], [0x1B8, int(y)])
+                e.node = e.disp
+                e.disp.active = 0                 # 0x424942 byte[node+0x1C] = 0
+            elif idx == 10:                       # 0x5F00000C ctor 0x42494F：キー桁 10 の位（層1）
+                # [0x1C]=rec3、[0x20]=rec0（ライブ値ポインタ＝0）、
+                # dst = (0x198, y)、行為 0x425C10、初期不可視。
+                e.beh = 0x425C10
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF)
+                e.d32(0x20, int(x) & 0xFFFFFFFF)
+                e.disp = DisplayNode(1, [0, 0, 0, 0], [0x198, int(y)])
+                e.node = e.disp
+                e.disp.active = 0                 # 0x4249C3
+            elif idx == 11:                       # 0x5F00000D ctor 0x4249D0：3 値窓（層1）
+                # [0x1C]=rec3（0x4AB5B0 bits3-4）、rect (0,y,0,y+0x20)（l/r 行為每帧重算）、
+                # dst = (0x188, x)、行為 0x425CD0。
+                e.beh = 0x425CD0
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF)
+                e.disp = DisplayNode(1, [0, int(y), 0, int(y) + 0x20], [0x188, int(x)])
+                e.node = e.disp
+                e.disp.active = 1
             elif idx == 4:                        # 0x424579 / 0x4258F0（菜单行）
                 row = int(a3) & 7
                 k = row & 3
@@ -2799,6 +2868,7 @@ class Pages(Page4Mixin):
         e.aux = seg                                  # [+0x20] = 段
         st = e.t
         if st == 0:                                  # 0x444A86
+            self._p6_spawn_menu(e.g32(0x30) != 0)    # 0x444A8E 0x444360(メニュー生成)
             f = self.spawn_flash(-0xFF, 0, 8)        # rec{0,-0xFF,typ,8}→淡入
             f.disp = None
             e.t = 1
@@ -2819,7 +2889,7 @@ class Pages(Page4Mixin):
                 self.inp.rebind_cfg(f3, f2, f1)         # 0x4018C0
             if self.inp.rec.b0 or self.inp.rec.b1:      # 0x444B69 b0/b1 → C/X 行表
                 self._adjust_bl = bl
-                self._adjust_row(seg)                   # 0x444B7F → 0x44547C[段]
+                self._adjust_row(e, seg)                # 0x444B7F → 0x44547C[段]
             self._adjust_tail()                         # 0x444F7A
             return True
         if st == 4:                                  # 0x445415
@@ -2827,17 +2897,18 @@ class Pages(Page4Mixin):
             e.alive = False
             return False
         if st == 5:                                  # 0x445431
-            self._adjust_apply(seg != 0)             # 0x40182A(段!=0)
+            # 0x444360([ent+0x30]!=0)＝メニュー再生成（説明行/第2窃块/跳選行）＋ 态=2
+            self._p6_spawn_menu(e.g32(0x30) != 0)
             e.t = 2
             return True
         if st in (6, 7):                             # 0x445464[6/7] = 行 0/1 动作同源
-            self._adjust_row(0 if st == 6 else 1)
+            self._adjust_row(e, 0 if st == 6 else 1)
             self._adjust_tail()
             return True
         self._adjust_tail()
         return True
 
-    def _adjust_row(self, row: int) -> None:
+    def _adjust_row(self, e: UiEntity, row: int) -> None:
         """0x44547C 18 行表（C=按住沿/X=按住沿均可，原码不区分按哪个键）。"""
         if row == 0:                                 # 0x444B99
             self.keys.bits |= 0x200                  # 鍛錬 ON（0x45AF30）
@@ -2853,20 +2924,31 @@ class Pages(Page4Mixin):
             self.p4_bgm_field = 4                    # 0x44FEE0(0x4AB514, 4): byte[0x50]=4
         elif row == 3:                               # 0x444C3A
             self.keys.bits |= 0x400
-        elif row == 7:                               # 0x444F14 输入设备切换
-            e_r7 = self._adjust_dev ^ 1              # [0x30] ^= 1
-            self._adjust_dev = e_r7
+        elif row == 7:                               # 0x444F14 説明行/表示切替
+            # [ent+0x30] ^= 1（0x444F23）＋ 态=5（0x444F26 ⇒ 0x444360 メニュー再生成）
+            # ＋ 0x4013DE(0x4AB454, 0, 0)（ポインタ/preset リセット）。
+            e.d32(0x30, e.g32(0x30) ^ 1)
+            e.t = 5
             self.inp.set_pos(0, 0)                   # 0x4013DE→0x44E620(inp,0,dev)
             self.inp.set_preset4(0, (0, 0))
-        elif row == 8:                               # 0x444ECF 亮度→对比度连算
+        elif row == 8:                               # 0x444ECF 完了（明度→彩度连算）
             b = self.disp_cfg.field(0x1FC0000)
             c = b * 4 - 0xC8
             self.disp_cfg.set_field(0xFE000000, c & 0xFFFFFFFF)
             self._adjust_apply_pal()                 # 0x444F60 0x44CDF0(2,…)
-            e_t8 = 3                                 # 0x444F6E [0x1C]=3
-            self._adjust_cursor()                    # 0x4019FB
-        elif row == 9:                               # 0x444C4E BGM 序号
-            self._adjust_bgm_i += 1                  # 0x444C66 inc [0x2C]
+            e.t = 3                                  # 0x444F6E [0x1C]=3（驻留→态4 退页）
+            self._adjust_cursor()                    # 0x4019FB 0x43DCB0 闪光
+        elif row == 9:                               # 0x444C4E MIDI デバイス選択
+            if self.inp.rec.b0:                      # b0：[ent+0x2C] 循环（设备数钳位）
+                if self._adjust_dev_i == 0x32:
+                    self._adjust_dev_i = 0
+                else:
+                    self._adjust_dev_i += 1
+                    if self._adjust_dev_i >= 0x32:   # 0x44FF90(0x4AB514) 设备数（复刻取上限）
+                        self._adjust_dev_i = 0x32
+            else:                                    # b1：0x3F000 字段写入 + 设备应用
+                self.disp_cfg.set_field(0x3F000, self._adjust_dev_i & 0xFFFFFFFF)
+                # 0x401DF2→0x44FDD0 / 0x40110E→0x44F390(0x4AB514, dev)＝MIDI 切替（音频后端无枚举）
         elif row == 10:                              # 0x444CCA 对比度 ±2
             cur = self.disp_cfg.field(0xFE000000)
             cur = cur + (2 if self.inp.rec.b0 else -2)
@@ -2881,11 +2963,21 @@ class Pages(Page4Mixin):
                 v = self._adjust_bgm_i + 1
                 self._adjust_bgm_i = 0 if v >= 0xD else v
                 self._adjust_bgm_dirty = True
-        elif row == 17:                              # 0x444F01 保存确认行
+        elif row == 17:                              # 0x444F01（seg≤8 不可达；表尾项）
             if self.keys.test(0x80):
-                self._adjust_apply_pal()
-                self._adjust_ser()                   # 0x445062 设置 blob 序列化
-                self._adjust_cursor()                # 0x444F6E [0x1C]=3 + 0x43DCB0
+                # bit0x80 ⇒ 行 7 同款：[0x30]^=1 + 态=5（メニュー再生成）+ ポインタリセット
+                e.d32(0x30, e.g32(0x30) ^ 1)
+                e.t = 5
+                self.inp.set_pos(0, 0)
+                self.inp.set_preset4(0, (0, 0))
+            else:
+                # 0x444F30：明度→彩度連算 + 0x44CDF0(1, …)（パレット1 復帰）+ 态=3 + 0x43DCB0
+                b = self.disp_cfg.field(0x1FC0000)
+                self.disp_cfg.set_field(0xFE000000, (b * 4 - 0xC8) & 0xFFFFFFFF)
+                self.pal = self._load_pal(1)
+                self.pal_now = self.pal
+                e.t = 3
+                self._adjust_cursor()
         elif row == 11:                              # 0x444D4D 亮度 ±2
             cur = self.disp_cfg.field(0x1FC0000)
             cur = cur + (2 if self.inp.rec.b0 else -2)
@@ -2952,6 +3044,142 @@ class Pages(Page4Mixin):
         """0x40182A（段!=0 时 0x458D60 场景重置族的调用）占位。"""
         if nonzero:
             self.scene_reset()
+
+    # ---- 页6 調整メニュー表示体（0x444360 → 0x4AD4FC、0x5F000008..D 群）--------
+
+    def _p6_spawn_menu(self, reentry: int) -> None:
+        """0x444360（調整メニュー生成，arg = [ent+0x30]!=0）：0x4018B6(0x4AD4FC) 清队列 →
+        0x5F000008(-1) 説明塊 → 0x5F000009 ×9（行ラベル prm 0..8）→ 0x5F00000A(0x60,0x200) /
+        0x5F00000D(0x80,0x140,0x18) / 0x5F00000A(0xA0,4) / 0x5F00000A(0xC0,0x400) →
+        0x5F00000C/B (0xE0,0xF) → C/B (0x100,0xF0) → C (0x120,0xF00)。
+        再入（arg!=0）：08 の prm=9＝底部説明行（0x425960）、09 の prm=9..17＝第2窃块ラベル、
+        末尾 bit0x80 時 0x5F00000C @ x=[0x28] prm=0x80（跳選桁、ライブ値 = [0x28]）。
+        旧复刻状态 0 只生成了闪光 ⇒ 菜单全体缺失（2026-11-15 用户截图定案）。"""
+        self.ui4fc.clear()                               # 0x4018B6(0x4AD4FC)
+        self.spawn(self.ui4fc, 0x5F000008, 0, 0, -1)
+        if reentry:
+            self.spawn(self.ui4fc, 0x5F000008, 0, 0, 9)  # 底部説明行
+        for i in range(9):
+            self.spawn(self.ui4fc, 0x5F000009, 0, 0, i if not reentry else 9 + i)
+        self.spawn(self.ui4fc, 0x5F00000A, 0x60, 0, 0x200)
+        self.spawn(self.ui4fc, 0x5F00000D, 0x80, 0x140, 0x18)
+        self.spawn(self.ui4fc, 0x5F00000A, 0xA0, 0, 4)
+        self.spawn(self.ui4fc, 0x5F00000A, 0xC0, 0, 0x400)
+        self.spawn(self.ui4fc, 0x5F00000C, 0, 0xE0, 0xF)
+        self.spawn(self.ui4fc, 0x5F00000B, 0, 0xE0, 0xF)
+        self.spawn(self.ui4fc, 0x5F00000C, 0, 0x100, 0xF0)
+        self.spawn(self.ui4fc, 0x5F00000B, 0, 0x100, 0xF0)
+        self.spawn(self.ui4fc, 0x5F00000C, 0, 0x120, 0xF00)
+        # 0x44465A：MIDI デバイス桁（0x5F00000C、rec0 = ＆[ent+0x2C]＝ライブ値ポインタ）。
+        # ★ rec0 はポインタ値のまま ctor の dst.y に入る ⇒ dst=(0x198, 巨大値) ⇒ 画面外
+        #   （原作の挙動どおり非表示。0x20 非 NULL マーカーとして 0x40000000 を採用）
+        g = self.spawn(self.ui4fc, 0x5F00000C, 0x40000000, 0x60, 0)
+        g.p["live"] = lambda: int(getattr(self, "_adjust_dev_i", 0))
+        if reentry and self.keys.test(0x80):
+            # 0x44486A：跳選桁（rec0 = ＆[ent+0x28]）——同様に dst 画面外で非表示
+            g = self.spawn(self.ui4fc, 0x5F00000C, 0x40000000, 0x140, 0x80)
+            g.p["live"] = self._adjust_bgm_i_getter()
+
+    def _adjust_bgm_i_getter(self):
+        """跳選桁のライブ値（=[ent+0x28]＝選択中关卡 0..0xD）——0x425C10 の *[0x20]。"""
+        return lambda: int(getattr(self, "_adjust_bgm_i", 0))
+
+    def _beh_430520(self, e: UiEntity) -> bool:
+        """0x430520（カウントダウン）：[0x1C]--、元値==0 で死（-1 初期 ⇒ 永生）。"""
+        old = e.s32(0x1C)
+        e.d32(0x1C, (old - 1) & 0xFFFFFFFF)
+        return old != 0
+
+    def _beh_425AD0(self, e: UiEntity) -> bool:
+        """0x425AD0（0x5F000009 行ラベル、thunk 0x4023CE）：++[0x20]；
+        node 可視 = ((cnt & 0x10) != 0) or (seg != [0x1C])——懸停行が 16 幀周期で点滅。"""
+        seg = _adjust_magic_div(int(self.inp.y) & 0xFFFFFFFF)
+        cnt = (e.s32(0x20) + 1) & 0xFFFFFFFF
+        e.d32(0x20, cnt)
+        if e.node is not None:
+            e.node.active = 1 if ((cnt & 0x10) or seg != e.s32(0x1C)) else 0
+        return True
+
+    def _beh_425B20(self, e: UiEntity) -> bool:
+        """0x425B20（0x5F00000A ON/OFF 行、thunk 0x4020B3）：
+        δ = 0x45AFF0(0x4AB5B0, [0x1C]) ? 0 : 0x20；rect.t = [0x20]+δ、rect.b = t+0x1F
+        （ビット立ってる⇒上有セル、無い⇒下無セル）；可視=1。"""
+        bit = bool(self.keys.bits & (e.s32(0x1C) & 0xFFFFFFFF))
+        t = e.s32(0x20) + (0 if bit else 0x20)
+        if e.node is not None:
+            e.node.active = 1
+            e.node.rect[1] = t
+            e.node.rect[3] = t + 0x1F
+        return True
+
+    def _beh_425B70(self, e: UiEntity) -> bool:
+        """0x425B70（0x5F00000B キー桁・1 の位、thunk 0x401A64）：
+        v = [0x20]？*[0x20]（ライブ値）: 0x45AFC0(0x4AB5B8, [0x1C])；c = v % 10；
+        rect = (c*32, 0x120, c*32+0x1F, 0x13F)（bm_st2 の ○壱弐…数字条）；可視=1。"""
+        live = e.p.get("live")
+        if callable(live):
+            v = int(live())
+        else:
+            v = self.disp_cfg.field(e.s32(0x1C) & 0xFFFFFFFF)
+        c = v % 10
+        if e.node is not None:
+            e.node.active = 1
+            e.node.rect[0] = c * 32
+            e.node.rect[2] = c * 32 + 0x1F
+            e.node.rect[1] = 0x120
+            e.node.rect[3] = 0x13F
+        return True
+
+    def _beh_425C10(self, e: UiEntity) -> bool:
+        """0x425C10（0x5F00000C キー桁・10 の位、thunk 0x4023E2）：
+        v = [0x20]？*[0x20]/10 : 0x45AFC0(0x4AB5B8, [0x1C])//10；
+        rect = (c*32, 0x120, c*32+0x1F, 0x13F)；可視=1。"""
+        live = e.p.get("live")
+        if callable(live):
+            v = int(live()) // 10
+        else:
+            v = self.disp_cfg.field(e.s32(0x1C) & 0xFFFFFFFF) // 10
+        if e.node is not None:
+            e.node.active = 1
+            e.node.rect[0] = v * 32
+            e.node.rect[2] = v * 32 + 0x1F
+            e.node.rect[1] = 0x120
+            e.node.rect[3] = 0x13F
+        return True
+
+    def _beh_425CD0(self, e: UiEntity) -> bool:
+        """0x425CD0（0x5F00000D 3 値窓、thunk 0x401C17）：
+        v = 0x45AFC0(0x4AB5B0, [0x1C]) & 3；rect.l = {0, 0x60, 0xC0}[v]、rect.r = l+0x5F；可視=1。"""
+        v = self.keys.field(e.s32(0x1C) & 0xFFFFFFFF) & 3
+        l = (0, 0x60, 0xC0)[v & 3]
+        if e.node is not None:
+            e.node.active = 1
+            e.node.rect[0] = l
+            e.node.rect[2] = l + 0x5F
+        return True
+
+    def _beh_425960(self, e: UiEntity) -> bool:
+        """0x425960（0x5F000008 説明行、rec3>=0）：idx = seg + [0x1C]；
+        0x45B030(0x80)（none）且 idx==0x10 → 7；none 且 idx==0x11 → 8；
+        b = tbl[idx]（スタック 16 バイト表、idx11 は未初期化ホール）；可視=1；
+        rect = (0, (b&0x7F)*24, 0x17F, t+0x17+(b&0x80 ? 0x18 : 0))——bm_st3 の 24px 列窓。"""
+        seg = _adjust_magic_div(int(self.inp.y) & 0xFFFFFFFF)
+        idx = seg + e.s32(0x1C)
+        none80 = (self.keys.bits & 0x80) == 0
+        if none80 and idx == 0x10:
+            idx = 7
+        elif none80 and idx == 0x11:
+            idx = 8
+        tbl = {3: 0x0C, 4: 0, 5: 0x81, 6: 3, 7: 0x84, 8: 0x86, 9: 0x88, 10: 0x8A,
+               12: 0xD, 13: 0xE, 14: 0xF, 15: 0x10, 16: 0x91, 17: 0x93, 18: 0x95,
+               19: 0x97, 20: 0x19}                    # idx11 = スタックホール（未初期化）
+        b = tbl.get(idx, 0)
+        t = (b & 0x7F) * 24
+        if e.node is not None:
+            e.node.active = 1
+            e.node.rect[1] = t
+            e.node.rect[3] = t + 0x17 + (0x18 if (b & 0x80) else 0)
+        return True
 
     def _adjust_apply_pal(self) -> None:
         """0x444F60：亮度/对比度字段 ×4-0xC8 → 0x44CDF0(2, 对比, 亮度) → 0x44B790
