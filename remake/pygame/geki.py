@@ -1609,6 +1609,9 @@ class Pages(Page4Mixin):
         self._p4_q("ui49c").clear()                    # 0x4AD49C
         self.p4_ui49c.clear()                          # （同名分裂的旧列表，一并清）
         self._p4_q("ui4cc").clear()                    # 0x4AD4CC
+        self.trailq.clear()                            # 0x4AD4CC（页1-3/页6 侧同名列表——
+        #   調整页的 0x4F000001 砖块生成在 trailq，不清则 页6→页3 彩虹墙 whole 泄漏上屏
+        #   （2026-11-15 用户实测"esc 返回 page3 后页面被破坏"根因））
         self.ui4fc.clear()                             # 0x4AD4FC
         self.ui52c.clear()                             # 0x4AD52C
         # 0x6F000007 的整屏人像/擦切是页13 队列实体的画布镜像：实体随队列清除，
@@ -2881,8 +2884,14 @@ class Pages(Page4Mixin):
         if st == 2:                                  # 0x444AE5 主交互态（常驻）
             key = self.inp.rec.key
             if 0x20 <= key <= 0x2F:                  # 0x444AF2 系统键 0x20..0x2F
-                mask = {4: 0xF, 5: 0xF0, 6: 0xF00}.get(seg, 0xF)
-                self.disp_cfg.write(mask, key - 0x20)   # 0x45B0E0
+                # 0x444AF2..0x444B28：仅 seg 4/5/6 写 0xF/0xF0/0xF00 字段（攻撃/光撃/捕獲入力），
+                # 其余行跳 0x444B32（只读回+重绑）——旧实现 .get(seg, 0xF) 让任何行都写 0xF。
+                if seg == 4:
+                    self.disp_cfg.write(0xF, key - 0x20)    # 0x444AFE/0x444B01
+                elif seg == 5:
+                    self.disp_cfg.write(0xF0, key - 0x20)   # 0x444B0B..0x444B14
+                elif seg == 6:
+                    self.disp_cfg.write(0xF00, key - 0x20)  # 0x444B1D..0x444B28
                 f3 = self.disp_cfg.field(0xF00)         # 0x444B32 读回三字段
                 f2 = self.disp_cfg.field(0xF0)
                 f1 = self.disp_cfg.field(0xF)
