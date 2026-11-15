@@ -15564,10 +15564,13 @@ class Page4Mixin:
         if hit == 0:                                           # 0x43C56B
             self._p4_43c691(p)
             return
-        r = 3 if self.p4_bit_any(0x200) else 2                  # 0x43C5C2..0x43C5E6
+        # 0x43C5C9：0x45AFF0(0x4AB5B0, 0x200)＝[0x4AB5B4] & 0x200（調整行 0 の XOR ビット）
+        r = 3 if (self.keys.bits & 0x200) else 2
+        # 0x43C5D7 [[p+0x1C]+0x28] = r：自動爆破 OFF(2)/ON(3) 写进**親実体**の [0x28]
         target = p.g32(0x1C)
-        if target:
-            self.p4_stat[target + 0x28] = r
+        parent = self.p4_links.get(target) if target else None
+        if parent is not None:
+            parent.d32(0x28, r & 0xFFFFFFFF)
         self.spawn(self._p4_q("ui40c"), 6,
                    a.s32(0x04), a.s32(0x08), hit, p.g32(0x1C))  # 0x43C5F7 / 0x43C594
         self.p4_45eff0(ta, a.s32(0x04), a.s32(0x08), 0x10008431)   # 0x43C61D
