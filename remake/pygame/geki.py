@@ -3043,9 +3043,13 @@ class Pages(Page4Mixin):
                 # 0x444EA4..0x444CC0：e1 ⇒ [esp+0x12]=1（BGM 脏，尾部按 [0x28] 重播）
                 self._adjust_bgm_dirty = True
             else:
-                # 0x444EB1：e0 ⇒ [0x28]++ ≤0xD 回卷（无脏标记）
+                # 0x444EB1：e0 ⇒ [0x28]++ ≤0xD 回卷（无脏标记）。
+                # [0x28]=0 PlayerSelect/1..7 Stage1..7/8+ Boss… ⇒ ゲーム開始組号
+                # [0x4AB5C8] = 選択ステージ-1（p4_block の chain = 組*4+11）。
                 v = self._adjust_bgm_i + 1
                 self._adjust_bgm_i = 0 if v >= 0xD else v
+                # 高字 = 週目フラグ（0x4548CF）を保持
+                self.theatre = (self.theatre & 0xFFFF0000) | max(0, self._adjust_bgm_i - 1)
         elif row == 17:                              # 0x444F01（seg≤8 不可达；表尾项）
             if self.keys.test(0x80):
                 # bit0x80 ⇒ 行 7 同款：[0x30]^=1 + 态=5（メニュー再生成）+ ポインタリセット
