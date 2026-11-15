@@ -705,12 +705,43 @@ class Input:
         self._prevdir = {}          # 方向键"上一帧是否按住"，用于取按下沿
         self.p4_cfg = None          # 页4 预设（set_preset4 装载）；None = 页1-3 菜单管线
         self.mouse_tx, self.mouse_ty = 320, 240   # 鼠标目标位置（0x44E82B 的追踪目标）
+        # 調整页键位赋值（0x4AB5B8 の 0xF/0xF0/0xF00 字段，值 = DIK-0x20）：
+        # 初值＝攻撃 C(14)、光撃 V(15)、捕獲 X(13)——与 0x498A88 预设/run.py 默认一致
+        self.key_assign = {"attack": 14, "lock": 15, "capture": 13}
+
+    # 調整页可赋值键范围：DIK 0x20..0x2F（值 = DIK-0x20）→ pygame 键码
+    DIK20_TO_PYG = {
+        0x00: 100,  # D
+        0x01: 102,  # F
+        0x02: 103,  # G
+        0x03: 104,  # H
+        0x04: 106,  # J
+        0x05: 107,  # K
+        0x06: 108,  # L
+        0x07: 59,   # ;
+        0x08: 39,   # '
+        0x09: 96,   # `
+        0x0A: 1073742049,  # LShift
+        0x0B: 92,   # \
+        0x0C: 122,  # Z
+        0x0D: 120,  # X
+        0x0E: 99,   # C
+        0x0F: 118,  # V
+    }
 
     def rebind_cfg(self, f3: int, f2: int, f1: int) -> None:
-        """0x4018C0(0x4AB454, f3, f2, f1)：按調整画面的三字段重绑输入预设（占位：
-        复刻侧预设树 0x446470 的 7..22 由 鍛錬/操作器/选机 决定，这三字段的
-        精确映射待 0x44E620 表对照；先按位存入 rec 供回放）。"""
-        self.rec.key = (f3 << 8) | (f2 << 4) | f1
+        """0x4018C0→0x44E360(f3, f2, f1)：調整页键位赋值反映射。
+        0x4AB5B8 的 0xF/0xF0/0xF00 字段（值 0..15 = DIK 0x20..0x2F）⇒
+        攻撃/光撃/捕獲入力键更新；Input.build 的 b0/b1 按赋值键读取
+        （0x44E360 另写 [mgr+0x40/0x44/0x48]，复刻侧无读者暂不建）。"""
+        self.key_assign = {"attack": f1 & 0xF, "lock": f2 & 0xF,
+                           "capture": f3 & 0xF}
+
+    def assigned_pygame_keys(self, kind: str) -> set:
+        """赋值键值 → pygame 键码集合（DIK 0x20+值 → 0x498A60 归一族）。"""
+        v = self.key_assign.get(kind, 0) & 0xF
+        pg = self.DIK20_TO_PYG.get(v)
+        return {pg} if pg is not None else set()
 
     def set_mode(self, mode: int) -> None:
         """0x44EDA0(0x4AB454, mode)：输入模式（0 = 游戏内光标模式）。"""
@@ -1552,10 +1583,12 @@ class Pages(Page4Mixin):
         `0x45AFF0(flags, 0)` 退出、finish 的 `0x45B070` 取最低位映射页号。
         """
         # 0x4520A7..0x4520E1：0x44CDF0(mgr, 2, 对比, 亮度, -256)
-        #   两个参数来自 0x45AFC0 取的配置位段（*4-0xC8），D 参 -256 = 淡入起点
+        #   两个参数来自 0x45AFC0(0x4AB5B8) 取的配置位段（*4-0xC8），D 参 -256 = 淡入起点
         if "palettes" in self.data and "2" in self.data["palettes"]:
             self.pal = np.array(self.data["palettes"]["2"], dtype=np.uint8)
-            self.pal_now = self.pal
+            c = self.disp_cfg.field(0xFE000000)      # 彩度（調整行 10）
+            b = self.disp_cfg.field(0x1FC0000)       # 明度（調整行 11）
+            self.pal_now = fade_palette(self.pal, b * 4 - 0xC8, c * 4 - 0xC8)
         ok = True
         # 0x4520EA：0x44C640(13, 10) 层13 ← bmetc\bm_mn.ggd
         ok = self.layers.bind(13, 10)

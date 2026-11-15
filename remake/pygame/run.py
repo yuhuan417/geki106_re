@@ -238,8 +238,8 @@ def main(argv: list[str] | None = None) -> int:
         state = {
             # 慢帧（Python 渲染 0.3~0.7s/帧）时按住状态可能在两帧之间被跳过，
             # 所以把"本间隔内出现过 KEYDOWN"也算作按下，只作用于下一个到期帧。
-            "shot": keys[pygame.K_c] or pend_shot,
-            "lock": keys[pygame.K_x] or keys[pygame.K_v] or pend_lock,
+            "shot": any(keys[k] for k in inp.assigned_pygame_keys("attack")) or pend_shot,
+            "lock": any(keys[k] for k in inp.assigned_pygame_keys("lock")) or pend_lock,
             # 方向键同理：按住靠 get_pressed()，**点按**靠事件锁存（否则一次快按会落在两帧之间）
             "left": keys[pygame.K_LEFT] or pend_dir["left"] > 0,
             "right": keys[pygame.K_RIGHT] or pend_dir["right"] > 0,
