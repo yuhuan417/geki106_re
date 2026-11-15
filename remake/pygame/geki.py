@@ -1190,6 +1190,14 @@ class Pages(Page4Mixin):
         self.p2_blits: list = []                  # ⑧ 静态页的待贴清单（draw 里执行）
         self.keys = KeyMgr()                       # 0x4AB5B0
         self.disp_cfg = KeyMgr()                   # 0x4AB5B8（亮度/对比度等显示配置字段）
+        # 0x4987F4 调色板重映射表 A（0x44D290 色带填充的色号变换；行 12 门控）
+        try:
+            import json as _json
+            from pathlib import Path as _Path
+            with open(_Path(__file__).resolve().parent.parent / "remap_tables.json") as _rf:
+                self._band_remap_a = bytes(_json.load(_rf)["remap_A"])
+        except Exception:
+            self._band_remap_a = None
         self._adjust_bgm_i = 0
         self._adjust_bgm_dirty = False
         self._adjust_pal_dirty = False
@@ -1440,7 +1448,10 @@ class Pages(Page4Mixin):
             if (h + y > 0x1E0) h = 0x1E0 - y
             rect = (0, y, 0x280, y+h)  → 填充 table[idx].color
             y += h; idx++
-        """
+
+        色号经 0x44D290：byte[0x4AA7B0+0x86]（調整行 12）置位时色号先过
+        重映射表 A（0x4987F4，remap_tables.json）再写——彩虹文字墙/色带变色效果。
+        旧实现直接写原始色号（重映射 pass 缺失）。"""
         y = 0
         i = self.band_start
         import os as _os
@@ -1448,8 +1459,12 @@ class Pages(Page4Mixin):
             print(f"[banddraw] f={self.p4_frames} start={self.band_start} scroll={self.band_scroll} count={self.band_count}", flush=True)
         scroll = self.band_scroll
         cnt = max(self.band_count, 1)
+        remap = getattr(self, "_band_remap_a", None)
+        use_remap = bool(remap) and getattr(self.layers, "cg40", 0)
         while y < H:                         # 0x4562A0 只看 y，不查表项数（越界环绕）
             color, h = self.band_table[i % cnt]
+            if use_remap:
+                color = remap[color & 0xFF]
             hh = h - scroll
             scroll = 0                      # 只对起始条生效
             if y + hh > H:
