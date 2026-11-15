@@ -2908,6 +2908,8 @@ class Pages(Page4Mixin):
                 e.t = st + 1                         # 0x444ADD ++[0x1C]
             e.p["dwell"] = e.p.get("dwell", 0) + 1   # 0x44544A [0x24]++（态未变时尾部）
             return True
+        if bl:                                       # 0x4453A2：段变化 ⇒ 0x450440(mgr,0)
+            self.audio.melody_step()                 # メニュー移動音（0x498FEC 表輪番）
         if st == 2:                                  # 0x444AE5 主交互态（常驻）
             key = self.inp.rec.key
             if 0x20 <= key <= 0x2F:                  # 0x444AF2 系统键 0x20..0x2F
@@ -2955,13 +2957,15 @@ class Pages(Page4Mixin):
             a = 1 if self.keys.test(8) else 0        # 0x45AFF0(8)
             b = 1 if self.keys.test(0x10) else 0     # 0x45AFF0(0x10)
             # 0x401C80→0x450580(0x4AB4B0, a, b)：音效管理器 byte[0x5C]=a、byte[0x5D]=b
-            self.p4_stat[0x4AB4B0 + 0x5C] = a & 0xFF
-            self.p4_stat[0x4AB4B0 + 0x5D] = b & 0xFF
+            # ＝ 0x450440 的两道播放门（効果音开关）
+            self.audio.gate_5c = a & 0xFF
+            self.audio.gate_5d = b & 0xFF
         elif row == 2:                               # 0x444C0D
             self.keys.bits ^= 4                      # 0x45AF90 XOR
             v = 1 if self.keys.test(4) else 0        # 0x45AFF0(4)
             # 0x4011F9→0x44FEE0(0x4AB514, v)：MIDI 管理器 byte[0x50] = v
-            self.p4_stat[0x4AB514 + 0x50] = v & 0xFF
+            # ＝ 0x44F640 BGM 播放的音楽开关门（0 ⇒ 0x44F860 不播放）
+            self.audio.bgm_byte50 = v & 0xFF
             self._adjust_bgm_dirty = True            # 0x444C30 [esp+0x12]=1
         elif row == 3:                               # 0x444C3A
             self.keys.bits ^= 0x400                  # 0x45AF90 XOR

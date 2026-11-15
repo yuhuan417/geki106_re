@@ -84,6 +84,7 @@ class Audio:
         self.melody_idx = 0            # [mgr+0x60]
         self.gate_5c = 1               # [mgr+0x5C]
         self.gate_5d = 1               # [mgr+0x5D]，0x450440 的前置门之一
+        self.bgm_byte50 = 1            # [0x4AB514+0x50]，0x44F640 BGM 播放的音楽开关
         self.bgm_id: int | None = None
         self.verbose = verbose
         if not enabled:
@@ -168,7 +169,10 @@ class Audio:
 
     # ---------------------------------------------------------------- BGM
     def bgm(self, track: int, loop: bool = True) -> bool:
-        """`0x44F600(0x4AB514, loop, id)`：播 BGM #track（1..20）。"""
+        """`0x44F600(0x4AB514, loop, id)`：播 BGM #track（1..20）。
+        0x44F640：byte[0x50]（音楽开关，調整行 2 写入）为 0 ⇒ 不播放。"""
+        if not self.bgm_byte50:
+            return True                             # 0x44F645 je 0x44F860：音楽 OFF
         if not self.enabled:
             self._say(f"BGM #{track}（静音模式）")
             return True
