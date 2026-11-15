@@ -842,6 +842,12 @@ class Input:
         self.p4_cfg = None
 
     def build(self, keys, mouse_buttons, mouse_delta=(0, 0), keycode: int = 0) -> Record:
+        # 0x44EC17..0x44EC2E：键码一次性门——[esi+0x1F]（上帧键码）非 0 ⇒ 本帧键码清 0
+        # （按住不重复；0x4AB59A 的键码 = 每次按下只有效一帧）
+        prev_key = getattr(self, "_prev_key", 0)
+        self._prev_key = keycode                # [esi+0x1F] = 原始键码
+        if prev_key != 0:
+            keycode = 0                         # 上帧有键 ⇒ 本帧清 0（按住不重复）
         b0 = bool(mouse_buttons[0]) or keys.get("shot", False)
         b1 = bool(mouse_buttons[2]) or keys.get("lock", False)
         r = Record()
@@ -2911,7 +2917,9 @@ class Pages(Page4Mixin):
                 f2 = self.disp_cfg.field(0xF0)
                 f1 = self.disp_cfg.field(0xF)
                 self.inp.rebind_cfg(f3, f2, f1)         # 0x4018C0
-            if self.inp.rec.b0 or self.inp.rec.b1:      # 0x444B69 b0/b1 → C/X 行表
+            # 0x444B69：al = byte[0x4AB596]/[0x4AB597]＝记录 +2/+3＝**按下沿 e0/e1**
+            # （0x44EB60 的 [eax+2]/[eax+3]）——按住不重复触发（1 押し = 1 行動）。
+            if self.inp.rec.e0 or self.inp.rec.e1:
                 self._adjust_bl = bl
                 self._adjust_row(e, seg)                # 0x444B7F → 0x44547C[段]
             self._adjust_tail()                         # 0x444F7A
@@ -2970,19 +2978,19 @@ class Pages(Page4Mixin):
             e.t = 3                                  # 0x444F6E [0x1C]=3（驻留→态4 退页）
             self._adjust_cursor()                    # 0x4019FB 0x43DCB0 闪光
         elif row == 9:                               # 0x444C4E MIDI デバイス選択
-            if self.inp.rec.b0:                      # b0：[ent+0x2C] 循环（设备数钳位）
+            if not self.inp.rec.e1:                  # 0x444C4E test al(=e1)：e0 ⇒ 循环
                 if self._adjust_dev_i == 0x32:
                     self._adjust_dev_i = 0
                 else:
                     self._adjust_dev_i += 1
                     if self._adjust_dev_i >= 0x32:   # 0x44FF90(0x4AB514) 设备数（复刻取上限）
                         self._adjust_dev_i = 0x32
-            else:                                    # b1：0x3F000 字段写入 + 设备应用
+            else:                                    # e1：0x3F000 字段写入 + 设备应用
                 self.disp_cfg.set_field(0x3F000, self._adjust_dev_i & 0xFFFFFFFF)
                 # 0x401DF2→0x44FDD0 / 0x40110E→0x44F390(0x4AB514, dev)＝MIDI 切替（音频后端无枚举）
         elif row == 10:                              # 0x444CCA 对比度 ±1
             cur = self.disp_cfg.field(0xFE000000)
-            cur = cur + (1 if self.inp.rec.b0 else -1)   # 0x444CD9..0x444CE7 ±1
+            cur = cur + (1 if self.inp.rec.e0 else -1)   # 0x444CD9 mov cl,[0x4AB596](e0) ±1
             if cur == 0x64:
                 cur = 0
             elif cur == 0x7F:
@@ -3011,7 +3019,7 @@ class Pages(Page4Mixin):
                 self._adjust_cursor()
         elif row == 11:                              # 0x444D4D 亮度 ±1
             cur = self.disp_cfg.field(0x1FC0000)
-            cur = cur + (1 if self.inp.rec.b0 else -1)   # 0x444D5C..0x444D6F ±1
+            cur = cur + (1 if self.inp.rec.e0 else -1)   # 0x444D5C mov cl,[0x4AB596](e0) ±1
             if cur == 0x64:
                 cur = 0
             elif cur == 0x7F:
