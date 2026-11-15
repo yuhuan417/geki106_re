@@ -1162,8 +1162,6 @@ class Pages(Page4Mixin):
         self._adjust_bgm_i = 0
         self._adjust_bgm_dirty = False
         self._adjust_pal_dirty = False
-        self._adjust_dev = 0                         # 0x444A30 [0x30] 输入设备切换
-        self.p4_bgm_field = 0                        # 0x4AB514 byte[0x50]
         self.p4_op_flag = 0                          # 0x4AA49C byte（操作器）
         self.p4_keyblob = bytearray(0x78)            # 0x4A4080..F7 键位 blob（DirectInput）
         self.sky_color = -1
@@ -2928,7 +2926,7 @@ class Pages(Page4Mixin):
             # 0x444B69：al = byte[0x4AB596]/[0x4AB597]＝记录 +2/+3＝**按下沿 e0/e1**
             # （0x44EB60 的 [eax+2]/[eax+3]）——按住不重复触发（1 押し = 1 行動）。
             if self.inp.rec.e0 or self.inp.rec.e1:
-                self._adjust_bl = bl
+                self._adjust_bl = bl                         # 0x4453A2 段变化 SE 门（bl 时 melody_step）
                 self._adjust_row(e, seg)                # 0x444B7F → 0x44547C[段]
             self._adjust_tail()                         # 0x444F7A
             return True
@@ -3073,29 +3071,6 @@ class Pages(Page4Mixin):
         c = self.spawn(self.ui52c, 0x61000005, a3=-8)
         c.aux = -8
         self.inp.set_mode(1)
-
-    def _adjust_ser(self) -> None:
-        """0x445062..0x4453AE（edi==0x10 且 0x45AFF0(0x4AB5B0,0x80) 门）：
-
-        0x4A4080..F7 键位 blob → 本地 7×0x40 项 {dword, word, byte, 名字串}；
-        `[(0x28)<<6]+帧+0x54` 取当前行名字串 → 0x44D330(0x4AA7B0, 0, 0x68,
-        0x1B0, 串, 0x10, 0xD9)（键名上屏）；末尾 0x40132F(0x4AB4B0, 0) 音（段变时）。
-        复刻侧 blob 为会话内镜像（持久化属 §15.4）。"""
-        if not self.keys.test(0x80):
-            return
-        texts = []
-        for i2 in range(7):
-            off = 0x08 + i2 * 0x10                   # blob 项步进（0x4A4088+）
-            if off + 4 <= len(self.p4_keyblob):
-                name = bytes(self.p4_keyblob[off:off + 4]).split(b"\x00")[0]
-                if name:
-                    texts.append(name.decode("ascii", "replace"))
-        self.p4_key_rows = texts                     # 0x44D330 绘制由 adjust 文字通道
-
-    def _adjust_apply(self, nonzero: bool) -> None:
-        """0x40182A（段!=0 时 0x458D60 场景重置族的调用）占位。"""
-        if nonzero:
-            self.scene_reset()
 
     # ---- 页6 調整メニュー表示体（0x444360 → 0x4AD4FC、0x5F000008..D 群）--------
 
