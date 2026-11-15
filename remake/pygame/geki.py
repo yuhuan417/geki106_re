@@ -3015,6 +3015,9 @@ class Pages(Page4Mixin):
             self._adjust_bgm_dirty = True            # 0x444C30 [esp+0x12]=1
         elif row == 3:                               # 0x444C3A
             self.keys.bits ^= 0x400                  # 0x45AF90 XOR
+            # ゲーム内読点：0x44161F（OP 状態機 0x4415F0、チェックポイント 0x33AE）——
+            # bit 置時 層3←資源0x53+選機[+0x57 週目0x4000且選機≠3] バインド。
+            # 0x4415F0 実体のホスト頁特定は未完（次回）。
         elif row == 7:                               # 0x444F14 説明行/表示切替
             # [ent+0x30] ^= 1（0x444F23）＋ 态=5（0x444F26 ⇒ 0x444360 メニュー再生成）
             # ＋ 0x4013DE(0x4AB454, 0, 0)（ポインタ/preset リセット）。
