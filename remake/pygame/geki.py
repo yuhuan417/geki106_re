@@ -2285,6 +2285,11 @@ class Pages(Page4Mixin):
                 e.beh = "scene_segment"          # 0x43E410
                 e.aux = _rank_magic_div(int(self.inp.y) & 0xFFFFFFFF)   # [+0x24]
                 e.a3 = int(a3) if a3 else 0                             # [+0x1C]
+            elif idx == 4:
+                # 0x43D951 ctor（0x6F000005，EDG2 t=0 生成）：行为 0x4013FC→0x4415F0
+                # ＝结局调色板/画集控制器（[0x1C] 帧计数，检查点 0xB4/0x1884/0x33AE）
+                e.beh = 0x4415F0
+                e.d32(0x1C, 0)
             elif idx == 5:
                 # 0x43D970 ctor（页13 的选择画面总控）：[1C]=[20]=[24]=[28]=0，
                 # 并 `0x45B0E0(0x4AB5B0, 0xC000, 0)` 把"选中槽"字段清 0；
@@ -3247,6 +3252,40 @@ class Pages(Page4Mixin):
             e.node.rect[1] = 0x120
             e.node.rect[3] = 0x13F
         return True
+
+    def _beh_4415F0(self, e: UiEntity) -> bool:
+        """0x4415F0（0x6F000005，EDG2 t=0 生成、thunk 0x4013FC）：结局调色板/画集控制器。
+        [0x1C] 帧计数，检查点：
+        0xB4   → 0x44171C：0x44CDF0(mgr, 3, 彩度', 明度', -255) パレット3＋配置淡入
+        0x1884 → 0x4416E8：0x44CDF0(mgr, 1, 彩度', 明度', 0)　パレット1
+        0x33AE → 0x44161A：0x45AFF0(0x4AB5B0, 0x400)（画像要素）置時
+                 層3 ← 資源 0x53+選機[+0x57 週目0x4000且選機≠3]（640×480 表面作成、
+                 0x4022E3 GGD 展開、0x44CE60 色键）＋ 0x4F00000C 全画面表示体生成。
+        [0x1C]++、返り値 = 新フレーム != 0（永生）。"""
+        f = e.s32(0x1C)
+        if f == 0xB4:
+            b = self.disp_cfg.field(0x1FC0000)
+            c = self.disp_cfg.field(0xFE000000)
+            self.pal = self._load_pal(3)
+            self.pal_now = fade_palette(self.pal, b * 4 - 0xC8, c * 4 - 0xC8)
+        elif f == 0x1884:
+            b = self.disp_cfg.field(0x1FC0000)
+            c = self.disp_cfg.field(0xFE000000)
+            self.pal = self._load_pal(1)
+            self.pal_now = fade_palette(self.pal, b * 4 - 0xC8, c * 4 - 0xC8)
+        elif f == 0x33AE:
+            if self.keys.bits & 0x400:                       # 0x441624 画像要素
+                ship = self.keys.field(0xC000) & 3
+                if self.p4_sys_bits() & 0x4000 and ship != 3:  # 0x441653 週目バリアント
+                    res = 0x53 + ship + 0x57
+                else:
+                    res = 0x53 + ship
+                if not self.layers.load(3, res):
+                    self.flags.set(2)                        # 0x4520xx 系の失敗旗
+                self.layers.color_key(3, 0)                  # 0x441699 0x44CE60(3,0)
+                self.spawn(self._p4_q("ui4cc"), 0x4F00000C, 0, 0, 0)  # 0x4416C8
+        e.d32(0x1C, (f + 1) & 0xFFFFFFFF)
+        return (f + 1) != 0
 
     def _beh_425CD0(self, e: UiEntity) -> bool:
         """0x425CD0（0x5F00000D 3 値窓、thunk 0x401C17）：

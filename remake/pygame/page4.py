@@ -18397,6 +18397,10 @@ class Page4Mixin:
             # ctor 0x4272DD / 行为 0x427580（击破波纹驱动）：VM 记录 dword ⇒ 转有符号
             _s4 = lambda v: v - 0x100000000 if v & 0x80000000 else v
             self.p4_spawn_61000004(_s4(a), _s4(b), _s4(d))
+        elif op == 5 and (c & 0xFF000000) == 0x6F000000:
+            # 0x6F 族（EDG2 の 0x6F000005＝結局調色板/画集控制器 0x4415F0 等）
+            _s6 = lambda v: v - 0x100000000 if v & 0x80000000 else v
+            self.spawn(self._p4_q("ui52c"), c, _s6(a), _s6(b), _s6(d))
         elif op == 5 and (c & 0xFFFFFF00) == 0x61000000:
             # 0x61 族其余型（跳表 0x4273C0，索引 = type-0x61000001）：
             #   0x61000007 init 0x42735E / 行为 0x427690 = BGM 主音量渐变
