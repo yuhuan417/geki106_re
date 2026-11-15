@@ -2891,6 +2891,11 @@ class Pages(Page4Mixin):
         bl = 1 if seg != e.aux else 0
         e.aux = seg                                  # [+0x20] = 段
         st = e.t
+        if st != e.p.get("last_st", -1):
+            # 0x4453C3：态变化 ⇒ [0x24]=0（驻留计数重启）——旧实现不清 ⇒
+            # 行8（完了）进态 3 后立即满足 0x20 驻留、闪光驻留消失
+            e.p["dwell"] = 0
+            e.p["last_st"] = st
         if st == 0:                                  # 0x444A86
             self._p6_spawn_menu(e.g32(0x30) != 0)    # 0x444A8E 0x444360(メニュー生成)
             f = self.spawn_flash(-0xFF, 0, 8)        # rec{0,-0xFF,typ,8}→淡入
@@ -2898,9 +2903,10 @@ class Pages(Page4Mixin):
             e.t = 1
             return True
         if st in (1, 3):                             # 0x444AD2
-            e.p["dwell"] = e.p.get("dwell", 0) + 1   # [0x24]++（0x444ADC inc eax 前）
-            if e.p["dwell"] >= 0x20:
+            # 0x444AD2 先比较（[0x24] 为上帧尾部自增值）、0x44544A 尾部再 ++ 的顺序
+            if e.p.get("dwell", 0) >= 0x20:
                 e.t = st + 1                         # 0x444ADD ++[0x1C]
+            e.p["dwell"] = e.p.get("dwell", 0) + 1   # 0x44544A [0x24]++（态未变时尾部）
             return True
         if st == 2:                                  # 0x444AE5 主交互态（常驻）
             key = self.inp.rec.key
@@ -2933,10 +2939,6 @@ class Pages(Page4Mixin):
             self._p6_spawn_menu(e.g32(0x30) != 0)
             e.t = 2
             return True
-        if st in (6, 7):                             # 0x445464[6/7] = 行 0/1 动作同源
-            self._adjust_row(e, 0 if st == 6 else 1)
-            self._adjust_tail()
-            return True
         self._adjust_tail()
         return True
 
@@ -2968,8 +2970,7 @@ class Pages(Page4Mixin):
             # ＋ 0x4013DE(0x4AB454, 0, 0)（ポインタ/preset リセット）。
             e.d32(0x30, e.g32(0x30) ^ 1)
             e.t = 5
-            self.inp.set_pos(0, 0)                   # 0x4013DE→0x44E620(inp,0,dev)
-            self.inp.set_preset4(0, (0, 0))
+            self.inp.set_pos(0, 0)                   # 0x4013DE→0x44E470(inp,0,0) 指针归零
         elif row == 8:                               # 0x444ECF 完了（明度→彩度连算）
             b = self.disp_cfg.field(0x1FC0000)
             c = b * 4 - 0xC8
@@ -2978,14 +2979,14 @@ class Pages(Page4Mixin):
             e.t = 3                                  # 0x444F6E [0x1C]=3（驻留→态4 退页）
             self._adjust_cursor()                    # 0x4019FB 0x43DCB0 闪光
         elif row == 9:                               # 0x444C4E MIDI デバイス選択
-            if not self.inp.rec.e1:                  # 0x444C4E test al(=e1)：e0 ⇒ 循环
+            if self.inp.rec.e1:                      # 0x444C4E test al(=e1)：e1 ⇒ 循环
                 if self._adjust_dev_i == 0x32:
                     self._adjust_dev_i = 0
                 else:
                     self._adjust_dev_i += 1
                     if self._adjust_dev_i >= 0x32:   # 0x44FF90(0x4AB514) 设备数（复刻取上限）
                         self._adjust_dev_i = 0x32
-            else:                                    # e1：0x3F000 字段写入 + 设备应用
+            else:                                    # e0：0x3F000 字段写入 + 设备应用
                 self.disp_cfg.set_field(0x3F000, self._adjust_dev_i & 0xFFFFFFFF)
                 # 0x401DF2→0x44FDD0 / 0x40110E→0x44F390(0x4AB514, dev)＝MIDI 切替（音频后端无枚举）
         elif row == 10:                              # 0x444CCA 对比度 ±1
@@ -2997,11 +2998,19 @@ class Pages(Page4Mixin):
                 cur = 0x63
             self.disp_cfg.set_field(0xFE000000, cur & 0xFFFFFFFF)
             self._adjust_pal_dirty = True            # 0x444D43 [esp+0x13]=1
-        elif row == 16:                              # 0x444E91 BGM 行
-            if self.keys.test(0x80):
+        elif row == 16:                              # 0x444E91 跳選（关卡选择）行
+            if not self.keys.test(0x80):
+                # 0x444EA2 je 0x444F14：bit0x80 清 ⇒ 行 7 动作（[0x30]^=1 + 态5 再生成）
+                e.d32(0x30, e.g32(0x30) ^ 1)
+                e.t = 5
+                self.inp.set_pos(0, 0)               # 0x4013DE→0x44E470
+            elif self.inp.rec.e1:
+                # 0x444EA4..0x444CC0：e1 ⇒ [esp+0x12]=1（BGM 脏，尾部按 [0x28] 重播）
+                self._adjust_bgm_dirty = True
+            else:
+                # 0x444EB1：e0 ⇒ [0x28]++ ≤0xD 回卷（无脏标记）
                 v = self._adjust_bgm_i + 1
                 self._adjust_bgm_i = 0 if v >= 0xD else v
-                self._adjust_bgm_dirty = True
         elif row == 17:                              # 0x444F01（seg≤8 不可达；表尾项）
             if self.keys.test(0x80):
                 # bit0x80 ⇒ 行 7 同款：[0x30]^=1 + 态=5（メニュー再生成）+ ポインタリセット
