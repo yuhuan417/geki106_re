@@ -3072,7 +3072,9 @@ class Pages(Page4Mixin):
             self._adjust_pal_dirty = True            # 0x444DC6 [esp+0x13]=1
         elif row == 12:                              # 0x444DD0 切替 XOR 0x40
             self.keys.bits ^= 0x40                   # 0x45AF90 XOR（旧版 OR ⇒ 切不回来）
-            self.layers.cg40 = 1 if self.keys.test(0x40) else 0   # 0x44DCD0 byte[0x86]
+            # 0x44DCD0 byte[0x4AA7B0+0x86] = test(0x40)：層ブリット 0x44D2A4 の
+            # パレットリマップ有効フラグ（0x4987F4 表）——描画側リマップ pass 未搭載
+            self.layers.cg40 = 1 if self.keys.test(0x40) else 0
         elif row == 13:                              # 0x444DF8 切替 XOR 0x20
             self.keys.bits ^= 0x20                   # 0x45AF90 XOR
             self.layers.cg20 = 1 if self.keys.test(0x20) else 0   # 0x44DCB0 byte[0x85]
