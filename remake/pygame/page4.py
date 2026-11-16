@@ -998,6 +998,14 @@ class Ent:
                 self.node.rect = ((0x1B0, 0x198, 0x1C7, 0x1AF) if a < 2
                                   else (0x1C8, 0x198, 0x1DF, 0x1AF))
                 self.node.dst = (a - 0x18, b - 0x18)
+        if "rect_link" in info:                        # *(rec+off)!=0 → rectA，否则 rectB
+            which, off, ra, rb = info["rect_link"]
+            h = b if which == "b" else a
+            tgt = self._deref_link(h) if h else None
+            cond = tgt is not None and tgt.g32(off) != 0
+            if self.node is not None:
+                self.node.rect = ra if cond else rb
+                self.node.dst = (a - 0x30, b - 0x30)
         if "rect_cmp" in info:                         # 0x41CA98：rec1==值 → rectA，否则 rectB
             val, ra, rb = info["rect_cmp"]
             if self.node is not None:
@@ -2514,9 +2522,11 @@ ENT29_INIT = {
                  "s3nz8000": 0x1C, "r0sh": (0x24, 2), "r1sh": (0x28, 2)},
     # 0x29000019（0x41C613）：x=-0xA0、+0x1C=p3、+0x20..24=*p0（块解引用，生成点填）、
     #   +0x28=*(p3+0x1C)（生成点填）、+0x2C=*p1、rect=*(p1+4)?{180,F0,1AF,11F}:{180,120,1AF,14F}
-    0x29000019: {"beh": 0x401CCB, "imm": {0x04: -0xA0}, "d_to": 0x1C},
+    0x29000019: {"beh": 0x401CCB, "imm": {0x04: -0xA0}, "d_to": 0x1C,
+                 "rect_link": ("b", 4, (0x180,0xF0,0x1AF,0x11F), (0x180,0x120,0x1AF,0x14F))},
     # 0x2900001A（0x41C6E5）：x=-0xA0、+0x1C=p3、+0x20..2C=*p0[0..3]、+0x30=*p1、rect 同上式
-    0x2900001A: {"beh": 0x401384, "imm": {0x04: -0xA0}, "d_to": 0x1C},
+    0x2900001A: {"beh": 0x401384, "imm": {0x04: -0xA0}, "d_to": 0x1C,
+                 "rect_link": ("b", 4, (0x180,0xF0,0x1AF,0x11F), (0x180,0x120,0x1AF,0x14F))},
     # 0x2900001B（0x41C7BB）：x=-0xA0、+0x1C=p3、+0x20=p0、+0x24=p1、+0x28=3、+0x2C/30=0、
     #   node.rect={-30,-1,-1,-30}、node.dst=(-30,-30)、node.active=0
     0x2900001B: {"beh": 0x40140B, "imm": {0x04: -0xA0, 0x28: 3, 0x2C: 0, 0x30: 0},
@@ -2537,7 +2547,8 @@ ENT29_INIT = {
     0x2900001E: {"beh": 0x401474, "imm": {0x20: 0x40, 0x24: 0}, "d_to": 0x1C},
     # 0x2900001F（0x41C99E）：x=-0xA0、+0x1C=p3、+0x20=*p0、+0x24=*(p0+4)+0x18、+0x28=0、
     #   rect=*(p0+8)?if:else（生成点填）
-    0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C},
+    0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C,
+                 "rect_link": ("a", 8, (0x180,0xF0,0x1AF,0x11F), (0x180,0x120,0x1AF,0x14F))},
     # 0x29000020（0x41CA67）：x=-0xA0、+0x1C=*p3、+0x20=p0、+0x24=p1、+0x28=*(p3+4)、
     #   rect=p1==-0xA8?if:else（生成点填）
     0x29000020: {"beh": 0x401A82, "imm": {0x04: -0xA0}, "r0_20": True, "r1_24": True,
