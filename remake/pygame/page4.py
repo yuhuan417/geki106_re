@@ -989,6 +989,27 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s2a05"):                          # 0x40A65F：0x2A000005 + rec3 改写
+            pg = getattr(self, "_pages", None)
+            px = pg.p4_player_x() if pg is not None else 0
+            py = pg.p4_player_y() if pg is not None else 0
+            self.d32(0x14, (0x2A000005 + d) & 0xFFFFFFFF)
+            self.d32(0x0C, 0x18)
+            self.m[0x10] = 1
+            self.d32(0x1C, 0)
+            ang0 = (pg.p4_45a9a0(px - a, py - b) if pg is not None else 0)
+            r = (pg.p4_rand() & 0x1FF) if pg is not None else 0
+            ang = (r + ang0 - 0xFF) & 0xFFFFFFFF
+            self.d32(0x20, (page4_cos(ang) * 3 >> 3) & 0xFFFFFFFF)
+            self.d32(0x24, (page4_sin(ang) * 3 >> 3) & 0xFFFFFFFF)
+            self.d32(0x28, (a << 4) & 0xFFFFFFFF)
+            self.d32(0x2C, (b << 4) & 0xFFFFFFFF)
+            self.d32(0x18, 0xA)
+            self.node = DNode(3, 0, 0)
+            self.node.rect = (0, ((d * 3 + 0xC) << 4) & 0xFFFFFFFF, 0x2F,
+                              ((d * 3 << 4) + 0xEF) & 0xFFFFFFFF)
+            self.node.dst = (a - 0x18, b - 0x18)
+            self.node.active = 1
         if info.get("s19_fields"):                     # 0x4084AE：0x2D000019
             self.d32(0x1C, d & 0xFFFFFFFF)
             self.d32(0x20, b & 0xFFFFFFFF)
@@ -2581,7 +2602,7 @@ ENT2A_INIT = {
     0x2A000004: {"beh": 0x401B22, "imm": {0x0C: 0x18, 0x18: 0x640},
                  "node": (2, 0x170, 0, 0x1DF, 0x103), "dst": (-0x28, -0xC8),
                  "b10_1": True, "d_to": 0x1C},
-    0x2A000005: {"beh": 0x4011BD, "imm": {0x0C: 0x18}},
+    0x2A000005: {"beh": 0x4011BD, "s2a05": True},
     0x2A00000A: {"beh": 0x401E29, "imm": {0x0C: 0x78, 0x18: 0x3E80}},    # r=120、HP=16000
 }
 
