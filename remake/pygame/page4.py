@@ -1585,8 +1585,8 @@ def _beh_23000007(self, e) -> bool:
     n = e.s32(0x1C)
     if n:
         for _ in range(n):                                   # 0x40E7AA..0x40E7FB
-            x = rng.randrange(0x500)                         # 0x401393 → 0x45AD00, 0x462D71 取商
-            y = rng.randrange(0x1E0) + 0x298                 # 余数 + 0x298
+            x = rng.randrange(0x500) + 0x298                 # 0x40E7BD edx(余数)+0x298 → rec[0]
+            y = rng.randrange(0x1E0)                         # 0x40E7EC edx(余数) → rec[1]
             self._p4_ent43c(0x23000007, x, y)       # 0x401FA5(0x4AD43C, rec)
         return False
     x = e.s32(0x04)
@@ -1614,7 +1614,7 @@ def _beh_23000008(self, e) -> bool:
     elif t == 0x10:
         e.d32(0x20, 0)                                       # 0x40E91F
     elif t == 0xC0:
-        self._p4_ent43c(0x23000009, e.s32(0x04) - 0x18, e.s32(0x08))   # 0x40E8E5
+        self._p4_ent43c(0x23000009, -0x18, e.s32(0x08))   # 0x40E8F5 push -0x18（x 常量，非父 x-0x18）
     e.d32(0x04, (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF)    # 0x40E93B
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
@@ -1727,7 +1727,7 @@ def _beh_2300000A(self, e) -> bool:
     e.d32(0x20, n)
     if n == 0:
         if e.s32(0x1C) > 0:
-            self.p4_43B070(e, 0)                     # 0x40EB03
+            self.p4_43B150(e, 0)                     # 0x40EB03 → 0x401D6B = 0x43B150（双发 V 形）
     elif e.s32(0x20) == 0x30:                        # 0x40EB0C
         e.d32(0x20, 0xFFFFFFD1)                      # -0x2F
         e.d32(0x1C, 4 if e.s32(0x1C) == -6 else -6)  # 0x40EB1B..0x40EB27
@@ -4987,10 +4987,12 @@ def _beh_40EBB0(self, e) -> bool:
     t = e.s32(0x1C)
     e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
     if t == 0:                                        # 0x40EBC4
-        self._p4_ent43c(0x2300000C, e.s32(0x04), e.s32(0x08), 0)
-    elif t == 0x1E0:                                  # 0x40EBFF
+        h = id(e) & 0x7FFFFFFF
+        self.p4_links[h] = e
+        self._p4_ent43c(0x2300000C, e.s32(0x04), e.s32(0x08), h)   # 0x40EBCB push ebx=父
+    elif (t + 1) == 0x1E0:                            # 0x40EBFF cmp ecx(新 t),0x1E0
         e.d32(0x20, 1)
-    elif (t & 0x7F) == 0x1F:                          # 0x40EC10
+    elif ((t + 1) & 0x7F) == 0x1F:                    # 0x40EC10 and ecx(新 t),0x7F
         self.p4_43B070(e, 0)
     if e.s32(0x20) != 0:                              # 0x40EC21
         e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
@@ -11736,7 +11738,7 @@ def _beh_23000004(self, e) -> bool:
     t = e.s32(0x1C)
     e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
     if t == e.s32(0x24):                       # 0x40E47C 到点打一发
-        self.p4_43B070(e, 0)
+        self.p4_43B150(e, 0)                   # 0x40E482 → 0x401D6B = 0x43B150（双发 V 形）
     elif (t + 1) == 0x168:                     # 0x40E489 360 帧时加速计数复位 1
         e.d32(0x20, 1)
     acc = e.s32(0x20)
@@ -18392,6 +18394,9 @@ class Page4Mixin:
         而 ui43c 的行为函数全部按 `[ent+0xNN]` 直接读写内存。
         """
         e = Ent(x, y, typ, a3)
+        if typ == 0x2300000D:                      # ctor 0x40DB54..0x40DB66
+            e.d32(0x1C, (y << 7) & 0xFFFFFFFF)     # [+0x1C] = rec[1]<<7
+            e.d32(0x20, (self.p4_player_y() - y) & 0xFFFFFFFF)  # [+0x20] = 自机y - y
         self.p4_q43c.append(e)
         self.p4_n43c += 1
         return e
