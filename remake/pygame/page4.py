@@ -60,6 +60,33 @@ def p4_tbl_4993c4():
     return _P4_TBL_4993C4
 
 
+_P4_SCORE_TABLES = None
+
+
+def p4_score_tables():
+    """`0x4993CC..0x4996FF` 的得分描述表区（10 个关卡指针共用，`build_p4_str.py` 导出）。
+
+    0x45EF33 把 `[0x4A4B64 + level*4]` 写进 `[0x4CD4A0+0xEC]`；`0x45F029`/`0x45FB12`
+    再按 `(type&0xFF)` 从**该只读区**取 dword（不是可写 p4_stat！）。"""
+    global _P4_SCORE_TABLES
+    if _P4_SCORE_TABLES is None:
+        try:
+            import json as _j
+            from pathlib import Path as _P
+            _d = _j.loads((_P(__file__).with_name("p4_score_tables.json")).read_text())
+            _P4_SCORE_TABLES = (int(_d["base"]), list(_d["words"]))
+        except Exception:
+            _P4_SCORE_TABLES = (0x4993CC, [])
+    return _P4_SCORE_TABLES
+
+
+def p4_score_entry(base: int, i: int) -> int:
+    """读 `[[base] + i*4]` 的只读表项；越界/未知 base 返回 0。"""
+    tbase, words = p4_score_tables()
+    off = (int(base) - tbase) // 4 + int(i)
+    return words[off] & 0xFFFFFFFF if 0 <= off < len(words) else 0
+
+
 _P4_STR_TABLE = None
 
 
@@ -14214,7 +14241,7 @@ class Page4Mixin:
 
     # HUD 对象 `0x4A4B64` 的种类表（`0x45EF2C mov edx,[eax*4+0x4A4B64]`）
     P4_HUD_KIND = (0x0, 0x4993CC, 0x499438, 0x499480, 0x4994B0,
-                   0x499514, 0x49955C, 0x4995C0)
+                   0x499514, 0x49955C, 0x4995C0, 0x49964C, 0x499678)
 
     def p4_hud_ctor(self, h, kind: int) -> None:
         """`0x45EF10(ret 4)`：HUD 对象构造。
@@ -14628,7 +14655,7 @@ class Page4Mixin:
             tbl = p4_tbl_4993c4()
             entry = tbl[i] if 0 <= i < len(tbl) else 0
         else:
-            entry = self.p4_stat.get(base + i * 4, 0) & 0xFFFFFFFF
+            entry = p4_score_entry(base, i)                     # 0x45F029：只读表 dword
         rec = self.p4_45dfb0(entry)                             # 0x45F05F
         self.p4_45e670(rec, 0, 1, 0)                            # 0x45F074
         if rec["b4"] & 4:                                       # 0x45F079
@@ -15003,7 +15030,7 @@ class Page4Mixin:
             tbl = p4_tbl_4993c4()
             entry = tbl[i] if 0 <= i < len(tbl) else 0
         else:
-            entry = self.p4_stat.get(base + i * 4, 0) & 0xFFFFFFFF
+            entry = p4_score_entry(base, i)             # 0x45FB12：只读表 dword
         return (entry >> 0x10) & 0xFFFF                 # 0x45FB20
 
     def p4_460800(self, o) -> int:
@@ -18472,6 +18499,13 @@ class Page4Mixin:
         # ★ 只写**低 16 位**：`+0x24` 是 word，`+0x26` 是紧邻的另一个 word（0x45EB40 置 0xA0）。
         # 若按 dword 写，会把 +0x26 一起清零。
         self.p4_stat_w16(0x24, level)
+        # 0x45EF29..0x45EF33：`edx = [0x4A4B64 + level*4]; [this+0xEC] = edx`
+        # —— 关卡号 → 得分描述表指针。0x45F5C0 的顺序是 0x45EB40（会把 +0xEC 清 0）
+        # 之后再 0x45EF10(level)，所以这里必须在重置后重新写回；旧实现漏了这条
+        # ⇒ +0xEC 恒 0 ⇒ 0x45EFF0 的 `if ([+0xEC]==0) ret` 早退，击破永远不加分。
+        self.p4_stat[0x4CD4A0 + 0xEC] = (
+            self.P4_HUD_KIND[level]
+            if 0 <= level < len(self.P4_HUD_KIND) else 0)
 
     def sequence_started(self) -> bool:
         """`0x460EE0(0x4CD590)`：`eax = [+0x40]`（getter，原样返回）。
