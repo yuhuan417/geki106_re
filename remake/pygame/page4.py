@@ -5701,6 +5701,8 @@ def _beh_40A020(self, e) -> bool:
             return False
         return e.g32(0x18) != 0                       # 0x40A326
     # 待机（[0x20]==0 且 [0x2C]==0）0x40A097
+    if typ == 0x2D00001B and e.s32(0x30) >= 0xCA:      # 0x40A0A1：[0x28]+=0x24
+        e.d16(0x28, (e.g16(0x28) + 0x24) & 0xFFFF)
     packed = main.g32(0x20)
     e.d32(0x24, packed)                               # 0x40A0B4
     lo = packed & 0xFFFF
@@ -5708,7 +5710,7 @@ def _beh_40A020(self, e) -> bool:
     e.d32(0x04, ((lo - 0x8000 if lo & 0x8000 else lo) >> 4) & 0xFFFFFFFF)
     e.d32(0x08, ((hi - 0x8000 if hi & 0x8000 else hi) >> 4) & 0xFFFFFFFF)
     e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)       # 0x40A0C7
-    return e.s32(0x30) < 0xCA                         # 0x40A0EA
+    return e.s32(0x30) < (0x195 if typ == 0x2D00001B else 0xCA)   # 0x40A0D7/0x40A0ED
 
 
 
