@@ -12575,9 +12575,9 @@ def _beh_432DC0(self, e) -> bool:
     e.raw[0x10] = 1 if t < 3 else 0
     if t == 5:
         return False
-    if t != 1 and e.disp is not None:
-        e.disp.rect = [e.disp.rect[0], e.disp.rect[1] + 0x20,
-                       e.disp.rect[2], e.disp.rect[3] + 0x20]
+    if t != 1 and e.disp is not None:              # 0x432DE1 压栈 (0,0x20,0,0x20) → out[0]/out[2]
+        e.disp.rect = [e.disp.rect[0] + 0x20, e.disp.rect[1],
+                       e.disp.rect[2] + 0x20, e.disp.rect[3]]
     return e.s32(0x18) != 0
 
 
@@ -12587,9 +12587,9 @@ def _beh_432FE0(self, e) -> bool:
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
     e.raw[0x10] = 1 if t < 0xA0 else 0
-    if (t & 0xF) == 0 and e.disp is not None:
-        e.disp.rect = [e.disp.rect[0], e.disp.rect[1] + 0x18,
-                       e.disp.rect[2], e.disp.rect[3] + 0x18]
+    if (t & 0xF) == 0 and e.disp is not None:      # 0x432FF9 压栈 (0,0x18,0,0x18) → out[0]/out[2]
+        e.disp.rect = [e.disp.rect[0] + 0x18, e.disp.rect[1],
+                       e.disp.rect[2] + 0x18, e.disp.rect[3]]
     if e.disp is not None:
         y = e.s32(0x08)
         e.disp.active = 1 if (-0xC < y < 0x1EC) else 0
@@ -12631,7 +12631,23 @@ def _beh_433520(self, e) -> bool:
     return e.s32(0x20) < 0x61
 
 
+def _beh_432F20(self, e) -> bool:
+    """`0x432F20`（0x31000013）：8.2 积分——[0x24]+=[0x1C]（y）、[0x20]−=0x40（x 左漂）；
+    每帧生成 0x31000014；dst=(x−0xC,y−0xC)；存活 x>−0xC。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) - 0x40) & 0xFFFFFFFF)
+    x = e.s32(0x20) >> 2
+    y = e.s32(0x24) >> 2
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    self.spawn(self._p4_q("ui49c"), 0x31000014, x, y, 0)
+    if e.disp is not None:
+        e.disp.dst = [x - 0xC, y - 0xC]
+    return x > -0xC
+
+
 P4_BEH: dict[int, object] = {
+    0x432F20: _beh_432F20,
     0x433520: _beh_433520,
     0x432DC0: _beh_432DC0, 0x432FE0: _beh_432FE0, 0x433340: _beh_433340,
     0x4327A0: _beh_4327A0, 0x432C80: _beh_432C80,
