@@ -307,9 +307,9 @@ ENT23_INIT = {
     #   [+0x2C]=0 —— 8.8 位置累加器必须从出生点起算，否则行为 0x40E9B0 的
     #   `[0x24]/[0x28]` 从 0 开始 ⇒ 敌机从 (0,0) 附近窜出（旧表只有行为指针）。
     0x23000009: {"beh": 0x4015AA, "imm": {0x1C: 0x500, 0x20: 0, 0x2C: 0}, "xy8": True},
-    # 0x2300000A（0x40DAE7）：[+0x1C]=-6、[+0x20]=-48、[+0x24]=0 —— 怒的正弦相位
-    #   必须从负半周开始。旧表漏了这三项 ⇒ 相位只增不减，y 从 456 漂到 597（屏幕底
-    #   480 以下），怒只剩上半截露在屏内；相位回卷后又「复原」（用户实测）。
+    # 0x2300000A（0x40DAE7）：[+0x1C]=-6、[+0x20]=-48、[+0x24]=0 —— **跳**（足+兆，
+    #   正弦航迹）的相位必须从负半周开始。旧表漏了这三项 ⇒ 相位只增不减，y 从 456
+    #   漂到 597（屏幕底 480 以下），跳只剩上半截露在屏内；相位回卷后又「复原」。
     0x2300000A: {"beh": 0x401181, "imm": {0x1C: -6, 0x20: -48, 0x24: 0}},
     0x2300000D: {"beh": 0x40210D, "imm": {}},
     0x2300000E: {"beh": 0x401BA9, "vtup": True, "r1sh": (0x24, 4)},   # 0x40DB72
@@ -5013,16 +5013,18 @@ def _beh_40F190(self, e) -> bool:
     → x≥0x78 且未受伤 → 待机；受伤 → 闪光帧（rect 滚动 + 半径+0xA + dst 左上移）；
     t==0x60 → SE(4) + 8 向 0x43B290 环（45° 步）。
 
-    HP≠0xC1 → x 步 5 否则 2；x-=步；HP≠0xC1 → node.dst.x += -4 否则 -2；
+    HP≠0xC1 → x 步 5 否则 2；x-=步；HP≠0xC1 → node.dst.x += -5 否则 -2；
     HP==0 → return 0；x≥0x78 且 [0x28]==HP → return 1（未受伤待机）；
     t=[0x1C]；t≠0x60 → [0xC]+=0xA、[0x28]-=0x40、HP=[0x28]、
-      rect += {0, t, t+0x14, 0x14}、node.dst += (-0xA,-0xA)、t+=0x14；
+      **rect += (0, t, 0x14, t+0x14)**（0x45A790 的压栈序是 db,dr,dt,dl）、
+      node.dst += (-0xA,-0xA)、t+=0x14；
     t==0x60 → SE(4,(x-0x140)<<4) + for a in 0,0x1C2..<0xE10: 0x43B290(e,cos(a),sin(a),0)、return 0。"""
     hp = e.s32(0x18)
     step = 5 if hp != 0xC1 else 2
     e.d32(0x04, (e.s32(0x04) - step) & 0xFFFFFFFF)      # 0x40F1B1
     if e.node is not None:
-        e.node.dst = (e.node.dst[0] + (-4 if hp != 0xC1 else -2), e.node.dst[1])
+        # 0x40F1B6..0x40F1C7：neg/sbb/and 0xFD/add -2 ⇒ 受伤 -5、未受伤 -2
+        e.node.dst = (e.node.dst[0] + (-5 if hp != 0xC1 else -2), e.node.dst[1])
     hp = e.s32(0x18)                                    # 0x40F1CA 重读
     if hp == 0:
         return False
@@ -5037,7 +5039,10 @@ def _beh_40F190(self, e) -> bool:
         e.d32(0x18, v28)                                # HP=[0x28]
         if e.node is not None:
             r = e.node.rect
-            e.node.rect = (r[0], r[1] + t, r[2] + t + 0x14, r[3] + 0x14)   # 0x401A0A
+            # 0x40F249..0x40F25C：push (t+0x14), 0x14, t, 0 → 0x45A790 的
+            # (rect, dl=0, dt=t, dr=0x14, db=t+0x14)。旧实现把 r/b 的增量写反，
+            # 受伤帧变成一条 20px 高的横带 ⇒「怒只剩上半截」（用户实测）。
+            e.node.rect = (r[0], r[1] + t, r[2] + 0x14, r[3] + t + 0x14)   # 0x401A0A
             e.node.dst = (e.node.dst[0] - 0xA, e.node.dst[1] - 0xA)        # 0x401415
         e.d32(0x1C, (t + 0x14) & 0xFFFFFFFF)
         return True                                     # 0x40F27D
