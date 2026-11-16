@@ -9345,7 +9345,9 @@ def _beh_404FA0(self, e) -> bool:
     if main.g32(0x18) != 0 and e.g32(0x18) != 0:
         return main.m[0x34] != 0
     main.d32(0x28, main.g32(0x28) | 1)
-    self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y, (6, 1))
+    _h2c = id(e) & 0x7FFFFFFF
+    self.p4_links[_h2c] = e
+    self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y, (_h2c, 6, 1))   # 0x4050A2 rec={6,1,父}
     if e.g32(0x18) == 0:
         self.spawn(self._p4_q("ui49c"), 0x32000007, x, y, 0)
     return False
@@ -10735,8 +10737,9 @@ def _beh_4064E0(self, e) -> bool:
         if e.node is not None:
             e.node.dst = (x - 0x18, y - 0x18)
     if e.g32(0x18) == 0:
-        self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y,
-                   0x10 + (self.p4_rand() & 0xF))
+        _h16 = id(e) & 0x7FFFFFFF
+        self.p4_links[_h16] = e
+        self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y, (_h16, 0xC, 0))  # 0x40FE0C
         return False
     if e.s32(0x24) == 2 and not self.p4_4305f0(e, 0x180):
         return False
@@ -10760,8 +10763,11 @@ def _p4_4067a0(self, e, leader) -> bool:
                                e.node.rect[2] + 0xC0, e.node.rect[3])
         return True
     if not self.p4_430640(e):
+        _h67 = id(e) & 0x7FFFFFFF
+        self.p4_links[_h67] = e
+        # exe 0x406695：rec={0x10+(rand&0xF), 1, 父}（0x406838 另有 {4+(rand&3), 0, 父}）
         self.spawn(self._p4_q("ui4cc"), 0x41000014, x, y,
-                   0x10 + (self.p4_rand() & 3))
+                   (_h67, 0x10 + (self.p4_rand() & 0xF), 1))
         return False
     return True
 
@@ -14899,6 +14905,35 @@ def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
     return e
 
 
+def _beh_42A750(self, e) -> bool:
+    """`0x42A750`（0x41000014 boss 闪 overlay，thunk 0x4024DC）：**贴父漂移 + 波纹**。
+
+    [0x24] += [0x20]（漂移种子）；[0x1C] += [0x24]；
+    node dst = (父dst.x − ([0x1C]>>8), 父dst.y + ([0x24]>>7))（[4]/[8] 是 ctor 拷的父 dst）；
+    [0x2C]++；0x43A520(0x4AD4CC, [0xC]+x, [0xC]+y, t=[0x2C], dur=([0x28]!=0), flag=[0xC])
+    （0x42A7AB call 0x401C08，波纹火花发生器）；[0x28]==2 且不在屏 → SE(0xB, 0)；
+    return 0x430640 在屏判据（0x42A7D9）。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x20)) & 0xFFFFFFFF)   # 0x42A762
+    acc = (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF          # 0x42A769
+    e.d32(0x1C, acc)
+    acc_s = acc - 0x100000000 if acc & 0x80000000 else acc
+    v24 = e.s32(0x24)
+    x = (e.s32(0x04) - (acc_s >> 8)) & 0xFFFFFFFF           # 0x42A770 sar 8
+    y = (e.s32(0x08) + (v24 >> 7)) & 0xFFFFFFFF             # 0x42A778 sar 7
+    if e.node is not None:
+        e.node.dst = (x, y)                                 # 0x401753
+    t2c = (e.s32(0x2C) + 1) & 0xFFFFFFFF                    # 0x42A79B
+    e.d32(0x2C, t2c)
+    # 0x401C08→0x43A520：波纹火花（dur=[0x28]!=0、flag=[0xC]）
+    self.p4_43a520(self._p4_q("ui4cc"),
+                   (e.s32(0x0C) + x) & 0xFFFFFFFF,
+                   (e.s32(0x0C) + y) & 0xFFFFFFFF,
+                   t2c, 1 if e.s32(0x28) != 0 else 0, e.s32(0x0C))
+    if e.s32(0x28) == 2 and not self.p4_430640(e):          # 0x42A7B8/0x42A7C7
+        self.p4_se_pan(0x0B, 0)                             # 0x42A7C9 0x450350(0xB,0)
+    return self.p4_430640(e)                                # 0x42A7D9 在屏=存活
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -14911,6 +14946,7 @@ P4_BEH: dict[int, object] = {
     0x443210: _beh_443210, 0x4457F0: _beh_4457F0,
     0x44A000: _beh_44A000, 0x44A070: _beh_44A070,   # 0x54 族板条（op5 控制器子体）
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
+    0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
     0x432DC0: _beh_432DC0, 0x432FE0: _beh_432FE0, 0x433340: _beh_433340,
@@ -16539,6 +16575,12 @@ class Page4Mixin:
         0x41000017: (0, 0x78, 0x1F8, 0x8F, 0x20F, 0xC, 2, 5, 1, 0x401B95),  # trail arc1
         0x41000018: (1, 0x100, 0xF0, 0x10F, 0xFF, 8, 4, 4, 1, 0x401B95),   # trail arc2
         0x41000019: (1, 0x100, 0xE0, 0x10F, 0xEF, 8, 1, 6, 0, 0x401B95),   # trail slot 追加
+        # 0x41000010（0x429458）：通用粒子层3 16×16 块；[0xC]=1、[0x18]=1、[0x1C]=1、[0x20]=5
+        0x41000010: (3, 0, 0x1C0, 0xF, 0x1CF, 8, 1, 5, 0, 0x401B95),
+        # 0x41000014（0x429551）：boss 闪overlay——[4]/[8]/node rect/dst 从 rec3 父节点
+        # 继承（p4_spawn41 特判），[0x20]=rec0、[0x28]=rec1、[0xC]=[rec+0xC]；
+        # beh 0x4024DC→0x42A750
+        0x41000014: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4024DC),
     }
 
     def p4_spawn41(self, x: int, y: int, typ: int, rec: tuple = ()) -> None:
@@ -16574,6 +16616,21 @@ class Page4Mixin:
         e.node.rect = (l, t, r, b)
         e.node.dst = (int(x) - dv, int(y) - dv)
         e.node.active = 1
+        if typ == 0x41000014 and isinstance(prm, tuple) and len(prm) == 3:
+            # 0x429551：[4]/[8]=父节点 dst.x/y、[0xC]=rec3(父)、[0x20]=rec0(漂移种子)、
+            # [0x28]=rec1(模式 0/1/2)、node rect/dst 从父节点拷贝、byte[node+0x1C]=1
+            _h, _r0, _r1 = prm
+            _p = getattr(self, "p4_links", {}).get(_h & 0x7FFFFFFF)
+            if _p is not None and _p.node is not None:
+                e.d32(0x04, _p.node.dst[0] & 0xFFFFFFFF)   # 0x42956A [edx+0x14]
+                e.d32(0x08, _p.node.dst[1] & 0xFFFFFFFF)   # 0x429576 [edx+0x18]
+                e.node.rect = tuple(_p.node.rect)          # 0x4295B9..0x4295CD rect 拷贝
+                e.node.dst = tuple(_p.node.dst)            # 0x4295D9/0x4295DF dst 拷贝
+            e.d32(0x1C, 0)                                 # 0x42957F
+            e.d32(0x24, 0)                                 # 0x42958A
+            e.d32(0x20, _r0 & 0xFFFFFFFF)                  # 0x429585 rec[0]
+            e.d32(0x28, _r1 & 0xFFFFFFFF)                  # 0x42958D rec[4]
+        e.node.active = 1
         self._p4_q("ui4cc").append(e)
         return e
 
@@ -16597,6 +16654,34 @@ class Page4Mixin:
         self._p4_q("ui52c").append(e)                  # 0x445AA0 → 0x4AD52C
         return e
 
+    def p4_43a520(self, q4cc, x: int, y: int, t: int, dur: int, flag: int) -> None:
+        """`0x43A520`（0x401C08）：**波纹火花发生器**（0x427580/0x42A750 共用）。
+
+        rand 均为 `rand%2dur-dur`：
+          t&1==1 → 路径 A：4 次 rand，0x41000004 火花 @(x+o1,y+o2)、
+                   rec3=(vx,vy)=((o1+o3+2)>>2,(o2+o4+2)>>2)
+          t&7==4 → 路径 B：2 次 rand，0x41000001 核心 @(x+o6,y+o5)、rec3=0
+                   （0x41000001 ctor 0x428CA5 内部 rand%3 选爆炸行）
+          t&0xF==8 且 flag → SE4 声像 (x-0x140)<<4。"""
+        m2 = 2 * dur
+        if t & 1:                                  # 0x43A52F test al,1（路径 A）
+            o1 = self.p4_rand_mod(m2)[1] - dur
+            o2 = self.p4_rand_mod(m2)[1] - dur
+            o3 = self.p4_rand_mod(m2)[1] - dur
+            o4 = self.p4_rand_mod(m2)[1] - dur
+            self.spark_spawn(x + o1, y + o2,
+                             (o1 + o3 + 2) >> 2, (o2 + o4 + 2) >> 2)   # 0x43A5AE
+        if (t & 7) == 4:                           # 0x43A5F6 and 7 / cmp 4（路径 B）
+            o5 = self.p4_rand_mod(m2)[1] - dur
+            o6 = self.p4_rand_mod(m2)[1] - dur
+            g = self.p4_spawn41(x + o6, y + o5, 0x41000001)           # 0x43A62F
+            if g is not None:
+                _, r3 = self.p4_rand_mod(3)                       # ctor 0x428CCF
+                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+        if (t & 0xF) == 8 and flag:                # 0x43A668 and 0xF / cmp 8
+            self.p4_se_pan(4, (x - 0x140) << 4)    # 0x43A685 SE#4 声像
+
+
     def _beh_427580(self, e) -> bool:
         """`0x427580`（0x61000004 击破波纹驱动，thunk 0x40193D）。
 
@@ -16615,30 +16700,16 @@ class Page4Mixin:
         0x43A700 终结：dur>>3 次（每次 2 rand）0x41000001 @(x+o2,y+o1)、rec3=0；
         flag → SE11 声像（0x43A7A0..0x43A7B5）。0x41000001 ctor 0x428CA5 内部
         rand%3 选爆炸行 ⇒ 移植侧 spawn 后补 p4_rand_mod(3) 改 rect（同 0x43CA94）。"""
-        x = e.s32(0x04)
-        y = e.s32(0x08)
-        dur = e.s32(0x20)
-        flag = e.g32(0x24)
         t = (e.s32(0x1C) + 1) & 0xFFFFFFFF             # 0x427589 inc（先于两段生成）
         e.d32(0x1C, t)
-        m2 = 2 * dur
-        if t & 1:                                      # 0x43A52F test al,1（路径 A）
-            o1 = self.p4_rand_mod(m2)[1] - dur
-            o2 = self.p4_rand_mod(m2)[1] - dur
-            o3 = self.p4_rand_mod(m2)[1] - dur
-            o4 = self.p4_rand_mod(m2)[1] - dur
-            self.spark_spawn(x + o1, y + o2,
-                             (o1 + o3 + 2) >> 2, (o2 + o4 + 2) >> 2)   # 0x43A5AE
-        if (t & 7) == 4:                               # 0x43A5F6 and 7 / cmp 4（路径 B）
-            o5 = self.p4_rand_mod(m2)[1] - dur
-            o6 = self.p4_rand_mod(m2)[1] - dur
-            g = self.p4_spawn41(x + o6, y + o5, 0x41000001)           # 0x43A62F
-            if g is not None:
-                _, r3 = self.p4_rand_mod(3)                           # ctor 0x428CCF
-                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
-        if (t & 0xF) == 8 and flag:                    # 0x43A668 and 0xF / cmp 8
-            self.p4_se_pan(4, (x - 0x140) << 4)        # 0x43A685 SE#4 声像
-        if t == dur:                                   # 0x4275B3（终结帧）
+        self.p4_43a520(self._p4_q("ui4cc"), e.s32(0x04), e.s32(0x08),
+                       t, e.s32(0x20), e.g32(0x24))
+        if t == e.s32(0x20):                           # 0x4275B3（终结帧）
+            x = e.s32(0x04)
+            y = e.s32(0x08)
+            dur = e.s32(0x20)
+            flag = e.g32(0x24)
+            m2 = 2 * dur
             n = dur >> 3                               # 0x43A70E sar 3
             for _ in range(n):                         # 0x43A723..0x43A792 循环
                 o1 = self.p4_rand_mod(m2)[1] - dur
