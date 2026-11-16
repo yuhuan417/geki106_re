@@ -4909,7 +4909,8 @@ def p4_409760(self, e) -> None:
         return
     dx = e.s32(0x04) - main.s32(0x04)
     dy = e.s32(0x08) - main.s32(0x08)
-    ang = self.p4_45a9a0(dy, dx)                    # 0x40978C 0x401091 → 0x45A9A0
+    ang = self.p4_45a9a0(dx, dy)                    # 0x40978C push edi(Δx),ebx(Δy)
+                                                    # → 0x45A9A0(row=Δy,col=Δx)
     c = page4_cos(ang)
     s = page4_sin(ang)
     rect_l = e.node.rect[0]
@@ -10398,11 +10399,13 @@ def _p4_45ac70(self, tgt: list, cur: list, lim: int) -> bool:
     （[tgt]==0 且 [cur]==0 → return 0）。"""
     if tgt[0] == 0 and cur[0] == 0:
         return False
-    a = self.p4_45a9a0(tgt[0], cur[0])
+    # exe 0x45AC8A：push [ebx](cur)、push [edi](tgt) → 0x45A9A0(row=tgt, col=cur)
+    # 包装器 (dx, dy) → p4_45a9a0(cur[0], tgt[0])；cos→tgt、sin→cur 均为**覆盖**
+    a = self.p4_45a9a0(cur[0], tgt[0])
     s_ = page4_sin(a)
     c = page4_cos(a)
-    cur[0] = (cur[0] + ((s_ * lim + 0x80) >> 8)) & 0xFFFFFFFF
-    tgt[0] = (tgt[0] + ((c * lim + 0x80) >> 8)) & 0xFFFFFFFF
+    cur[0] = ((s_ * lim + 0x80) >> 8) & 0xFFFFFFFF   # 0x45ACB4.. mov [ebx]
+    tgt[0] = ((c * lim + 0x80) >> 8) & 0xFFFFFFFF    # 0x45ACA2.. mov [edi]
     return True
 
 
@@ -11775,21 +11778,33 @@ def _beh_4098E0(self, e) -> bool:
     y = e.s32(0x08)
     if v20 == 0 and v2c == 0:
         if v30 == 0:
-            for _ in range(9):
-                self._p4_ent43c(0x2D000019, main.s32(0x04), main.s32(0x08))
-        a = (self.p4_rand() & 0x3F) - 0x1F
+            # 0x40991E..0x409956：ebp=1..0xA 共 **10** 架；记录 (r0=主句柄,
+            # r1=本实体指针, r2=0x2D000019, r3=ebp)——rec0 走父句柄惯例
+            mh = id(main) & 0x7FFFFFFF
+            self.p4_links[mh] = main
+            sh = id(e) & 0x7FFFFFFF
+            self.p4_links[sh] = e
+            for i in range(1, 11):
+                self._p4_ent43c(0x2D000019, mh, sh, i)
+        a = (self.p4_rand() & 0x3F) - 0x1F              # 0x40995F
         e.d32(0x28, ((a & 0xFFFF) | 0x400000) & 0xFFFFFFFF)
-    elif 0x32 <= v30 < 0x65:
-        cur = [e.s32(0x28)]
-        tgt = [e.s32(0x2A)]
-        self._p4_45ac70(tgt, cur, 8)
-        e.d32(0x28, cur[0] & 0xFFFFFFFF)
-        e.d32(0x2A, tgt[0] & 0xFFFFFFFF)
-        cur2 = [e.s32(0x24)]
-        tgt2 = [e.s32(0x28)]
-        self._p4_45ac70(tgt2, cur2, 0x40)
-        e.d32(0x24, cur2[0] & 0xFFFFFFFF)
-        e.d32(0x28, tgt2[0] & 0xFFFFFFFF)
+    elif 0x32 <= v30 < 0x65:                            # 0x409976
+        # 0x409980..0x4099F0：第一发 0x45AC70 以 (px−x, py−y) 为 (tgt, cur)、lim=8
+        # （tgt=dx 槽=row、cur=dy 槽=col —— row=dx/col=dy 的 +Y 轴测角），
+        # 结果 + movsx word[0x28]/word[0x2A]（当前速度包）→ 第二发 lim=0x40 →
+        # 打包 (cur<<16)|(tgt&0xFFFF) 回 [0x28]
+        blk_t = [(self.p4_player_x() - x) & 0xFFFFFFFF]   # tgt 槽 = dx
+        blk_c = [(self.p4_player_y() - y) & 0xFFFFFFFF]   # cur 槽 = dy
+        self._p4_45ac70(blk_t, blk_c, 8)
+        _w28 = e.g16(0x28)
+        _w2a = e.g16(0x2A)
+        ebp = (blk_t[0] + (_w28 - 0x10000 if _w28 & 0x8000 else _w28)) & 0xFFFFFFFF
+        edi = (blk_c[0] + (_w2a - 0x10000 if _w2a & 0x8000 else _w2a)) & 0xFFFFFFFF
+        blk2_t = [ebp]                                  # 0x4099CF mov [esp+0x2c],ebp
+        blk2_c = [edi]                                  # 0x4099D3 mov [esp+0x28],edi
+        self._p4_45ac70(blk2_t, blk2_c, 0x40)
+        packed = ((blk2_c[0] << 16) | (blk2_t[0] & 0xFFFF)) & 0xFFFFFFFF
+        e.d32(0x28, packed)                             # 0x4099E4/0x4099F0
     if v20 != 0 or v2c != 0:
         if v2c == 0:
             e.d32(0x2C, (1800 * v2c if False else 1800 * e.s32(0x2C) if False else
@@ -20131,12 +20146,22 @@ class Page4Mixin:
 
     @staticmethod
     def p4_45a9a0(dx: int, dy: int) -> int:
-        """`0x45A9A0`（0x401091）：角度表查询——0x45A9A0 附近为 atan2 系
-        （0x41A8D5 调用点把 (Δx,Δy) 映成 0..0x6BF 角）。复刻按 0x45ABB0 系同构
-        处理：|Δ| 归一后查 p4_sin_q 的角度象限。"""
-        import math
-        a = int(math.degrees(math.atan2(dy, dx)) * 10) % 3600
-        return a
+        """`0x45A9A0`（0x401091）：**表驱动 atan**（2026-11-17 换掉 atan2 近似）。
+
+        exe 实参序 (Δy, Δx)=（表行, 表列），本仓库调用点惯例传 (dx, dy)，
+        故此处 row=dy、col=dx。两分量 sar 1 直到 |v|<0x100（双 0 → 0），查
+        0x5B3E38 256×256 字表（0x5D3E38 止）：row≥0,col≥0 → t；row<0,col≥0 →
+        0xE10−t；row≥0,col<0 → 0x708−t；both<0 → t+0x708（0x708=180.0°、0xE10=360.0°）。"""
+        row, col = dy, dx
+        if row == 0 and col == 0:                    # 0x45A9A9
+            return 0
+        while row >= 0x100 or row < -0x100 or col >= 0x100 or col < -0x100:
+            row >>= 1                                # 0x45A9D1 sar（负数向 −∞）
+            col >>= 1
+        t = _p4_atan2_table()[abs(row) * 256 + abs(col)]
+        if row < 0:                                  # 0x45AA26/0x45A9F0 行负
+            return (0xE10 - t) if col >= 0 else (t + 0x708)
+        return (0x708 - t) if col < 0 else t         # 0x45AA15/0x45A9DF
 
     def p4_43B430(self, e, x: int, y: int, dx: int, dy: int, spdarg: int) -> None:
         """`0x43B430`（thunk 0x402144）：5 参 (x, y, dx, dy, spd)——出射点用**传入的
