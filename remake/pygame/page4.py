@@ -13717,7 +13717,7 @@ def _beh_432990(self, e) -> bool:
         else:
             vy -= 4 if vy >= 0 else 1
         e.d32(0x24, vy & 0xFFFFFFFF)
-        if self.p4_430640(par, x, y, 0x10):
+        if self.p4_hit_test(par, x, y, 0x10):         # 0x401843→0x4306C0
             par.d32(0x24, 0)
             e.d32(0x1C, 0)
     if e.g32(0x18) == 0:
@@ -13725,9 +13725,10 @@ def _beh_432990(self, e) -> bool:
         if par2 is not None:
             par2.d32(0x24, 0)
         for _ in range(4):
-            self.spawn(self._p4_q("ui4cc"), 0x41000004,
-                       x + (self.p4_rand() & 0x1F) - 0xF,
-                       y + (self.p4_rand() & 0x1F) - 0xF, 0)
+            jx = (self.p4_rand() & 0x1F) - 0xF
+            jy = (self.p4_rand() & 0x1F) - 0xF
+            # 0x432AC4：位置用 (x,y)，随机偏移作为 rec3/prm 传入
+            self.spawn(self._p4_q("ui4cc"), 0x41000004, x, y, (jx, jy))
         self._p4_4047e0_se(9, (x - 0x140) << 4)
         return False
     if e.node is not None:
