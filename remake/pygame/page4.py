@@ -13829,6 +13829,87 @@ def _p4_m(e):
     return e.m if hasattr(e, "m") else e.raw
 
 
+
+def _beh_41DD70(self, e) -> bool:
+    """`0x41DD70`（thunk 0x4016C7；0x29000007..0B 的入场体）：七态铺 0x29000003 编队。
+
+    首帧（[0x20]==0）按 [0x1C]（态 1..7）铺队；之后 [0x20] 计时：
+    0x10<=t<0x18 → [0x24]++；否则 t∈[[0x28],[0x28]+0x10) → [0x24]−−。
+    尾：x += [0x24]（node dst.x 同步）、[0x20]++；存活 = x>−0x18 && HP!=0。
+    """
+    if e.s32(0x20) == 0:
+        st = e.s32(0x1C)
+        if 1 <= st <= 7:
+            v = st - 1
+            if st in (1, 7):
+                e.d32(0x28, 0xFA)
+                y0 = 0xFFFFFFE8 if v == 0 else 0x1F8
+                for i in range(8):
+                    self._p4_ent43c(0x29000003, 0x28 + i * 0x50, y0)
+            elif st == 2:
+                e.d32(0x28, 0x122)
+                for i in range(8):
+                    self._p4_ent43c(0x29000003, 0x298 + i * 0x21, 0x30)
+            elif st == 3:
+                e.d32(0x28, 0x15E)
+                self._p4_ent43c(0x29000003, 0x298, 0xF0)
+                yy = 0xC0
+                while True:
+                    self._p4_ent43c(0x29000003, 0x2C8, yy)
+                    if yy + 0x60 > 0x120:
+                        break
+                    yy += 0x60
+                yy = 0x90
+                while True:
+                    self._p4_ent43c(0x29000003, 0x2F8, yy)
+                    if yy + 0xC0 > 0x150:
+                        break
+                    yy += 0xC0
+                yy = 0x60
+                while True:
+                    self._p4_ent43c(0x29000003, 0x328, yy)
+                    if yy + 0x60 > 0x180:
+                        break
+                    yy += 0x60
+            elif st == 4:
+                e.d32(0x28, 0x15E)
+                cnt = 0
+                yy = -0x40
+                while cnt <= 4:
+                    self._p4_ent43c(0x29000003, 0x2C0, yy)
+                    if yy != e.s32(0x08):
+                        self._p4_ent43c(0x29000003, 0x2C0, yy)
+                    yy += 0x60
+                    cnt += 1
+            elif st == 5:
+                e.d32(0x28, 0x168)
+                yy = -0x78
+                while yy >= -0x3C0:
+                    self._p4_ent43c(0x29000003, 0x140, yy)
+                    yy -= 0x78
+            else:   # st == 6
+                e.d32(0x28, 0x122)
+                for i in range(8):
+                    xx = 0x2A8 + i * 0x50
+                    self._p4_ent43c(0x29000003, xx, 0x1FE + i * 0x3C)
+                    self._p4_ent43c(0x29000003, xx, -0x1E - i * 0x3C)
+    else:
+        t = e.s32(0x20)
+        if 0x10 <= t < 0x18:
+            e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
+        else:
+            base = e.s32(0x28)
+            if base <= t < base + 0x10:
+                e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+    vx = e.s32(0x24)
+    x = (e.s32(0x04) + vx) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + vx, e.node.dst[1])
+    return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
+
+
 P4_BEH: dict[int, object] = {
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
@@ -13884,7 +13965,8 @@ P4_BEH: dict[int, object] = {
     0x411AD0: _beh_411AD0, 0x4115B0: _beh_4115B0,
     0x412510: _beh_412510, 0x419EC0: _beh_419EC0,
     0x41E7B0: _beh_41E7B0, 0x4185C0: _beh_4185C0,
-    0x417940: _beh_417940, 0x417F30: _beh_417F30,   # 0x29 护卫状态机 / 0x27 帧表发射器
+    0x417940: _beh_417940, 0x417F30: _beh_417F30,
+    0x41DD70: _beh_41DD70,   # 0x29 护卫状态机 / 0x27 帧表发射器
     0x41CF70: _beh_41CF70, 0x41F780: _beh_41F780,   # 0x29 两段横穿 / 0x29 回旋镖
     0x4194A0: _beh_4194A0, 0x419540: _beh_419540,   # 0x28 定高左退 / 抛物线跳跳
     0x41A220: _beh_41A220,                          # 0x28 减速下坠纵摆
