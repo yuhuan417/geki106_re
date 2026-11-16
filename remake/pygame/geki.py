@@ -1872,14 +1872,18 @@ class Pages(Page4Mixin):
 
     # ---- 页12：中间页（鍛錬 mode：页13 选人后 → 页12 → 页4/页15）--------------
     def page12_enter(self) -> None:
-        """`0x4536E0` 全序列（2026-11-11 按反汇编订正）：
+        """`0x4536E0` 全序列（2026-11-16 按反汇编复核）：
 
         亮度/对比度字段(0x4AB5B8) ×4-0xC8 → 0x44CDF0(2, 参) 调色板2 →
-        0x44C640(13, 0x2B)（层13 ← bm_s1lg 关卡大字）→ 0x44CE60(13, 0) →
+        0x44C640(13, 0x2B)（层13 ← bm_s1lg）→ 0x44CE60(13, 0) →
         0x44E620(预设 4 @(0x140, 0xF0)) → 0x44EDA0(0) → **[0x4AB5C8]=0** →
-        0x458D60 场景重置 → 0x5F000014 @(0,0) prm=0 入 0x4AD4FC →
-        0x45C740(0x4AB5CC, 0, &buf) 排行榜读 → 0x401C99 →
-        0x45FE10(0x4100000D, 项+0x4C) 放大窗 → SetPeriod(**0**)（失败旗标 0x40）。"""
+        0x458D60 场景重置 → 0x5F000014（desc 全 0）入 0x4AD4FC →
+        0x45C740(0x4AB5CC, 0, &buf) 记录读取 → 0x401C99 记录流复位 →
+        **0x45FE10(项+0x4C, 0x4100000D) 应用关卡场景** →
+        SetPeriod(0)（失败旗标 0x40）。
+
+        注：0x44C640(13,0x2B) 的绑定随即被 0x45FE10 的 0x44CEE0（释放 14 层）抹掉；
+        层13 要到状态8 的 0x449E10(stage,0xB5) 才重新装 bm_tr。"""
         self.flags.clear()
         self.screen_fill = -1
         self.pal = self.data and self._load_pal(2)
@@ -1890,17 +1894,21 @@ class Pages(Page4Mixin):
         self.inp.set_preset4(4, (0x140, 0xF0))
         self.inp.set_mode(0)                          # 0x44EDA0(0)
         self.theatre = 0                              # 0x45379C [0x4AB5C8] = ebx = 0
+        self.p4_stat[0x4AB5C8] = 0                    # 同一地址的字节镜像（页12_finish 读它）
         self.scene_reset()                            # 0x4537A2 → 0x458D60
         st = self.p4_stat
         m = self.spawn(self.ui4fc, 0x5F000014)        # 0x4537A8..0x4537D3
-        # ⚠ 不可覆写 beh：spawn 的 ctor 分派（idx 18）已置 "stage_title12"
-        #（行为 0x426340 九态选关机，兼管 0x449E10 舞台文字更新）。
-        # 旧代码在这里改成 "stage_text"（无此分派）⇒ 状态机失联，鍛錬停在「第一幕 市街」。
+        # 0x5F000014 的 ctor（idx 18）自配节点、行为就是 0x426340（九态选关机）——不可覆写。
         entry = self.p4_45c740_entry(0)               # 0x4537DC 0x45C740(0x4AB5CC, 0, &buf)
         st["45c740_buf"] = entry
         self.stream_reset()                           # 0x4537E8 0x401C99 → 0x45FB80
-        zoom = int.from_bytes(entry[0x4C:0x50], "little")
-        self._p4_43c9c2(None, None, zoom)             # 0x4537F1 0x45FE10(0x4100000D, 项+0x4C)
+        # 0x4537F1..0x453809：`0x45FE10(0x4100000D, 项+0x4C)` —— **应用场景**（不是命中结算）。
+        # 项+0x4C = 该记录附件的内存指针；复刻侧不持久化 0x4AB5CC 的附件表，默认附件
+        # = 资源记录 #0x4E（0x45C360 的默认记录构造：malloc size(0x4E) + 0x45DDA0(0x4E) 模板）
+        # = pages_data.json 的 scene0（14 层/168 色带/74 背景实体）＝页3 的街市场景。
+        # ⚠ 旧实现误调 `_p4_43c9c2`（0x43C9C2 是命中反应函数，参数是弹/靶指针），
+        # 传 None 时因 k=0 直接返回 ⇒ 页12 永远不装场景 ⇒ 黑底（用户实测）。
+        self.apply_scene(self.data["scene0"])         # 0x4537F1 → 0x45FE10
         if not self.timer.set_period(0):              # 0x45380E 0x45A490(0)
             self.flags.set(FLAG_EXIT)                 # 0x45381E 0x45AF30(0x40)
 
@@ -2467,11 +2475,34 @@ class Pages(Page4Mixin):
                 e.disp = DisplayNode(0x0D,
                                      [left, 0x88 + 0x28 * k, left + w, 0xA7 + 0x28 * k],
                                      [MENU_ROW_DSTX[row], 0x118 + 0x30 * k])
-            elif idx == 18:                       # 0x5F000014：舞台文字（鍛錬 中间页的大字）
-                # 页12 的关卡标题：层 13（bm_s1lg）的 (0,0)-(0x1FF,0x7F) 128×64 大字
-                # dst 居中 (0x70, 0x50)，0x4294A1 的 0x4100000D 放大窗效果
+            elif idx == 18:                       # 0x5F000014 ctor 0x424D47：选关机总控（层13）
+                # ctor：`0x45A750(node, 0,0,0,0)` ⇒ 矩形全 0（状态8 才按 stage 写入）、
+                # dst = `0x45A690(0xE0, 0xD0)` ⇒ (0xE0,0xD0)，`[0x1C]=[0x24]=0`。
+                # ⚠ 旧实现按 bm_s1lg 的 512×128 大字 @(0x70,0x50) 建模——那是页4 开场
+                # 的舞台标题图层，不是选关机（用户实测页12 只剩「第一幕 街市」黑底）。
                 e.beh = "stage_title12"
-                e.disp = DisplayNode(13, [0, 0, 0x1FF, 0x7F], [0x70, 0x50])
+                e.a3 = 0                          # [+0x1C] 状态
+                e.a4 = 0                          # [+0x24] 状态内计时
+                e.disp = DisplayNode(13, [0, 0, 0, 0], [0xE0, 0xD0])
+            elif idx == 19:                       # 0x5F000015 ctor 0x424DA5：关卡预览块
+                # 层13、rect (0,0,0,0)、dst (0x120,0xD0)、`[0x1C]=[0x20]=[0x24]=0`；
+                # 行为 0x426910 每帧用 `[0x20]<<6` 取 64×64 源块（bm_tr 的关卡编号列）。
+                e.beh = "stage_preview12"
+                e.a3 = e.a4 = e.aux = 0
+                e.disp = DisplayNode(13, [0, 0, 0, 0], [0x120, 0xD0])
+            elif idx == 20:                       # 0x5F000016 ctor 0x424E06：難易度标签（三元组历史）
+                # 层13、`0x45A750(0,0x100,0x8F,0x12F)`（注意压栈序 b,r,t,l）、
+                # dst (0x18,0x18)、历史三元组清零；行为 0x4269B0（可见 = `[0x1C]<8`）。
+                e.beh = "stage_hist12"
+                e.a3 = e.a4 = e.aux = 0
+                e.disp = DisplayNode(13, [0, 0x100, 0x8F, 0x12F], [0x18, 0x18])
+            elif idx == 21:                       # 0x5F000017 ctor 0x424E6D：周目/关卡文字条
+                # 层13、dst (0xC0,0x18)、`[0x28] = word[0x4AB5CA] * 0x180`（周目滚动量）、
+                # 其余 0；行为 0x4269F0 每帧按目标周目滚动 48px 宽的纵条。
+                e.beh = "stage_text12"
+                e.a3 = e.a4 = e.aux = 0
+                e.p["v28"] = self._stage_week() * 0x180
+                e.disp = DisplayNode(13, [0, 0, 0, 0], [0xC0, 0x18])
             elif idx == 25:                       # 0x5F00001B ctor 0x424EDB
                 # 选中槽的**高亮框**：每帧按 0x45AFC0(0x4AB5B0,0xC000) 重建源矩形
                 # （层3 bm_psel 的第 slot+5 条 48px 带），dst 固定 (0, 0x1C0)。
@@ -2586,6 +2617,12 @@ class Pages(Page4Mixin):
                 self._menu_row(e)
             elif e.beh == "stage_title12":
                 self._stage_title12(e)
+            elif e.beh == "stage_preview12":
+                self._stage_preview12(e)
+            elif e.beh == "stage_hist12":
+                self._stage_hist12(e)
+            elif e.beh == "stage_text12":
+                self._stage_text12(e)
             elif e.beh == "scene_bg":
                 self._scene_bg(e)
             elif e.beh == "fade_in":
@@ -4690,125 +4727,201 @@ class Pages(Page4Mixin):
 
     # 0x4258F0（0x5F000006 的行为）：只改节点可见位 [node+0x1C]
     def _stage_title12(self, e: UiEntity) -> None:
-        """0x5F000014 → 行为 0x426340：**鍛錬选关机九态机**（2026-11-12 落地）。
+        """0x5F000014 → 行为 0x426340：**鍛錬选关机九态机**（2026-11-16 按 0x424D47/0x426340 复核）。
 
-        状态（跳表 0x4267B0，`[ent+0x1C]`）：
+        入口公共段（0x42634B）：`[0x24]--`，新值作为 ecx 传给状态体（所以
+        「置 [+0x24]=N、态=X」都是在 **N 帧后**才动作）。跳表 0x4267B0：
         ```
-        0=0x426367  生成面板 + 0x61000005(-255→0) 淡入；[+0x24]=2、态=8
-        8=0x426463  0x449E10(stage,0xB5) 显示更新 + 0x61000005(-255→0,+16)；
-                    [+0x24]=0x10、态=1；按 stage 与 7 比较写 [flags+4] 矩形
-        1/3/5=0x426556  [ent+0x24] 到 0 → 0x44E470(320,240) 指针归中 → 态+1
-        2=0x426585  输入：指针 |x-320|>0x50 → 关卡 ±(x≥320?1:-1)，界 = (0x70000!=0)+0xF00000，
-                    <0→界-1、≥界→0，写 word[0x4AB5C8]、态=7；
-                    |y-240|>0x50 → 周目 ±(y≥0xA0?1:-1)，界 = 关卡<8 ? 4+bit31 : min(0x70000,4)，
-                    回绕，写 word[0x4AB5CA]；居中：btn0 沿 → 态=3（0x61000005(-16)、[+0x24]=0x10）；
-                    btn1 沿 → 态=5
+        0=0x426367  生成 0x5F000015/16/17 入 0x4AD4FC + 0x61000005(-255,-255,0) 压暗；
+                    [+0x24]=2、态=8
+        8=0x426463  ecx==0 才动作：0x449E10(stage,0xB5)（=应用关卡场景 + 层13←bm_tr）
+                    + 0x61000005(-255→0,+16) 淡入；[+0x24]=0x10、态=1；
+                    按 stage<7 / ==7 / >7 写主实体矩形（0,0x40/0x80/0xC0,0xBF,…）
+        1/3/5=0x426556  ecx==0 → 0x44E470(320,240) 指针归中 → 态+1
+        2=0x426585  输入（见下）；横移 → 态=7；纵移不换态
+        4=0x42678E  0x45AF30(0x4AB5C0, 0x10000) —— 选定，页12 收尾去页4/页15
+        6=0x426795  0x45AF30(0x4AB5C0, 0x200) —— 取消，回页3
         7=0x42640C  0x61000005(-255,-255,0) 压暗；[+0x24]=2、态=8
-        3=0x426556  同 1 → 态 4
-        4=0x42678E  `0x45AF30(0x4AB5C0, 0x10000)` —— 选定完毕，页12 收尾去页4/页15
-        5=0x426556  同 1 → 态 6
-        6=0x426795  `0x45AF30(0x4AB5C0, 0x200)` —— 取消，回页3
+        >8=0x4267A4  空转（返回 1）
         ```
-        界限：关卡 0..((0x4AB5B0 的 0x70000 字段!=0) + 0xF00000 字段) - 1（回绕）；
-        周目 = 关卡<8 ? 0..(4+bit31)-1 : 0..min(0x70000,4)-1（`0x42664C..0x426695`）。
+        态 2 输入（0x426585，用 `[0x4AB59C]/[0x4AB5A0]` 虚拟指针）：
+        `|x-320|>0x50` → 关卡 ±(x≥320?1:-1)，界 = (0x70000 字段!=0)+0xF00000 字段，
+        <0→界-1、≥界→0；新关==8 时清周目 word；
+        `|y-240|>0x50` → 周目 ±(y≥0xA0?1:-1)，界 = 关<8 ? 4+bit31 : min(0x70000,4)；
+        居中：btn0 沿 → 态=3、btn1 沿 → 态=5（两者都生成 0x61000005(-255,0,-16)、
+        [+0x24]=0x10）——注意 rec3 是 **-16**，压栈序见 0x4266F8。
         """
-        import random as _r
+        # 0x42634B..0x426360：公共计时器先自减，再按状态派发
+        e.a4 -= 1
+        ecx = e.a4
         st = e.a3
-        # 态 2 的输入分支（0x426585）
-        if st == 2:
-            px, py = int(self.inp.x) & 0xFFFFFFFF, int(self.inp.y) & 0xFFFFFFFF
-            moved = False
-            if abs(px - 0x140) > 0x50:                       # 0x42658B..0x426596 横向
-                f7 = self.keys.field(0x70000)                # 0x42659F..0x4265AE 0x45AFC0(…,0x70000)
-                fF = self.keys.field(0xF00000)               # 0x4265B0..0x4265BE 0x45AFC0(…,0xF00000)
-                limit = (1 if f7 else 0) + fF                # 0x4265CB esi = (f7!=0)+fF
-                stage = self.theatre & 0xFFFF                # word[0x4AB5C8]（0x4265D5 mov edx,…）
-                stage += 1 if px >= 0x140 else -1            # 0x4265DB..0x4265E2 setge/dec/and/inc
-                if stage < 0:
-                    stage = limit - 1                        # 0x4265E9 lea eax,[esi-1]
-                elif stage >= limit:                         # 0x4265EC cmp ax,si / jl
-                    stage = 0                                # 0x4265F1 xor eax,eax
-                if stage == 8:
-                    self.theatre = (self.theatre & 0xFFFF0000)  # 0x426612 word[0x4AB5CA]=0
-                self.theatre = (self.theatre & 0xFFFF0000) | (stage & 0xFFFF)
-                self.p4_stat[0x4AB5C8] = self.theatre        # 0x4265F4/0x42661B word 写回
-                st = 7                                       # 0x4265FA/0x426622 mov dword[ebx+0x1C],7
-                moved = True
-            elif abs(py - 0xF0) > 0x50:                      # 0x426634..0x426646 纵向
-                if (self.theatre & 0xFFFF) < 8:              # 0x42664C cmp word[0x4AB5C8],8
-                    bit31 = self.keys.test(0x80000000)       # 0x426656..0x426666 0x45AFC0(…,0x80000000)
-                    lim = 4 + (1 if bit31 else 0)            # 0x42666B add eax,4
-                else:                                        # 0x426670..0x426695
-                    f7 = self.keys.field(0x70000)
-                    lim = min(f7, 4)                         # 0x42667F cmp eax,4 / jae
-                lp = (self.theatre >> 16) & 0xFFFF           # word[0x4AB5CA]（0x4266B0 add cx,…）
-                delta = 1 if py >= 0xA0 else -1              # 0x4266A2 cmp esi,0xA0 / setge
-                lp += delta
-                if lp < 0:
-                    lp = lim - 1                             # 0x4266BC lea ecx,[eax-1]
-                elif lp >= lim:                              # 0x4266C2 cmp edx,eax / jl
-                    lp = 0                                   # 0x4266C6 xor ecx,ecx
-                self.theatre = (self.theatre & 0xFFFF) | ((lp & 0xFFFF) << 16)
-                self.p4_stat[0x4AB5C8] = self.theatre        # 0x4266C8 word[0x4AB5CA] 写回
-                self.inp.set_pos(0x140, 0xF0)                # 0x4266CF 0x44E470 指针归中
-                return True                                  # 0x4266E5 mov al,1（保持存活）
-                self.inp.set_pos(0x140, 0xF0)                # 0x4266CF 0x44E470 指针归中
-                return True                                  # 0x4266E5 mov al,1（保持存活）
-            elif self.inp.rec.e0:                            # 0x4266EF byte[0x4AB596]
-                e.a3 = 3                                     # 0x44670E mov dword[ebx+0x1C],3
-                e.a4 = 0x10                                  # 0x42673A [+0x24]=0x10
-                self.spawn_flash(-255, -255, 0x10)           # 0x4266F8 淡入门
-                return True
-            elif self.inp.rec.e1:                            # 0x42674C byte[0x4AB597]
-                e.a3 = 5
-                e.a4 = 0x10
-                self.spawn_flash(-255, -255, 0x10)
-                return True
-            if moved:
-                e.a3 = 7                                     # 0x4265FA/0x426622 态=7（压暗）
-                e.a4 = 2                                     # 0x42644A？—— 7 态 [+0x24]=2 → 态 8
+        if st > 8:
+            return True                                   # 0x4267A4 尾部
+        if st == 0:                                       # 0x426367
+            self.spawn(self.ui4fc, 0x5F000015)            # 0x42637A 关卡预览块
+            self.spawn(self.ui4fc, 0x5F000016)            # 0x4263B1 选择器历史条
+            self.spawn(self.ui4fc, 0x5F000017)            # 0x4263E8 周目/关卡文字条
+            self.spawn_flash(-255, -255, 0)               # 0x426425 0x61000005(-255,-255,0)
+            e.a4 = 2                                      # 0x42644A [+0x24]=2
+            e.a3 = 8                                      # 0x426451 态=8
             return True
-        # 态 4：选定 → 0x10000（0x42678E push 0x10000 / 0x45AF30）
-        if st == 4:
+        if st == 8:                                       # 0x426463
+            if ecx != 0:
+                return True                               # 0x426465..0x426469：计时未尽
+            stage = self.theatre & 0xFFFF                 # 0x42646B movsx word[0x4AB5C8]
+            # 0x426472..0x42647A：0x449E10(ent, stage, 0xB5)
+            #   = 0x45C740(0x4AB5CC,stage) → 0x45FE10(项+0x4C, 0x4100000D) → 层13←资源0xB5
+            #     (bmetc\bm_tr.ggd) + 色键0。
+            #   复刻侧不持久化 0x4AB5CC 的附件表；默认附件 = 资源记录 #0x4E = scene0。
+            self.apply_scene(self.data["scene0"])
+            self.layers.bind(13, 0xB5)                    # 0x44C640(层13, 0xB5) = bm_tr
+            self.layers.color_key(13, 0)                  # 0x44CE60(13, 0)
+            self.spawn_flash(-255, 0, 0x10)               # 0x42647F..0x4264BA 淡入
+            if stage < 7:                                 # 0x4264D3 cmp ax,7 / jge
+                e.disp.rect = [0, 0x40, 0xBF, 0x7F]       # 0x4264D9 push 0x7F,0xBF,0x40,0
+            elif stage == 7:                              # 0x4264EE jne
+                e.disp.rect = [0, 0x80, 0xBF, 0xBF]       # 0x4264F0 push 0xBF,0xBF,0x80,0
+            else:
+                e.disp.rect = [0, 0xC0, 0xBF, 0xFF]       # 0x42653B push 0xFF,0xBF,0xC0,0
+            e.a4 = 0x10                                   # 0x4264BF [+0x24]=0x10
+            e.a3 = 1                                      # 0x4264C6 态=1
+            return True
+        if st in (1, 3, 5):                               # 0x426556
+            if ecx != 0:
+                return True                               # 0x426558 jne 尾部
+            self.inp.set_pos(0x140, 0xF0)                 # 0x426563 0x4013DE(0x4AB454,320,240)
+            e.a3 = st + 1                                 # 0x426578 inc
+            return True
+        if st == 2:                                       # 0x426585
+            px, py = int(self.inp.x), int(self.inp.y)
+            if abs(px - 0x140) > 0x50:                    # 0x42658B..0x426596 横向
+                f7 = self.keys.field(0x70000)             # 0x42659F..0x4265AE
+                fF = self.keys.field(0xF00000)            # 0x4265B0..0x4265BE
+                limit = (1 if f7 else 0) + fF             # 0x4265CB esi
+                stage = self.theatre & 0xFFFF             # 0x4265D5 word[0x4AB5C8]
+                stage += 1 if px >= 0x140 else -1         # 0x4265DB..0x4265E2
+                if stage < 0:
+                    stage = limit - 1                     # 0x4265E9 lea eax,[esi-1]
+                elif stage >= limit:                      # 0x4265EC cmp ax,si / jl
+                    stage = 0                             # 0x4265F1 xor eax,eax
+                if stage == 8:                            # 0x42660C cmp ax,8 / jne
+                    self.theatre &= 0xFFFF0000            # 0x426612 word[0x4AB5CA]=0
+                self.theatre = (self.theatre & 0xFFFF0000) | (stage & 0xFFFF)
+                self.p4_stat[0x4AB5C8] = self.theatre     # 0x4265F4/0x42661B word 写回
+                e.a3 = 7                                  # 0x4265FA/0x426622
+                return True
+            if abs(py - 0xF0) > 0x50:                     # 0x426634..0x426646 纵向
+                if (self.theatre & 0xFFFF) < 8:           # 0x42664C cmp word[0x4AB5C8],8
+                    bit31 = self.keys.test(0x80000000)    # 0x426656..0x426666
+                    lim = 4 + (1 if bit31 else 0)         # 0x42666B add eax,4
+                else:                                     # 0x426670..0x426695
+                    lim = min(self.keys.field(0x70000), 4)  # 0x42667F cmp eax,4 / jae
+                lp = (self.theatre >> 16) & 0xFFFF        # 0x4266B0 word[0x4AB5CA]
+                lp += 1 if py >= 0xA0 else -1             # 0x4266A2 cmp esi,0xA0 / setge
+                if lp < 0:
+                    lp = lim - 1                          # 0x4266BC lea ecx,[eax-1]
+                elif lp >= lim:                           # 0x4266C2 cmp edx,eax / jl
+                    lp = 0                                # 0x4266C6 xor ecx,ecx
+                self.theatre = (self.theatre & 0xFFFF) | ((lp & 0xFFFF) << 16)
+                self.p4_stat[0x4AB5C8] = self.theatre     # 0x4266C8 word[0x4AB5CA] 写回
+                self.inp.set_pos(0x140, 0xF0)             # 0x4266CF 0x44E470 指针归中
+                return True                               # 0x4266E5 mov al,1
+            if self.inp.rec.e0:                           # 0x4266EF byte[0x4AB596]
+                e.a3 = 3                                  # 0x42670E
+                self.spawn_flash(-255, 0, -0x10)          # 0x4266F8 desc{-255,0,-16}
+                e.a4 = 0x10                               # 0x42673A [+0x24]=0x10
+                return True
+            if self.inp.rec.e1:                           # 0x42674C byte[0x4AB597]
+                e.a3 = 5                                  # 0x42676B
+                self.spawn_flash(-255, 0, -0x10)          # 0x426755 同 btn0
+                e.a4 = 0x10
+                return True
+            return True                                   # 0x4267A4 尾部
+        if st == 4:                                       # 0x42678E
             self.flags.set(0x10000)
             return True
-        # 态 6：取消 → 0x200（0x426795 push 0x200 / 0x45AF30）
-        if st == 6:
+        if st == 6:                                       # 0x426795
             self.flags.set(0x200)
             return True
-        # 态 1/3/5（0x426556）：[ent+0x24] 到 0 → 0x44E470(320,240) 归中 → 态+1
-        if st in (1, 3, 5):
-            if e.a4 == 0:
-                self.inp.set_pos(0x140, 0xF0)                # 0x426563 0x4013DE(0x4AB454,0x140,0xF0)
-                e.a3 = st + 1                                # 0x426578 inc eax
-            else:
-                e.a4 -= 1                                    # 0x42656E dec（[ent+0x24] 倒数）
+        if st == 7:                                       # 0x42640C
+            self.spawn_flash(-255, -255, 0)               # 0x426425
+            e.a4 = 2                                      # 0x42644A
+            e.a3 = 8                                      # 0x426451
             return True
-        # 态 7（0x42640C）：压暗保持，[+0x24]=2 → 态 8
-        if st == 7:
-            self.spawn_flash(-255, -255, 0)                  # 0x42640C..0x426444（保持压暗）
-            if e.a4 == 0:
-                e.a4 = 2                                     # 0x42644A [+0x24]=2
-                e.a3 = 8                                     # 0x426451 [ebx+0x1C]=8
-            else:
-                e.a4 -= 1
-            return True
-        # 态 8（0x426463）：0x449E10(stage,0xB5) 显示更新 + 0x61000005(-255→0,+16)、[+0x24]=0x10、态=1
-        if st == 8:
-            stage = self.keys.field(0xFFFF)
-            self.spawn_flash(-255, 0, 0x10)                  # 0x42647F..0x4264BA 淡入
-            e.a4 = 0x10                                      # 0x4264BF [+0x24]=0x10
-            e.a3 = 1                                         # 0x4264C6 [ebx+0x1C]=1
-            e.p["disp_stage"] = stage                        # 0x4264CD/0x4264D3 stage→矩形
-            return True
-        # 态 0（0x426367）：面板生成 + 淡入 → [+0x24]=2、态=8
-        if st == 0:
-            self.spawn_flash(-255, 0, 8)                     # 0x42639B 0x61000005(-255,0,8)
-            e.a4 = 2                                         # 0x42644A？—— 0x426449 处 [+0x24]=2
-            e.a3 = 8                                         # 0x42644A/0x426451 [ebx+0x1C]=8
-            return True
-        e.t += 1
         return True
+
+    # ---- 页12 三个副实体 ----------------------------------------------------
+    def _stage_week(self) -> int:
+        """`movsx word[0x4AB5CA]`：周目计数（有符号 16 位）。"""
+        w = (int(self.theatre) >> 16) & 0xFFFF
+        return w - 0x10000 if w & 0x8000 else w
+
+    def _stage_preview12(self, e: UiEntity) -> None:
+        """0x426910（0x5F000015）：关卡预览块。
+
+        `[0x1C] < 7` 才显示；源块 = (`[0x20]<<6`, 0, +0x3F, 0x3F)（bm_tr 的 64×64 关卡列）。
+        随后历史移位 `[0x1C]←[0x20]←[0x24]←word[0x4AB5C8]`。
+        """
+        d = e.disp
+        if e.a3 < 7:                                      # 0x426916 cmp [esi+0x1C],7 / jge
+            idx = int(e.a4)                               # 0x42691C [esi+0x20]
+            if d is not None:
+                d.rect = [idx * 0x40, 0, idx * 0x40 + 0x3F, 0x3F]   # 0x426924..0x426932
+                d.active = True                           # 0x42695D byte[node+0x1C]=1
+        else:
+            if d is not None:
+                d.active = False                          # 0x426966 byte[node+0x1C]=0
+        e.a3 = e.a4                                       # 0x42696A..0x426976
+        e.a4 = e.aux
+        e.aux = self.theatre & 0xFFFF
+
+    def _stage_hist12(self, e: UiEntity) -> None:
+        """0x4269B0（0x5F000016）：选择器历史条（固定矩形 0,0x100,0x8F,0x12F）。
+
+        可见 = `[0x1C] < 8`；随后与预览块相同的三元组移位更新。
+        """
+        if e.disp is not None:
+            e.disp.active = e.a3 < 8                      # 0x4269B6 cmp/setl
+        e.a3 = e.a4                                       # 0x4269BF..0x4269C5
+        e.a4 = e.aux
+        e.aux = self.theatre & 0xFFFF                     # 0x4269CB..0x4269D2
+
+    def _stage_text12(self, e: UiEntity) -> None:
+        """0x4269F0（0x5F000017）：难度/附加关模式带（bm_tr 的 48px 横带）。
+
+        `target = word[0x4AB5CA] * 0x180`（周目×0x180，滚动量 = 周目×48px）；
+        `[0x28]` 每帧向 target 逼近 `(|Δ|+7)>>3`；`[0x20]>=8 且 [0x1C]<8` ⇒ 归零。
+        v = `[0x28] >> 3`；源带 = (`0xC0`, `0x40+v`, `0x11F`, `0x6F+v`)（初級/中級/上級/特級/悪夢），
+        dst.x = 0xC0。`[0x1C]>=8`（附加关）时 dst.x=0x18，且 `0x45A790` 把源带加
+        (0x60,0,0x90,0) ⇒ (`0x120`, `0x40+v`, `0x1AF`, `0x6F+v`)（一騎討/辛口/元祖/元祖改）。
+        尾段同样是三元组移位。
+        """
+        target = self._stage_week() * 0x180               # 0x4269F0..0x426A00
+        cur = int(e.p.get("v28", 0))
+        if cur < target:                                  # 0x426A06 cmp / jge
+            cur += (target - cur + 7) >> 3                # 0x426A0A..0x426A14
+        elif cur > target:                                # 0x426A19 jle
+            cur -= (cur - target + 7) >> 3                # 0x426A1B..0x426A27
+        if e.a4 >= 8 and e.a3 < 8:                        # 0x426A2A..0x426A36
+            cur = 0
+        e.p["v28"] = cur
+        v = cur >> 3                                      # 0x426A3D sar eax,3
+        d = e.disp
+        if e.a3 >= 8:                                     # 0x426A83..0x426AB3
+            if d is not None:
+                d.dst[0] = 0x18                           # 0x426A99 [node+0x14]=0x18
+                # 0x426A90: 0x45A790(grow) 0,0x90,0,0x60 叠加在 (0xC0,t,0x11F,b) 上
+                # ⇒ (0x120, t, 0x1AF, b)：附加关用右侧「一騎討/辛口/元祖/元祖改」列
+                d.rect = [0x120, 0x40 + v, 0x1AF, 0x6F + v]
+        else:
+            if d is not None:
+                d.dst[0] = 0xC0                           # 0x426AB6 [node+0x14]=0xC0
+                # 0x426A49..0x426A5C 压栈序 (r,b,l,0xC0) ⇒ rect
+                # = (0xC0, 0x40+v, 0x11F, 0x6F+v)＝难度带（初級/中級/上級/特級/悪夢）
+                d.rect = [0xC0, 0x40 + v, 0x11F, 0x6F + v]
+        e.a3 = e.a4                                       # 0x426ABD..0x426AC9
+        e.a4 = e.aux
+        e.aux = self.theatre & 0xFFFF
 
     def _menu_row(self, e: UiEntity) -> None:
         """0x4258F0：可见 = 列位相同 且 (行 != 选中 或 选中项闪烁)。
