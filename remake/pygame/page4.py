@@ -1109,6 +1109,9 @@ class Ent:
             self.d32(0x28, 0)
         if "z20" in info:
             self.d32(0x20, 0)
+        if info.get("node_off"):                       # ctor 只把 node.active 清 0
+            if self.node is not None:
+                self.node.active = 0
         if info.get("b10_eq0"):                        # byte[0x10] = (rec3 == 0)（0x413CA4）
             self.m[0x10] = 1 if d == 0 else 0
         if info.get("node_vis_eq0"):                   # node.active = (rec3 == 0)（0x413CC0）
@@ -2448,7 +2451,7 @@ ENT29_INIT = {
     0x29000003: {"beh": 0x401758, "d_to": 0x1C, "r0_20": True, "r1_24": True,
                  "imm": {0x28: 0, 0x2C: 0}},
     0x29000004: {"beh": 0x4015A5, "imm": {0x1C: 0, 0x20: 0x10}},
-    0x29000005: {"beh": 0x40134D},
+    0x29000005: {"beh": 0x40134D, "b10_0": True, "node_off": True},
     0x29000006: {"beh": 0x401D7F},
     0x29000007: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
     0x29000008: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
@@ -2456,17 +2459,17 @@ ENT29_INIT = {
     0x2900000A: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
     0x2900000B: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
     0x2900000C: {"beh": 0x40211C},
-    0x2900000D: {"beh": 0x4011EF},
+    0x2900000D: {"beh": 0x4011EF, "d_to": 0x1C},
     0x2900000E: {"beh": 0x4021C6, "imm": {0x28: 0x40}},
     0x2900000F: {"beh": 0x4019D8, "d_to": 0x1C},
     0x29000010: {"beh": 0x401EFB},
     0x29000011: {"beh": 0x4010BE, "imm": {0x1C: 0, 0x20: 0x10, 0x24: -2}},
-    0x29000012: {"beh": 0x4023A1, "z1c": True},
+    0x29000012: {"beh": 0x4023A1, "z1c": True, "d_to": 0x20},
     0x29000013: {"beh": 0x4017E9, "z1c": True},
-    0x29000014: {"beh": 0x4018CF, "z1c": True},
+    0x29000014: {"beh": 0x4018CF, "z1c": True, "d_to": 0x20},
     0x29000015: {"beh": 0x401398, "imm": {0x24: -8}, "d_to": 0x28},
     0x29000016: {"beh": 0x4018A7},
-    0x29000017: {"beh": 0x40217B, "imm": {0x1C: 0, 0x20: 0x10}},
+    0x29000017: {"beh": 0x40217B, "imm": {0x1C: 0, 0x20: 0x10}, "d_to": 0x24},
     # —— 0x29000018..0x29000021（2026-11-11 按各自 ctor case 重读修正）——
     # 0x29000018（0x41C5CC）：+0x1C=(p3!=0)?0x8000:0、+0x20=0、+0x24=p0<<2、+0x28=p1<<2、+0x2C/30=0
     0x29000018: {"beh": 0x4013C5, "imm": {0x20: 0, 0x2C: 0, 0x30: 0},
@@ -7073,11 +7076,12 @@ def _beh_41D080(self, e) -> bool:
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
     if t == 1:
+        _h = id(e) & 0x7FFFFFFF
+        self.p4_links[_h] = e
         for dx, dy in ((-0xA0, 0), (0x36, -0xAA), (0x5C, -0x30),
                        (-0x3A, -0x5A), (0x60, 0x4C), (-0x16, 0x4C)):
-            c = self._p4_ent43c(0x29000003, e.s32(0x04) + dx, e.s32(0x08) + dy)
-            c.d32(0x18, (id(e) & 0x7FFFFFFF))    # prm = 父指针（句柄）
-            getattr(self, "p4_links", {})[id(e) & 0x7FFFFFFF] = e
+            # ctor 0x41C0D1：[0x1C]=rec3(父)、[0x20]=rec0(dx)、[0x24]=rec1(dy)
+            self._p4_ent43c(0x29000003, dx, dy, _h)
     ph = e.s32(0x20)
     if ph == 0:
         x = (e.s32(0x04) - 1) & 0xFFFFFFFF
@@ -7201,7 +7205,7 @@ def _beh_41D330(self, e) -> bool:
                 e.d32(0x28, (e.s32(0x28) + e.s32(0x2C)) & 0xFFFFFFFF)
                 if e.s32(0x2C) > 4:
                     e.d32(0x2C, (e.s32(0x2C) - 4) & 0xFFFFFFFF)
-        if parent.m[0x34] != 0 or e.g32(0x18) == 0:
+        if parent.m[0x34] == 0 or e.g32(0x18) == 0:   # 0x41D68F 父死才断链
             e.d32(0x1C, 0)
             e.d32(0x20, 0)
             e.m[0x10] = 0
@@ -7222,7 +7226,7 @@ def _beh_41D330(self, e) -> bool:
         e.d32(0x08, (e.s32(0x08) + (t2v >> 2)) & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0xC, e.s32(0x08) - 0xC)
-    if h == 0 and e.s32(0x08) >= 0x210:
+    if e.s32(0x1C) == 0 and e.s32(0x08) >= 0x210:      # 0x41D7A4 重读 [+0x1C]
         return False
     return True
 
