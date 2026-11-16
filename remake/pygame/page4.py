@@ -989,6 +989,25 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("d30_yf0"):                        # 0x41C41A：[+0x30]=(y>0xF0)
+            self.d32(0x30, 1 if b > 0xF0 else 0)
+        if info.get("s0f_fields"):                     # 0x41C260：0x2900000F
+            self.d32(0x20, abs(24 * a - 0x54) & 0xFFFFFFFF)
+            self.d32(0x24, 0x708 if a <= 3 else 0)
+            if self.node is not None:
+                self.node.rect = ((0x1B0, 0x198, 0x1C7, 0x1AF) if a < 2
+                                  else (0x1C8, 0x198, 0x1DF, 0x1AF))
+                self.node.dst = (a - 0x18, b - 0x18)
+        if info.get("s10_fields"):                     # 0x41C344：0x29000010
+            self.d32(0x0C, (4 * a + 8) & 0xFFFFFFFF)
+            self.d32(0x1C, d & 0xFFFFFFFF)
+            self.d32(0x20, a & 0xFFFFFFFF)
+            self.d32(0x24, (0x140 * b) & 0xFFFFFFFF)
+            if self.node is None:
+                self.node = DNode(2, 0, 0)
+            self.node.rect = (0xC0 + 24 * (a & 6), 0xF0 + 0x30 * (a & 1),
+                              0xEF + 24 * (a & 6), 0x11F + 0x30 * (a & 1))
+            self.node.dst = (a - 0x18, b - 0x18)
         if info.get("s04_fields"):                     # 0x418DBF：+0x28=rec1、+0x30=rec3
             self.d32(0x28, b & 0xFFFFFFFF)
             self.d32(0x30, d & 0xFFFFFFFF)
@@ -2471,11 +2490,12 @@ ENT29_INIT = {
     0x29000009: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
     0x2900000A: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
     0x2900000B: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
-    0x2900000C: {"beh": 0x40211C},
+    0x2900000C: {"beh": 0x40211C, "r0_20": True, "r1_24": True},
     0x2900000D: {"beh": 0x4011EF, "d_to": 0x1C},
-    0x2900000E: {"beh": 0x4021C6, "imm": {0x28: 0x40}},
-    0x2900000F: {"beh": 0x4019D8, "d_to": 0x1C},
-    0x29000010: {"beh": 0x401EFB},
+    0x2900000E: {"beh": 0x4021C6, "imm": {0x28: 0x40, 0x2C: 0},
+                 "r0sh": (0x20, 3), "r1sh": (0x24, 3), "d30_yf0": True},
+    0x2900000F: {"beh": 0x4019D8, "d_to": 0x1C, "s0f_fields": True},
+    0x29000010: {"beh": 0x401EFB, "s10_fields": True},
     0x29000011: {"beh": 0x4010BE, "imm": {0x1C: 0, 0x20: 0x10, 0x24: -2}},
     0x29000012: {"beh": 0x4023A1, "z1c": True, "d_to": 0x20},
     0x29000013: {"beh": 0x4017E9, "z1c": True},
@@ -7726,7 +7746,7 @@ def _beh_41F010(self, e) -> bool:
             v_s = v - 0x100000000 if v & 0x80000000 else v
             if (v & 1) == 0:
                 c30 = e.s32(0x30)
-                e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 >= 0 else 1)) & 0xFFFFFFFF)
+                e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 != 0 else 1)) & 0xFFFFFFFF)
             if v_s == -0x20:
                 e.d32(0x1C, 2)
             if (v & 7) == 0:
@@ -7736,7 +7756,7 @@ def _beh_41F010(self, e) -> bool:
         elif st == 2:
             e.d32(0x28, (e.s32(0x28) + 2) & 0xFFFFFFFF)
             c30 = e.s32(0x30)
-            e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 >= 0 else 1)) & 0xFFFFFFFF)
+            e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 != 0 else 1)) & 0xFFFFFFFF)
             if e.s32(0x2C) == 0:
                 e.d32(0x1C, 3)
         elif st == 3:
