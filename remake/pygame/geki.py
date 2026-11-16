@@ -1171,6 +1171,15 @@ class UiEntity:
     # 行为函数按 [+0x1C] 之类的偏移读写，所以这里给一份 0x5C 的 raw。
     raw: bytearray = field(default_factory=lambda: bytearray(0x5C))
 
+    @property
+    def node(self):
+        """页4 行为函数按 Ent 的 `+0x38` 读写节点，这里把 disp 暴露成同义属性。"""
+        return self.disp
+
+    @node.setter
+    def node(self, v):
+        self.disp = v
+
     def g32(self, off: int) -> int:
         return int.from_bytes(self.raw[off:off + 4], "little")
 
@@ -2604,6 +2613,18 @@ class Pages(Page4Mixin):
             e.d32(0x20, (int(x) << 3) & 0xFFFFFFFF)
             e.d32(0x24, ((0x298 - int(x)) // 0xA) & 0xFFFFFFFF)  # C 截断除
             e.d32(0x18, 1)
+            if type_word == 0x32000010:              # ctor 0x431AA0
+                # [+0x40]=0x4010E6(→0x4335F0)、r=1、byte[0x10]=0、[0x1C]=rec3、
+                # [+0x20]=0、[+0x24]=rec0(x)、rect 清零
+                e.beh = 0x4335F0
+                e.d32(0x0C, 1)
+                e.raw[0x10] = 0
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.d32(0x20, 0)
+                e.d32(0x24, int(x) & 0xFFFFFFFF)
+                e.d32(0x18, 1)
+                if e.disp is not None:
+                    e.disp.rect = [0, 0, 0, 0]
             e.d32(0x0C, 0x18)
             e.raw[0x10] = 1
             _r = P32_RECTS.get(type_word, (0, 0x20, 0x1F, 0x3F))

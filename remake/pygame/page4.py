@@ -12834,7 +12834,7 @@ def _beh_432C00(self, e) -> bool:
         e.d32(0x1C, 0)
         c = (e.s32(0x20) + 1) & 0xFFFFFFFF
         e.d32(0x20, c)
-        e.m[0x10] = 1 if c < 3 else 0
+        _p4_m(e)[0x10] = 1 if c < 3 else 0
         if c == 4:
             return False
     return e.g32(0x18) != 0
@@ -12860,10 +12860,10 @@ def _beh_4331C0(self, e) -> bool:
             e.node.rect = (r[0] - 0x18, r[1] + 0x48, r[2] - 0x18, r[3] + 0x48)
         else:
             if sel == 2:
-                e.m[0x10] = 0
+                _p4_m(e)[0x10] = 0
             e.node.rect = (r[0], r[1] - 0x18, r[2], r[3] - 0x18)
     elif sel == 2:
-        e.m[0x10] = 0
+        _p4_m(e)[0x10] = 0
     return True
 
 
@@ -13090,6 +13090,12 @@ def _beh_4335F0(self, e) -> bool:
     return par.m[0x34] != 0 if par is not None else True
 
 
+
+def _p4_m(e):
+    """Ent 用 `e.m`，UiEntity 用 `e.raw`（0x31/0x32 队列实体）。"""
+    return e.m if hasattr(e, "m") else e.raw
+
+
 P4_BEH: dict[int, object] = {
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
@@ -13098,6 +13104,9 @@ P4_BEH: dict[int, object] = {
     0x4324B0: _beh_4324B0, 0x432670: _beh_432670,
     0x4321C0: _beh_4321C0, 0x432250: _beh_432250, 0x432340: _beh_432340,
     0x4325E0: _beh_4325E0, 0x432820: _beh_432820, 0x4328B0: _beh_4328B0,
+    0x432C00: _beh_432C00, 0x4331C0: _beh_4331C0, 0x432E30: _beh_432E30,
+    0x433260: _beh_433260, 0x433AD0: _beh_433AD0, 0x432990: _beh_432990,
+    0x433060: _beh_433060, 0x433820: _beh_433820, 0x4335F0: _beh_4335F0,
     0x433390: _beh_433390, 0x433480: _beh_433480,
     **{ _a: globals()[f"_beh_p4slot_{_a:06X}"] for _a in P4_SPAWN_SLOTS },
     0x43AEB0: _beh_43AEB0,
