@@ -70,6 +70,18 @@ def main() -> int:
 
     miss = missing_behaviours()
     bad = []
+    tested = 0
+    for name in ("ENT24_INIT", "ENT25_INIT", "ENT26_INIT", "ENT27_INIT",
+                 "ENT28_INIT", "ENT29_INIT", "ENT2A_INIT", "ENT2C_INIT",
+                 "ENT2D_INIT"):
+        for ty in getattr(page4, name):
+            tested += 1
+            try:
+                e = pages._p4_ent43c(ty, 320, 240, 0)
+                for _ in range(20):
+                    pages.p4_call_behaviour(e)
+            except Exception as ex:  # noqa: BLE001
+                bad.append((name, hex(ty), repr(ex)))
     for ty in sorted(geki.P31_CTOR):
         a3 = (0, 0)
         if ty == 0x31000012:
@@ -96,7 +108,7 @@ def main() -> int:
         for b in bad:
             print("  ", b)
     if not miss and not bad:
-        print(f"OK：行为全登记，0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
+        print(f"OK：行为全登记，ENT 表 {tested} 型各 20 帧、0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
         return 0
     return 1
 

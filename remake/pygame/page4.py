@@ -2917,13 +2917,13 @@ def _beh_411C10(self, e) -> bool:
     否则（x≥−0x30 时）在 (x,y−0x18)、(−0x18,+0x30)、(+0x30) 三点各生成
     0x44000001 到 0x4AD4CC，并 [宿主+0x28]++，return 0。
     """
-    host = self._deref_link(e.s32(0x24))
+    host = self.p4_links.get(e.s32(0x24) & 0x7FFFFFFF)
     t = e.s32(0x1C)
     if (t & 0x7F) == 0 and host is not None and host.s32(0x2C) == 1:
         self.p4_43B070(e, 0)
     if t & 1:
         e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
-    part = self._deref_link(e.s32(0x20))
+    part = self.p4_links.get(e.s32(0x20) & 0x7FFFFFFF)
     x, y = e.s32(0x04), e.s32(0x08)
     if part is not None:
         if y < part.s32(0x08) - 0x60:
@@ -3578,10 +3578,12 @@ def _beh_416FA0(self, e) -> bool:
                 e.d32(0x20, page4_45a9a0(dy, dx) & 0xFFFFFFFF)   # 0x416FEC 0x401091→0x45A9A0
         elif st == 1:                                # 0x416FF9
             if e.node is not None:
-                e.node.grow(0x30, 0, 0x30, 0)        # 0x401A0A(node+4, 0x30,0,0x30,0)
+                r = e.node.rect                     # 0x45A790：y ±0x30
+                e.node.rect = (r[0], r[1] + 0x30, r[2], r[3] + 0x30)
         elif st == 2:                                # 0x417012
             if e.node is not None:
-                e.node.grow(-0x60, 0, -0x60, 0)      # 0x401A0A(node+4, -0x60,0,-0x60,0)
+                r = e.node.rect                     # 0x45A790：y ±0x60
+                e.node.rect = (r[0], r[1] - 0x60, r[2], r[3] - 0x60)
             self.p4_43B070(e, 0)                     # 0x41702D 0x40213F→0x43B070
     t = (t + 1) & 0xFFFFFFFF                         # 0x417035
     e.d32(0x1C, t)

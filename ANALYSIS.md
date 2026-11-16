@@ -1754,3 +1754,13 @@ ctor 写：`[0x40]=0x40101E、r=0x18、[0x18]=1、byte[0x10]=1`、`[0x24]=rec0<<
 复刻原缺这条生成。已加 `spawn_5c` 键；实测生成 1 个 `0x5C000002`、prm=自身句柄。
 0x2C000009 的 `rec0` 被当作 `{word x, word y}` 指针（`0x403DE6..0x403E03`），
 其 `[0x1C]/rect` 依赖指针内容，与 §16.384 同类，暂未展开。
+### 16.400 全族 ctor/行为冒烟发现的两处崩溃（2026-11-16）
+
+对 ENT24..ENT2D 全部 154 型各 spawn+20 帧，暴露两处只在特定型才触发的 AttributeError：
+
+- `0x24000011`：行为里 `self._deref_link(...)` —— `_deref_link` 是 **Ent** 的方法，Pages 没有；
+  改为 `self.p4_links.get(handle)`。
+- `0x2700000B`：`e.node.grow(±0x30…)` —— `DNode` 没有 grow；按 `0x45A790` 写回
+  `rect = (l, t±0x30, r, b±0x30)`。该型被打到状态 1/2 时必崩。
+修后 154 型各 20 帧 + 0x31 26 型各 30 帧全部无异常；`remake/check_behaviors.py` 已把
+“全 ENT 表跑帧”纳入自检。
