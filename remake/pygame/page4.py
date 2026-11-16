@@ -994,6 +994,27 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s2c0c"):                          # 0x404059：0x2C00000C
+            self.d32(0x1C, a & 0xFFFFFFFF)
+            self.d32(0x20, d & 0xFFFFFFFF)
+            self.d32(0x28, 0)
+            k = b & 1
+            if self.node is not None:
+                self.node.rect = (0, ((3 * k + 3) << 5) & 0xFFFFFFFF, 0x5F,
+                                  ((3 * k << 5) + 0xBF) & 0xFFFFFFFF)
+                self.node.dst = (a - 0x30, b - 0x30)
+        if info.get("s2c0d"):                          # 0x4040F2：0x2C00000D
+            self.d32(0x1C, a & 0xFFFFFFFF)
+            self.d32(0x20, b & 0xFFFFFFFF)
+            _pg = getattr(self, "_pages", None)
+            self.d32(0x24, (((_pg.p4_rand() if _pg is not None else 0) & 0xF) + 0xF) & 0xFFFFFFFF)
+            self.d32(0x28, 0)
+            self.d32(0x2C, 0)
+            self.d32(0x30, 0x10)
+            self.d32(0x0C, 0x30)
+            self.m[0x10] = 0
+            if self.node is not None:
+                self.node.dst = (a - 0x30, b - 0x30)
         if info.get("s2c05"):                          # 0x403C31：0x2C000005
             self.d32(0x18, 1)
             self.m[0x10] = 1
@@ -2666,9 +2687,9 @@ ENT2C_INIT = {
     0x2C00000A: {"beh": 0x401A14},
     0x2C00000B: {"beh": 0x401AA0, "imm": {0x0C: 0x30, 0x20: 0x1C2}, "r0_1C": True,
                  "d_to": 0x28, "dst": (-0x30, -0x30), "b10_1": True},
-    0x2C00000C: {"beh": 0x4010C8, "imm": {0x0C: 0x30, 0x18: 0x2710, 0x28: 0},
-                 "r0_1C": True, "d_to": 0x20, "dst": (-0x30, -0x30), "b10_1": True},
-    0x2C00000D: {"beh": 0x401D66, "imm": {0x18: 0xE, 0x30: 0x10},
+    0x2C00000C: {"beh": 0x4010C8, "imm": {0x0C: 0x30, 0x18: 0x2710}, "s2c0c": True,
+                 "node": (2, 0, 0, 0, 0), "dst": (-0x30, -0x30), "b10_1": True},
+    0x2C00000D: {"beh": 0x401D66, "imm": {0x18: 0xE}, "s2c0d": True,
                  "node": (2, 0, 0x60, 0x5F, 0xBF), "dst": (-0x30, -0x30)},
     0x2C000010: {"beh": 0x40158C, "imm": {0x0C: 0x48, 0x18: 0x2580, 0x1C: -0x50, 0x20: -1},
                  "node": (2, 0, 0x90, 0x8F, 0x11F), "dst": (-0x48, -0x48), "b10_1": True},
