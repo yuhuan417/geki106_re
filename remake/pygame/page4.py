@@ -977,6 +977,16 @@ class Ent:
         thunk = info["beh"]
         self.d32(0x40, thunk)
         self.beh = ENT23_BEH_THUNK.get(thunk, thunk)
+        if "node" in info:                             # 0x2A/0x2C/0x2D 族 ctor 自建节点
+            layer, l, t, r, b2 = info["node"]
+            self.node = DNode(layer, l, t)
+            self.node.rect = (l, t, r, b2)
+            self.node.active = 1
+        if info.get("b10_1"):
+            self.m[0x10] = 1
+        if "dst" in info and self.node is not None:
+            dx, dy = info["dst"]
+            self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
         if info.get("s04_fields"):                     # 0x418DBF：+0x28=rec1、+0x30=rec3
@@ -2511,10 +2521,17 @@ ENT29_INIT = {
 
 # 0x2A 族（关8）ctor case 表（0x40A410，跳表 0x40A7F8，10 型）——2026-11-06 读定
 ENT2A_INIT = {
-    0x2A000001: {"beh": 0x4018C5, "imm": {0x0C: 0x90, 0x18: 0x30D40}},   # r=144、HP=200000
-    0x2A000002: {"beh": 0x401E60, "imm": {0x0C: 0x18, 0x18: 0x640}},     # r=24、HP=1600
-    0x2A000003: {"beh": 0x401ED8, "imm": {0x0C: 0x18, 0x18: 0x640}},
-    0x2A000004: {"beh": 0x401B22, "imm": {0x0C: 0x18, 0x18: 0x640}},
+    0x2A000001: {"beh": 0x4018C5, "imm": {0x0C: 0x90, 0x18: 0x30D40},
+                 "node": (2, 0, 0, 0x10F, 0x13F), "dst": (-0x88, -0xA0), "b10_1": True},
+    0x2A000002: {"beh": 0x401E60, "imm": {0x0C: 0x18, 0x18: 0x640},
+                 "node": (2, 0x110, 0, 0x16F, 0x5F), "dst": (-0x2C, -0x32),
+                 "b10_1": True, "d_to": 0x1C},
+    0x2A000003: {"beh": 0x401ED8, "imm": {0x0C: 0x18, 0x18: 0x640, 0x30: 0},
+                 "node": (2, 0x1E0, 0, 0x27F, 0x9F), "dst": (-0x50, -0x50),
+                 "b10_1": True, "d_to": 0x1C},
+    0x2A000004: {"beh": 0x401B22, "imm": {0x0C: 0x18, 0x18: 0x640},
+                 "node": (2, 0x170, 0, 0x1DF, 0x103), "dst": (-0x28, -0xC8),
+                 "b10_1": True, "d_to": 0x1C},
     0x2A000005: {"beh": 0x4011BD, "imm": {0x0C: 0x18}},
     0x2A00000A: {"beh": 0x401E29, "imm": {0x0C: 0x78, 0x18: 0x3E80}},    # r=120、HP=16000
 }
