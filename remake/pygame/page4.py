@@ -998,6 +998,11 @@ class Ent:
                 self.node.rect = ((0x1B0, 0x198, 0x1C7, 0x1AF) if a < 2
                                   else (0x1C8, 0x198, 0x1DF, 0x1AF))
                 self.node.dst = (a - 0x18, b - 0x18)
+        if "rect_cmp" in info:                         # 0x41CA98：rec1==值 → rectA，否则 rectB
+            val, ra, rb = info["rect_cmp"]
+            if self.node is not None:
+                self.node.rect = ra if (b & 0xFFFFFFFF) == (val & 0xFFFFFFFF) else rb
+                self.node.dst = (a - 0x30, b - 0x30)
         if info.get("s10_fields"):                     # 0x41C344：0x29000010
             self.d32(0x0C, (4 * a + 8) & 0xFFFFFFFF)
             self.d32(0x1C, d & 0xFFFFFFFF)
@@ -2535,7 +2540,9 @@ ENT29_INIT = {
     0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C},
     # 0x29000020（0x41CA67）：x=-0xA0、+0x1C=*p3、+0x20=p0、+0x24=p1、+0x28=*(p3+4)、
     #   rect=p1==-0xA8?if:else（生成点填）
-    0x29000020: {"beh": 0x401A82, "imm": {0x04: -0xA0}, "r0_20": True, "r1_24": True},
+    0x29000020: {"beh": 0x401A82, "imm": {0x04: -0xA0}, "r0_20": True, "r1_24": True,
+                 "rect_cmp": (-0xA8, (0x180, 0xF0, 0x1AF, 0x11F),
+                              (0x180, 0x120, 0x1AF, 0x14F))},
     # 0x29000021（0x41CB69）：+0x1C=*p3、+0x20=*(p3+4)、+0x24=p0<<8、+0x28=p1<<8、+0x2C=0、
     #   +0x18=|*p3|+|*(p3+4)|、SE(2,(x-0x140)<<4)（0x41FFF0 生成点填）
     0x29000021: {"beh": 0x40166D, "imm": {0x2C: 0}},
@@ -3326,7 +3333,7 @@ def _beh_41F610(self, e) -> bool:
     x < −0x18 或 HP=0 → **生成 0x29000013（关7 boss）并自灭**。"""
     osc = e.s32(0x20)
     if osc != 0 and e.s32(0x1C) > 0x1E0:
-        e.d32(0x20, (osc + (2 if osc >= 0 else -2)) & 0xFFFFFFFF)
+        e.d32(0x20, (osc + (-1 if osc >= 0 else 1)) & 0xFFFFFFFF)   # 0x41F627 and 2/dec → ±1
     e.d32(0x1C, (e.s32(0x1C) + abs(osc)) & 0xFFFFFFFF)
     e.d32(8, (e.s32(8) + osc) & 0xFFFFFFFF)
     e.d32(4, (e.s32(4) - 2) & 0xFFFFFFFF)
