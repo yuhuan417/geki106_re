@@ -5672,6 +5672,21 @@ def _beh_40A020(self, e) -> bool:
             + ((sn * 7) >> 3)
         x84 = (x84 - 0x10000 if x84 & 0x8000 else x84) & 0xFFFF
         y84 = (y84 - 0x10000 if y84 & 0x8000 else y84) & 0xFFFF
+        if (typ == 0x2D00001B
+                and e.s32(0x30) == ((0x195 - 8 * e.s32(0x2C)) & 0xFFFFFFFF)):
+            # 0x40A229：1B 的散开用“新旧 8.4 位移”打包成速度对
+            old_x = e.g16(0x24)
+            old_ys = e.g16(0x26)
+            old_ys = old_ys - 0x10000 if old_ys & 0x8000 else old_ys
+            new_ys = y84 - 0x10000 if y84 & 0x8000 else y84
+            lo = (((x84 & 0xFFFF) - old_x) << 1) & 0xFFFF
+            hi = (((new_ys - old_ys) << 17)) & 0xFFFFFFFF
+            v = (lo ^ hi) & 0xFFFFFFFF
+            if v == 0:
+                v = 0x40
+            e.d32(0x2C, v)
+            e.d32(0x20, 0)
+            e.d32(0x18, 0xA)
         e.d16(0x24, x84)
         e.d16(0x26, y84)
         e.d32(0x04, ((x84 - 0x8000 if x84 & 0x8000 else x84) >> 4) & 0xFFFFFFFF)
