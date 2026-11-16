@@ -3311,7 +3311,7 @@ def _beh_419850(self, e) -> bool:
     e.d32(4, (e.s32(4) + e.s32(0x28)) & 0xFFFFFFFF)
     e.d32(8, e.s32(0x20) & 0xFFFFFFFF)
     e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x40,4,0x30)
     if e.s32(0x24) != 0 and e.s32(0x24) == e.s32(4):
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -3533,7 +3533,7 @@ def _beh_419EC0(self, e) -> bool:
     e.d32(0x24, (e.s32(0x24) + (1 if osc != 0 else -1)) & 0xFFFFFFFF)   # 0x419ED4
     e.d32(4, ((e.s32(0x20)) >> 4) & 0xFFFFFFFF)
     e.d32(8, e.s32(0x2C) & 0xFFFFFFFF)                                  # 0x419EE4 y=[0x2C]
-    # 0x401BA4 特效
+    self.p4_4193e0(e, 0x10,1,0x30)
     if e.s32(0x24) > 0 and osc != 0 and (e.s32(0x24) & 7) == 0:         # 0x419EFA 门用 [0x24]&7
         self.p4_43B070(e, 0)
         e.d32(0x28, (osc - 1) & 0xFFFFFFFF)
@@ -3554,7 +3554,7 @@ def _beh_41A090(self, e) -> bool:
     e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
     if e.s32(4) < -0x140:                              # 0x41A0CE
         e.d32(0x20, 4)
-    # 0x401BA4(0x18,1,0x30) 特效
+    self.p4_4193e0(e, 0x18,1,0x30)
     if e.s32(0x28) == 0 and e.s32(0x20) > 0 and e.s32(4) > 0x140 and e.s32(0x2C) != 0:
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -3992,7 +3992,7 @@ def _beh_4194A0(self, e) -> bool:
     node dst=(x−0x18,y−0x18)；return x > −0x18 且 HP≠0。"""
     e.d32(0x04, (e.s32(0x04) - e.s32(0x24)) & 0xFFFFFFFF)
     e.d32(0x08, e.s32(0x20) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x20,1,0x30)
     if e.s32(0x04) == 0xF0 and e.s32(0x28) != 0:
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -4019,7 +4019,7 @@ def _beh_419540(self, e) -> bool:
         e.d32(0x28, (-e.s32(0x28)) & 0xFFFFFFFF)
         e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
         e.d32(0x24, 0x3C)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x40,2,0x30)
     if e.s32(0x24) == 0 and e.s32(0x28) > 0:
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -4041,7 +4041,7 @@ def _beh_41A220(self, e) -> bool:
         e.d32(0x2C, (e.s32(0x2C) + (-1 if e.s32(0x08) >= 0xF0 else 1)) & 0xFFFFFFFF)
     e.d32(0x04, (e.s32(0x20) >> 2) & 0xFFFFFFFF)    # sar 2
     e.d32(0x08, (e.s32(0x24) >> 2) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x40,3,0x30)
     if (e.s32(0x2C) & 0xF) == 0xF and e.s32(0x04) > 0xA0:
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -4205,6 +4205,31 @@ def p4_414010(self, e) -> None:
         dy = 0x30
     nd.rect = (nd.rect[0], t + dy, nd.rect[2], nd.rect[3] + dy)
 
+def p4_4193e0(self, e, arg1: int, shift: int, arg3: int) -> None:
+    """`0x4193E0`（thunk 0x401BA4）：**入场/离场帧动画**。
+
+    t=++[0x1C]；t<arg1 → y += t>>shift（算术）；否则 d=t−arg1：
+    d∈{0,2} → rect.y −= arg3；d==4 → [0x1C]=0、rect.y += arg3；其余不变。
+    """
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < arg1:
+        e.d32(0x08, (e.s32(0x08) + (t >> shift)) & 0xFFFFFFFF)
+        return
+    d = t - arg1
+    if d > 6:
+        return
+    if e.node is None:
+        return
+    if d in (0, 2):
+        e.node.rect = (e.node.rect[0], e.node.rect[1] - arg3,
+                       e.node.rect[2], e.node.rect[3] - arg3)
+    elif d == 4:
+        e.d32(0x1C, 0)
+        e.node.rect = (e.node.rect[0], e.node.rect[1] + arg3,
+                       e.node.rect[2], e.node.rect[3] + arg3)
+
+
 def p4_416440(self, e) -> None:
     """`0x416440`：HP==0 时向 0x4AD43C 生成 boss 0x27000011（prm=父实体）。"""
     if e.g32(0x18) != 0:
@@ -4325,7 +4350,7 @@ def _beh_419E30(self, e) -> bool:
     s = e.s32(0x20)
     e.d32(0x08, ((s - 0x100000000 if s & 0x80000000 else s) >> 2) & 0xFFFFFFFF)
     e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 4,0,0x30)
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
     return e.g32(0x18) != 0 and (e.s32(0x08) < 0x1F8 or e.s32(0x24) < 0)
@@ -5411,7 +5436,7 @@ def _beh_4197B0(self, e) -> bool:
     node dst=(x−0x18,y−0x18)；return HP≠0 且 x > −0x18。"""
     e.d32(0x04, (e.s32(0x04) - 4) & 0xFFFFFFFF)
     e.d32(0x08, e.s32(0x20) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x10,1,0x30)
     if e.s32(0x24) != 0:
         c = (e.s32(0x28) + 1) & 0xFFFFFFFF
         e.d32(0x28, c)
@@ -5428,7 +5453,7 @@ def _beh_41A180(self, e) -> bool:
     node dst=(x−0x18,y−0x18)；return HP≠0 且 x < 0x298。"""
     e.d32(0x04, (e.s32(0x04) + 3) & 0xFFFFFFFF)
     e.d32(0x08, e.s32(0x20) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x18,1,0x30)
     if e.s32(0x24) != 0:
         c = (e.s32(0x28) + 1) & 0xFFFFFFFF
         e.d32(0x28, c)
@@ -6323,7 +6348,7 @@ def _beh_419610(self, e) -> bool:
         e.d32(0x20, (e.s32(0x20) + (e.s32(0x28) >> 1)) & 0xFFFFFFFF)
         e.d32(0x24, (e.s32(0x24) - e.s32(0x28)) & 0xFFFFFFFF)
         e.d32(0x28, (e.s32(0x28) + 1) & 0xFFFFFFFF)
-        # 0x401BA4 → 0x417BA0 特效（帧动画）
+        self.p4_4193e0(e, 8,0,0x30)
     x = (e.s32(0x20) - 0x100000000 if e.s32(0x20) & 0x80000000 else e.s32(0x20)) >> 4
     y = (e.s32(0x24) - 0x100000000 if e.s32(0x24) & 0x80000000 else e.s32(0x24)) >> 4
     e.d32(0x04, x & 0xFFFFFFFF)
@@ -6346,7 +6371,7 @@ def _beh_4196E0(self, e) -> bool:
     e.d32(0x04, ((s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 4) & 0xFFFFFFFF)
     if e.s32(0x24) == 0:
         e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x80,4,0x30)
     c = (e.s32(0x30) + 1) & 0xFFFFFFFF
     e.d32(0x30, c)
     if (c & 0x7F) == 0:
@@ -6373,7 +6398,7 @@ def _beh_419910(self, e) -> bool:
     x = (e.s32(0x20) - 0x100000000 if e.s32(0x20) & 0x80000000 else e.s32(0x20)) >> 4
     e.d32(0x08, y & 0xFFFFFFFF)
     e.d32(0x04, x & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 8,0,0x30)
     if e.s32(0x28) == 0 and e.s32(0x1C) == 0:
         if e.s32(0x30) != 0:
             w2c = e.g16(0x2C)
@@ -6416,7 +6441,7 @@ def _beh_419B70(self, e) -> bool:
     s20 = e.s32(0x20)
     y = (s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 4
     e.d32(0x08, y & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 8,0,0x30)
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
     return e.g32(0x18) != 0 and x > -0x18
@@ -6440,7 +6465,7 @@ def _beh_419A30(self, e) -> bool:
     e.d32(0x08, ((e.s32(0x24) - 0x100000000 if e.s32(0x24) & 0x80000000
                   else e.s32(0x24)) >> 4) & 0xFFFFFFFF)
     e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x10,1,0x30)
     h = e.s32(0x2C)
     if h == 0:
         c = self._p4_ent43c(0x28000008, e.s32(0x04) + 0x60, e.s32(0x08) + 0xC0)
@@ -6478,7 +6503,7 @@ def _beh_419C60(self, e) -> bool:
     x = e.s32(0x04)
     vis = 1 if -0x18 < x < 0x298 else 0
     e.m[0x10] = vis
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x20,2,0x30)
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
     return e.g32(0x18) != 0 and e.s32(0x24) < 4
@@ -6501,7 +6526,7 @@ def _beh_419D50(self, e) -> bool:
     e.d32(0x08, ((s20 - 0x100000000 if s20 & 0x80000000 else s20) >> 3) & 0xFFFFFFFF)
     if x == 0x1E4:
         e.d32(0x24, 0x30)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x10,1,0x30)
     if e.s32(0x24) != 0 and e.s32(0x28) != 0 and (x & 0x1F) == 0:
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -6522,7 +6547,7 @@ def _beh_419F80(self, e) -> bool:
     x = (v - 0x100000000 if v & 0x80000000 else v) >> 2
     e.d32(0x04, x & 0xFFFFFFFF)
     e.d32(0x08, e.s32(0x20) & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x20,1,0x30)
     c = (e.s32(0x24) + 1) & 0xFFFFFFFF
     e.d32(0x24, c)
     if (c & 0x3F) == 0 and x < 0x208:
@@ -6554,7 +6579,7 @@ def _beh_41A300(self, e) -> bool:
     x = (a24 - 0x100000000 if a24 & 0x80000000 else a24) >> 3
     e.d32(0x08, y & 0xFFFFFFFF)
     e.d32(0x04, x & 0xFFFFFFFF)
-    # 0x401BA4 → 0x417BA0 特效（帧动画）
+    self.p4_4193e0(e, 0x18,0,0x60)
     if e.s32(0x20) != 0:
         e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
     elif (e.s32(0x2C) & 0xF) == 0 and y > 0:
