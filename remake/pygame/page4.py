@@ -10998,108 +10998,515 @@ def _p4_407350_tail(self, e, x: int, y: int, v20: int) -> bool:
     return e.g32(0x18) != 0
 
 
+def _s8b(v):
+    """byte → 有符号（对应 `movsx ??, byte [...]`）。"""
+    v &= 0xFF
+    return v - 0x100 if v & 0x80 else v
+
+
+def _s16(v):
+    """word → 有符号（对应 `movsx ??, word [...]`）。"""
+    v &= 0xFFFF
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def _c_rem(a, b):
+    """C 的 `idiv` 余数（向 0 截断）——Python 的 % 对负数向 −∞ 取整，不能直接用。"""
+    r = abs(a) % abs(b)
+    return -r if a < 0 else r
+
+
+def _atan2(a0, a1):
+    """0x45A9A0（thunk 0x401091）：atan2 表，单位 1/3600 圈；arg0=dy、arg1=dx。"""
+    from page4 import page4_45a9a0          # 复刻侧已有逐字节实现
+    return page4_45a9a0(a0, a1)
+
+
 def _beh_408540(self, e) -> bool:
-    """`0x408540`（0x2D000019，**关8 真boss 十四态** 0x409380）。
+    """`0x408540`（type 0x2D000018，关 8 真 boss，14 态，跳表 0x409380）。
 
-    每帧：word[0x1C]（低位=帧相位 hi/lo 双字节：hi=轮、lo=帧）、word[0x1E]=相角、
-    [0x20]/[0x24]=位置 8.4、[0x28]=半径、[0x2C]=角速度、[0x30]=寿命。
-    态表（word[0x1C]&0xFF → 0x409380）主要模式（依据各态 push 序）：
-      0：word[0x20] = 0x0F000000 | (0x1400 + (0x65−ang)²)&0xFFFF（半径内缩）；
-        word[0x1C] 低位自增到 ≥4 且 HP<0x4B00 → 态 5
-      1：word[0x1E]==0x32A → 重置低位；否则 t%0x195==0 → 0x33000026 @(x,y)
-        prm 4*轮+0x18 入 0x4AD49C
-      2：word[0x1E]==0x194 → 重置；否则 t%0xCA==0 或 t%0x65==0（轮≥2）→
-        0x33000028 @(x,y) 入 0x4AD49C
-      3：t 到 0x32A → 重置+铺 0x2D00001C @(x±0xE1/0x1C2) ×0xE1 圈入 0x4AD43C
-      4：word[0x1E]==0x194 → 切态 6；word[0x1E]==0 → (轮≥2? 0x1C2+0x96 : 0x258)
-        0x2D00001C 环 ×0xE1
-      5：t%3==0 → 双 0x33000023 @(x,y)（0x3C026C0 / 0x1A4026C0，镜像角）
-        入 0x4AD49C
-      6..13：相似角向/环形铺件（0x33000023/0x33000026/0x2D00001C）。
-    公共尾（0x4092F3）：word[0x1E]−−、x=[0x20]>>4、y=[0x24]>>4；
-    node dst=(x−0x78,y−0x78)；HP==0 → 0x4A000006 @(x,y) + return 0；else 1。"""
-    w1c = e.g16(0x1C)
-    w1e = e.g16(0x1E)
-    st = (w1c >> 8) & 0xFF
-    t = w1c & 0xFF
-    if st > 0xD:
-        return True
-    x = e.s32(0x04)
-    y = e.s32(0x08)
-    hp = e.g32(0x18)
-    if hp == 0:
-        self.spawn(self._p4_q("ui4cc"), 0x4A000006, x, y, 0)
-        return False
-    if st == 0:
-        ang = w1e
-        rad = ((0x1400 + (0x65 - ang) * (0x65 - ang)) & 0xFFFF) | 0xF000000
-        e.d32(0x20, rad & 0xFFFFFFFF)
-        t += 1
-        if t >= 4 and hp < 0x4B00:
-            st = 5
-            t = 0
-        e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
-    elif st == 1:
-        if w1e == 0x32A:
-            t += 1
-            if t >= 4 and hp < 0x4B00:
-                st = 5
-                t = 0
-            e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
-        elif w1e % 0x195 == 0:
-            self.spawn(self._p4_q("ui49c"), 0x33000026, x, y,
-                       (4 * ((w1c >> 8) & 0xFF) + 0x18))
-    elif st == 2:
-        if w1e == 0x194:
-            t += 1
-            e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
-        elif (t < 2 and w1e % 0xCA == 0) or (t >= 2 and w1e % 0x65 == 0):
-            self.spawn(self._p4_q("ui49c"), 0x33000028, x, y, 0)
-    elif st == 3:
-        if w1e == 0x32A:
-            t += 1
-            e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
-        else:
-            for i in range(0xE1):
-                base = 0x1C2 + (0x96 if (w1c >> 8) & 0xFF >= 2 else 0x258) + i
-                self._p4_ent43c(0x2D00001C, x, y)
-    elif st in (4, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD):
-        if w1e == 0x194:
-            e.d32(0x1C, ((6 << 8) | (t + 1)) & 0xFFFF)
-        elif w1e == 0:
-            nb = (w1c >> 8) & 0xFF
-            base = 0x1C2 + (0x96 if nb >= 2 else 0x258)
-            for i in range(0xE1):
-                self._p4_ent43c(0x2D00001C, x, y)
-        elif st == 5:
-            if w1e % 3 == 0:
-                a = (19 * w1e) & 0xFFFFFFFF
-                self.spawn(self._p4_q("ui49c"), 0x33000023, x, y,
-                           (0x3C026C0, (a | 0x708) & 0xFFFFFFFF))
-                a2 = (0xE10 - a) & 0xFFFFFFFF
-                self.spawn(self._p4_q("ui49c"), 0x33000023, x, y,
-                           (0x1A4026C0, a2))
-        elif st in (6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD):
-            if w1e == 0x32A:
-                t += 1
-                e.d32(0x1C, ((st << 8) | t) & 0xFFFF)
-            elif w1e % 0x65 == 0:
-                self.spawn(self._p4_q("ui49c"), 0x33000026, x, y,
-                           (4 * ((w1c >> 8) & 0xFF) + 0x10))
-    # 位置更新（0x4092F3）
-    w20 = e.s32(0x20)
-    w24 = e.s32(0x24)
-    e.d32(0x04, ((w20 if False else w20) >> 4) & 0xFFFFFFFF) \
-        if False else e.d32(0x04, (w20 >> 4) & 0xFFFFFFFF)
-    e.d32(0x08, (w24 >> 4) & 0xFFFFFFFF)
-    x = (w20 >> 4) & 0xFFFFFFFF
-    y = (w24 >> 4) & 0xFFFFFFFF
-    if e.node is not None:
-        e.node.dst = (x - 0x78, y - 0x78)
-    e.d16(0x1E, (w1e - 1) & 0xFFFF)
-    return True
+    返回值：HP != 0 → 1（活）；HP == 0 → 先投放 0x4A000006 再 return 0。
+    """
+    _eh = id(e) & 0x7FFFFFFF
+    self.p4_links[_eh] = e
+    q49c = self._p4_q("ui49c")          # 0x4AD49C
+    q4cc = self._p4_q("ui4cc")          # 0x4AD4CC
+    q52c = self._p4_q("ui52c")          # 0x4AD52C（VM op5 队列 0x445AA0；复刻侧无现成名）
+
+    st = _s8b(e.m[0x1C])                # 0x408550 态号
+    rnd = _s8b(e.m[0x1D])               # 0x40855D 轮次
+    ang = _s16(e.g16(0x1E))             # 0x408555 相位角
+    saved_ang = ang                     # 0x408568 [esp+0x1C]
+    pend = st                           # 0x408559 [esp+0x10] “下一个态”
+
+    INC, ADV, ADV2, MOV, TAI = 0x4087EC, 0x4085AC, 0x4085B0, 0x4087F1, 0x4092F8
+
+    # ------------------------------------------------------------------
+    # 内部块
+    # ------------------------------------------------------------------
+    def _set_state_5():
+        """0x4085DC：态 5 / 轮 0，并清零相位角。"""
+        nonlocal rnd
+        rnd = 0
+        e.d32(0x1C, 0x00000005)
+
+    def _adv_hi():
+        """0x4092A7：pend>4 或 HP 充足时的落地；返回下一个 pc。"""
+        nonlocal rnd, pend
+        if _s16(pend) <= 9:                              # 0x4092A7 cmp ax,9 / jg
+            if rnd == 4 or (e.g32(0x18) & 0xFFFFFFFF) < 0x2580:   # 0x4092AD/0x4092B3（jae）
+                # 0x4092BC
+                pend = 0x0A                              # 0x4092C0 mov [esp+0x10],esi(0xA)
+                rnd = 0
+                e.d16(0x24, 0x50)                        # 0x4092CA 目标半径
+                e.d32(0x1C, 0x0000000A)                  # 0x4092D0 态 10 / 轮 0 / 角 0
+                return MOV
+        # 0x4092D8：轮次上限 8，态号取 pend 低字节
+        if rnd > 8:                                      # cmp cx,8 / jle
+            rnd = 8
+        e.d32(0x1C, ((rnd & 0xFF) << 8) | (pend & 0xFF))
+        return MOV
+
+    def _ring_particles():
+        """0x408CC3：2 轮“自机式”粒子（0x41000004 带速度对 + 0x41000001）。"""
+        for _k in range(2):                              # 0x408CC3 [esp+0x18]=2
+            a1 = self.p4_rand() % 0xE10                  # 0x408CD8
+            a2 = self.p4_rand() % 0x78                   # 0x408CE8
+            cv = (int(page4_cos(a1)) * a2 + 0x7F) >> 8   # 0x408CEA..0x408CF8（sar）
+            sv = (int(page4_sin(a1)) * a2 + 0x7F) >> 8   # 0x408CFB..0x408D0B
+            vx = (cv + 2) >> 2                           # 0x408D02..0x408D0E
+            vy = (sv + 2) >> 2                           # 0x408D11..0x408D14
+            x = e.s32(0x04) + cv                         # 0x408D2E/0x408D31/0x408D35/0x408D3C
+            y = e.s32(0x08) + sv
+            # 0x408D34..0x408D6D：0x430400(&rec, x, y, 0x41000004, &(vx,vy)) → 0x4AD4CC
+            self.spawn(q4cc, 0x41000004, x, y, (vx & 0xFFFFFFFF, vy & 0xFFFFFFFF))
+            # 0x408D76..0x408DB6：0x430400(&rec, x, y, 0x41000001, 0)   → 0x4AD4CC
+            self.spawn(q4cc, 0x41000001, x, y, 0)
+
+    # ------------------------------------------------------------------
+    # 主循环（用 pc 模拟 0x4087EC / 0x4085AC / 0x4087F1 / 0x4092F8 四处 goto）
+    # ------------------------------------------------------------------
+    pc = None                            # None = 0x408540 入口分派
+    while True:
+        # ============================== 入口分派 ==============================
+        if pc is None:                                   # 0x408540-0x408577
+            if not (0 <= st <= 0xD):                     # 0x408565 cmp/ja（无符号）
+                pc = INC
+                continue
+            pc = st                                      # jmp [eax*4+0x409380]
+            continue
+
+        # ============================== 0x4087EC ==============================
+        # 帧相位 +1，然后按 [esp+0x10] 决定是否进“转动块”
+        if pc == INC:
+            ang = (ang + 1) & 0xFFFF                     # 0x4087EC
+            e.d16(0x1E, ang)                             # 0x4087ED
+            pc = MOV if _s16(pend) >= 1 else TAI         # 0x4087F1 cmp/ jl
+            continue
+
+        # ============================== 0x4087F1 转动块 ==============================
+        # x = 0x1B80 + cos([0x28])*[0x26]>>4；y = 0xF00 + sin([0x28])*[0x26]>>4；
+        # [0x28] -= 4；当 [0x28]&0x3C==0 且 [0x24]!=[0x26] 时半径 ±1 收敛
+        if pc == MOV:
+            if _s16(pend) < 1:                           # 0x4087F7
+                pc = TAI
+                continue
+            orb = e.s32(0x28)                            # 0x4087FD
+            rad = e.g16(0x26)                            # 0x408806 / 0x408810
+            cx = int(page4_cos(orb)) * _s16(rad)         # 0x408801/0x40880A imul
+            e.d16(0x20, (((cx >> 4) + 0x1B80)) & 0xFFFF)  # 0x40881D
+            sy = int(page4_sin(orb)) * _s16(rad)         # 0x408824/0x408829
+            orb = (orb - 4)                              # 0x40883A
+            e.d16(0x22, (((sy >> 4) + 0xF00)) & 0xFFFF)  # 0x40883D
+            e.d32(0x28, orb & 0xFFFFFFFF)                # 0x408841
+            diff = _s16(e.g16(0x24)) - _s16(rad)         # 0x408844/0x408848
+            if diff == 0:                                # 0x40884C je
+                pc = TAI
+                continue
+            if orb & 0x3C:                               # 0x408852 test cl,0x3c
+                pc = TAI
+                continue
+            if diff <= 0:                                # 0x40885D jle → 0x4092F3
+                e.d16(0x26, (rad - 1) & 0xFFFF)
+            else:                                        # 0x408863 inc edi
+                e.d16(0x26, (rad + 1) & 0xFFFF)
+            pc = TAI
+            continue
+
+        # ============================== 0x4092F8 公共尾 ==============================
+        if pc == TAI:
+            x = _s16(e.g16(0x20)) >> 4                   # 0x4092FC/0x409303
+            y = _s16(e.g16(0x22)) >> 4                   # 0x4092F8/0x409300
+            e.d32(0x08, y & 0xFFFFFFFF)                  # 0x409306
+            e.d32(0x04, x & 0xFFFFFFFF)                  # 0x409309
+            if e.node is not None:                       # 0x401753 + node+0x14/+0x18
+                e.node.dst = (x - 0x78, y - 0x78)
+            if (e.g32(0x18) & 0xFFFFFFFF) != 0:          # 0x409325 test eax,eax / jne
+                return True
+            # 0x40932C..0x409361：0x430400(&rec, x, y, 0x4A000006, e) → 0x4AD4CC
+            self.spawn(q4cc, 0x4A000006, x, y, e)
+            return False                                 # 0x409369 xor al,al
+
+        # ============================== 0x4085AC 态推进 ==============================
+        if pc == ADV:
+            pend = (pend + 1) & 0xFFFFFFFF               # 0x4085AC inc
+            pc = ADV2
+            continue
+        if pc == ADV2:
+            if (pend & 0xFFFF) == (st & 0xFFFF):         # 0x4085B0 cmp word,dx / je
+                pc = INC
+                continue
+            if _s16(pend) > 4:                           # 0x4085BF cmp ax,4 / jg
+                pc = _adv_hi()
+                continue
+            if rnd != 4 and (e.g32(0x18) & 0xFFFFFFFF) >= 0x4B00:   # 0x4085C9/0x4085CF
+                pc = _adv_hi()
+                continue
+            _set_state_5()                               # 0x4085DC..0x4085F1
+            pc = MOV
+            continue
+
+        # ============================== 态 0：入场滑入 ==============================
+        # 0x40857E：x = (0x1400 + (0x65−ang)^2) & 0xFFFF，y 固定 0x0F00(=240)；
+        #           ang==0x65 时推进（下一态 1）
+        if pc == 0:
+            d = (0x65 - _s16(ang)) & 0xFFFFFFFF          # 0x40857E/0x408581/0x408586
+            v = (d * d) & 0xFFFFFFFF                     # 0x40858A imul
+            v = (v + 0x1400) & 0xFFFF                    # 0x40858D/0x408593
+            e.d32(0x20, v | 0x0F000000)                  # 0x408599/0x4085A3（同时写 y=0x0F00）
+            if _s16(ang) != 0x65:                        # 0x40859F/0x4085A6
+                pc = INC
+                continue
+            pc = ADV                                     # 0x4085AC
+            continue
+
+        # ============================== 态 1：横排弹幕（0x26C0 固定初速位） ==============================
+        # 0x4085F6：ang==0x32A → 推进；否则先造一条 0x33000023 模板记录，再按
+        #           (ang % 0x32B) 选表、把表项写进模板 rec+6（= 初速 y 的高字）后逐个入队
+        if pc == 1:
+            if _s16(ang) == 0x32A:                       # 0x4085F6/0x4085FB
+                pc = ADV
+                continue
+            # 0x4085FD..0x408624：0x4023C4(&rec, e, 0x26C0, 0x33000023, prm)（**不入队**）
+            rec0 = e
+            rec1 = 0x26C0
+            rec3 = ((((rnd + 0xA) << 20) & 0xFFFF0708) | 0x708) & 0xFFFFFFFF
+            # 0x40864F：edx = saved_ang % 0x32B
+            am = _c_rem(_s16(saved_ang), 0x32B)
+            # 表（0x408655..0x4086CE；都是 word 数组，写进 S+0x20..S+0x42）
+            tblA = (0x5A, 0xD2, 0x14A, 0x1C2)            # S+0x20
+            tblB = (0x3C, 0xB4, 0x12C, 0x1A4)            # S+0x28
+            tblC = (0x1E, 0x96, 0x10E, 0x186)            # S+0x30
+            tblD = (0x28, 0x78, 0xC8, 0x118, 0x168, 0x1B8)   # S+0x38（6 项）
+            # 0x4086DD..0x4087E2：32 轮（ebx 0→0x1C1FF，步 0xE10）；
+            # 判据 `(ang%0x32B) == j/0x32B`，而 j/0x32B 恒为 0（0xE6C2B449 magic 是 /0x32B）
+            for j in range(32):
+                if am != (j // 0x32B):                   # 0x4086F0/0x4086F4
+                    continue
+                mask = 1 << j                            # 0x408705 shl eax,cl
+                tbl = None
+                if mask & 0x10100001:                    # 0x408709
+                    tbl = tblB
+                if mask & 0x20000100:                    # 0x408714
+                    tbl = tblC
+                if mask & 0x40001000:                    # 0x40871F
+                    tbl = tblA
+                if mask & 0x404010:                      # 0x40872A
+                    tbl = tblD
+                if mask & 0x81010000:                    # 0x408735 → 0x40873C 追击支
+                    # 用 tblB 倒序 4 项；dy=player_y−v、dx=player_x−0x1F4 求角
+                    for v in (0x1A4, 0x12C, 0xB4, 0x3C):  # 0x40873C..0x40878B
+                        b = (rec1 & 0xFFFF) | (((v << 4) & 0xFFFF) << 16)   # rec+6（y 高字）
+                        a = _atan2(self.p4_player_y() - v,
+                                   self.p4_player_x() - 0x1F4) & 0xFFFF
+                        d = (rec3 & 0xFFFF0000) | a                     # rec+0xC（prm 低字）
+                        self.spawn(q49c, 0x33000023, rec0, b, d)
+                    continue
+                if tbl is None:                          # edx==0 → 本 j 不生成
+                    continue
+                # 0x40878F..0x4087CB：条数 = 6（tblD）或 4（其余），**倒序**读表
+                for v in reversed(tbl):
+                    b = (rec1 & 0xFFFF) | (((v << 4) & 0xFFFF) << 16)   # rec+6
+                    self.spawn(q49c, 0x33000023, rec0, b, rec3)
+            pc = INC                                     # 0x4087E8 → 0x4087EC
+            continue
+
+        # ============================== 态 2：0x33000026 扇形 ==============================
+        # 0x408869
+        if pc == 2:
+            if _s16(ang) == 0x32A:                       # 0x408869/0x40886E
+                pc = ADV
+                continue
+            if _c_rem(_s16(ang), 0x195) == 0:            # 0x408874..0x408881
+                # 0x408887..0x4088C7：0x430400(&rec, e, 0, 0x33000026, rnd*4+0x18) → 0x4AD49C
+                self.spawn(q49c, 0x33000026, e, 0, (rnd * 4 + 0x18) & 0xFFFFFFFF)
+            pc = INC
+            continue
+
+        # ============================== 态 3：0x33000028 ==============================
+        # 0x4088D1
+        if pc == 3:
+            if _s16(ang) == 0x194:                       # 0x4088D1/0x4088D6
+                pc = ADV
+                continue
+            if rnd < 2:                                  # 0x4088DF cmp cx,2 / jge
+                hit = (_c_rem(_s16(ang), 0xCA) == 0)     # 0x4088E6..0x4088ED
+            else:
+                hit = (_c_rem(_s16(ang), 0x65) == 0)     # 0x4088F6..0x4088FD
+            if hit:
+                # 0x408905..0x40893C：0x430400(&rec, e, 0, 0x33000028, 0) → 0x4AD49C
+                self.spawn(q49c, 0x33000028, e, 0, 0)
+            pc = INC
+            continue
+
+        # ============================== 态 4：八向 0x2D00001A 卫队 ==============================
+        # 0x408946：ang==0x32A → 轮+1 且回到态 1（pend=1）；ang>0x260 什么都不做
+        if pc == 4:
+            if _s16(ang) == 0x32A:                       # 0x408946/0x40894B
+                pend = 1                                 # 0x40894D
+                rnd += 1                                 # 0x408955 inc ecx
+                pc = ADV2
+                continue
+            if _s16(ang) > 0x260:                        # 0x40895B/0x408960 jg
+                pc = INC
+                continue
+            if rnd < 2:
+                if _c_rem(_s16(ang), 0x195) == 0:        # 0x408972..0x408979
+                    grp = 1
+                elif _c_rem(_s16(ang) - 0xCA, 0x195) == 0:   # 0x408AA4..0x408AB4
+                    grp = 2
+                else:
+                    grp = 0                              # 0x408ABA jl
+            else:
+                if _c_rem(_s16(ang), 0xCA) == 0:         # 0x408982..0x40898B
+                    grp = 1
+                elif _c_rem(_s16(ang) - 0x65, 0xCA) == 0:    # 0x408AC0..0x408ACD
+                    grp = 2
+                else:
+                    grp = 0
+            if grp == 1:
+                # 0x408991/0x4089A9、0x4089D3/0x4089EB、0x408A15/0x408A2D、0x408A57/0x408A6F
+                for b, d in ((0xF4C00780, 0xF8F80000),
+                             (0xF88003C0, 0xF8F80000),
+                             (0x078003C0, 0x07080000),
+                             (0x0B400780, 0x07080000)):
+                    self._p4_ent43c(0x2D00001A, _eh, b, d)
+            elif grp == 2:
+                # 0x408AD3/0x408AEB、0x408B15/0x408B2D、0x408B57/0x408B6F、0x408B99/0x408BB1
+                for b, d in ((0xF4C003C0, 0xF8940000),
+                             (0xF8800000, 0xF82A0000),
+                             (0x07800000, 0x07D60000),
+                             (0x0B4003C0, 0x076C0000)):
+                    self._p4_ent43c(0x2D00001A, _eh, b, d)
+            pc = INC
+            continue
+
+        # ============================== 态 5：开场特效 / 0x61000005 ==============================
+        # 0x408BE0
+        if pc == 5:
+            if _s16(ang) == 0:                           # 0x408BE0 test bx,bx / jne
+                # 0x408BE5..0x408C20：0x430400(&rec, 0, 0xFF, 0x61000005, 0x10) → 0x4AD52C
+                self.spawn(q52c, 0x61000005, 0, 0xFF, 0x10)
+                _ring_particles()                        # → 0x408CC3
+                pc = INC
+                continue
+            if _s16(ang) == 0x18:                        # 0x408C2A
+                # 0x408C30..0x408C45：0x45A790(node+4, 0, 0xF0, 0, 0xF0) ⇒ rect += (0,0xF0,0,0xF0)
+                if e.node is not None:
+                    r = e.node.rect
+                    e.node.rect = (r[0], r[1] + 0xF0, r[2], r[3] + 0xF0)
+                _ring_particles()
+                pc = INC
+                continue
+            if _s16(ang) == 0x19:                        # 0x408C4F
+                # 0x408C55..0x408C90：0x430400(&rec, 0xFF, 0, 0x61000005, -0x10) → 0x4AD52C
+                self.spawn(q52c, 0x61000005, 0xFF, 0, 0xFFFFFFF0)
+                # 0x408C95..0x408CA8：0x450350(0x4AB4B0, 0x0B, (x-0x140)<<4)
+                self.p4_se_pan(0x0B, (e.s32(0x04) - 0x140) << 4)
+                _ring_particles()
+                pc = INC
+                continue
+            if _s16(ang) == 0x32:                        # 0x408CAF/0x408CB3
+                pc = ADV
+                continue
+            if _s16(ang) > 0x19:                         # 0x408CB9/0x408CBD jg
+                pc = INC
+                continue
+            _ring_particles()                            # ang in 1..0x17 → 0x408CC3
+            pc = INC
+            continue
+
+        # ============================== 态 6：随机横坐标 0x33000023 连射 ==============================
+        # 0x408DD3
+        if pc == 6:
+            if _s16(ang) == 0x32A:                       # 0x408DD3/0x408DD8
+                pc = ADV
+                continue
+            if _c_rem(_s16(ang), 0x32) != 0:             # 0x408DDE..0x408DEB
+                pc = INC
+                continue
+            if rnd < 0:                                  # 0x408DF1..0x408DF6
+                pc = INC
+                continue
+            for _i in range(rnd + 1):                    # 0x408DFC ebx = rnd+1
+                # 0x408DFF..0x408E51：rec = {e, pos, 0x33000023, 0xE00A8C} → 0x4AD49C
+                #   注意 0xE00A8C 是**先 push** 的，所以落在 rec[3]
+                pos = ((self.p4_rand() % 0x2800) & 0xFFFF) | 0x1CC00000   # 0x408E09..0x408E1C
+                self.spawn(q49c, 0x33000023, e, pos, 0xE00A8C)
+            pc = INC
+            continue
+
+        # ============================== 态 7：自身 type 复制 ==============================
+        # 0x408E5E
+        if pc == 7:
+            if _s16(ang) == 0x194:                       # 0x408E5E/0x408E63
+                pc = ADV
+                continue
+            if rnd < 2:
+                hit = (_c_rem(_s16(ang), 0x32) == 0)     # 0x408E73..0x408E7A
+            else:
+                hit = (_c_rem(_s16(ang), 0x19) == 0)     # 0x408E83..0x408E8A
+            if hit:
+                # 0x408E92..0x408EC9：0x430400(&rec, e, 0, 0x2D000019, 0) → 0x4AD43C
+                self._p4_ent43c(0x2D000019, e, 0, 0)
+            pc = INC
+            continue
+
+        # ============================== 态 8：0x33000027（一次） ==============================
+        # 0x408ED3
+        if pc == 8:
+            if _s16(ang) != 0:                           # 0x408ED3 test bx,bx / jne
+                if _s16(ang) == 0x32A:                   # 0x408F1E..0x408F23 → 0x4085A6
+                    pc = ADV
+                else:
+                    pc = INC
+                continue
+            # 0x408ED8..0x408F14：0x430400(&rec, e, 0, 0x33000027, rnd+4) → 0x4AD49C
+            self.spawn(q49c, 0x33000027, e, 0, (rnd + 4) & 0xFFFFFFFF)
+            pc = INC
+            continue
+
+        # ============================== 态 9：0x2D00001C 环 ==============================
+        # 0x408F28
+        if pc == 9:
+            if _s16(ang) == 0x194:                       # 0x408F28/0x408F2D
+                pend = 6                                 # 0x408F2F
+                rnd += 1                                 # 0x408F37
+                pc = ADV2
+                continue
+            if _s16(ang) != 0:                           # 0x408F3D/0x408F40
+                pc = INC
+                continue
+            # 0x408F46..0x408F5B：步长 = 0x1C2 + (rnd>=2 ? 0x96 : 0)
+            step = 0x1C2 + (0x96 if rnd >= 2 else 0)
+            a = 0xE1                                     # 0x408F50
+            while a < 0xE10:                             # 0x408FA0/0x408FA4/0x408FAA
+                # 0x408F65..0x408F9B：0x430400(&rec, e, 0, 0x2D00001C, a) → 0x4AD43C
+                self._p4_ent43c(0x2D00001C, _eh, 0, a & 0xFFFFFFFF)
+                a += step
+            pc = INC
+            continue
+
+        # ============================== 态 10：对偶 0x33000023（38*ang 相位） ==============================
+        # 0x408FB1
+        if pc == 10:
+            if _s16(ang) == 0x32A:                       # 0x408FB1/0x408FB6
+                pc = ADV
+                continue
+            if _c_rem(_s16(ang), 3) != 0:                # 0x408FBC..0x408FCB
+                pc = INC
+                continue
+            q = (38 * _s16(ang)) & 0xFFFFFFFF            # 0x408FD1/0x408FD7/0x408FDF
+            base = ((rnd + 9) << 20) & 0xFFFFFFFF        # 0x408FE5/0x408FEB
+            d1 = (base ^ (_c_rem(q, 0xE10) & 0xFFFF)) & 0xFFFFFFFF     # 0x408FE8..0x408FF4
+            # 0x408FF6..0x40902C：b=0x3C026C0
+            self.spawn(q49c, 0x33000023, e, 0x3C026C0, d1)
+            d2 = (base ^ (_c_rem(0xE10 - q, 0xE10) & 0xFFFF)) & 0xFFFFFFFF   # 0x409035..0x40904A
+            # 0x40904C..0x409085：b=0x1A4026C0
+            self.spawn(q49c, 0x33000023, e, 0x1A4026C0, d2)
+            pc = INC
+            continue
+
+        # ============================== 态 11：0x33000026（rnd*4+0x10） ==============================
+        # 0x40908F
+        if pc == 11:
+            if _s16(ang) == 0x32A:                       # 0x40908F/0x409094
+                pc = ADV
+                continue
+            if _s16(ang) > 0x195:                        # 0x40909A/0x40909F
+                pc = INC
+                continue
+            if _c_rem(_s16(ang), 0x65) != 0:             # 0x4090A5..0x4090B2
+                pc = INC
+                continue
+            # 0x4090B8..0x4090F8：0x430400(&rec, e, 0, 0x33000026, rnd*4+0x10) → 0x4AD49C
+            self.spawn(q49c, 0x33000026, e, 0, (rnd * 4 + 0x10) & 0xFFFFFFFF)
+            pc = INC
+            continue
+
+        # ============================== 态 12：0x33000029（远离自机的落点） ==============================
+        # 0x409102
+        if pc == 12:
+            if _s16(ang) == 0x32A:                       # 0x409102/0x409107
+                pc = ADV
+                continue
+            if rnd < 2:
+                hit = (_c_rem(_s16(ang), 0x65) == 0)     # 0x409117..0x40911E
+            else:
+                hit = (_c_rem(_s16(ang), 0x32) == 0)     # 0x409127..0x40912E
+            if not hit:
+                pc = INC
+                continue
+            px = self.p4_player_x()
+            py = self.p4_player_y()
+            n = 0                                        # 0x409136 xor edi,edi
+            xv = 0
+            while True:                                  # 0x409138 循环：x
+                xv = (self.p4_rand() % 0xC8) + 0x3C      # 0x40913D..0x40914C
+                lim = px if px < 0x12C else 0x12C        # 0x40914F..0x409156
+                if abs(lim - xv) <= 0x50:                # 0x40915B..0x409165
+                    break
+                n += 1                                   # 0x409167
+                if n >= 0x64:                            # 0x409168/0x40916B
+                    break
+            yv = 0
+            while True:                                  # 0x40916D 循环：y
+                yv = (self.p4_rand() % 0x168) + 0x3C     # 0x409173..0x409181
+                if abs(py - yv) <= 0x78:                 # 0x409184..0x40918E
+                    break
+                n += 1                                   # 0x409190
+                if n >= 0x64:                            # 0x409191/0x409194
+                    break
+            prm = (((yv & 0xFFFF) << 16) | (xv & 0xFFFF)) & 0xFFFFFFFF   # 0x409196..0x4091A1
+            # 0x4091A3..0x4091D1：0x430400(&rec, e, prm, 0x33000029, 0) → 0x4AD49C
+            self.spawn(q49c, 0x33000029, e, prm, 0)
+            pc = INC
+            continue
+
+        # ============================== 态 13：0x2D00001B 铺 12 只 ==============================
+        # 0x4091DB
+        if pc == 13:
+            if _s16(ang) == 0x32A:                       # 0x4091DB/0x4091E0
+                pend = 0x0A                              # 0x4091E2 mov [esp+0x10],esi(0xA)
+                rnd += 1                                 # 0x4091E6
+                pc = ADV2
+                continue
+            am = _c_rem(_s16(saved_ang), 0x32B)          # 0x4091EC..0x4091F9
+            for j in range(32):                          # 0x409203..0x40929C
+                if am != (j // 0x32B):                   # 同态 1：j/0x32B 恒为 0
+                    continue
+                # 0x40921E..0x409242：rand()%0x258 + 0x96
+                prm = (self.p4_rand() % 0x258) + 0x96
+                # 0x409278：只有 (1<<j) & 0xFFF != 0（j<12）才入队 0x4AD43C
+                if ((1 << j) & 0xFFF) != 0:
+                    self._p4_ent43c(0x2D00001B, e, 0, prm & 0xFFFFFFFF)
+            pc = INC
+            continue
+
+        raise AssertionError(f"0x408540: 未处理的分派 pc={pc!r}")   # pragma: no cover
 
 
+# ===========================================================================
 def _beh_4098E0(self, e) -> bool:
     """`0x4098E0`（0x2D00001A，0x408540 铺出的僚机）：**挂主四态**。
 
