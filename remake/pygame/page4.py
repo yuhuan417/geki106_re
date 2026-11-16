@@ -7708,7 +7708,9 @@ def _beh_41E960(self, e) -> bool:
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
     if t == 1:
-        self._p4_ent43c(0x2900000D, e.s32(0x04), e.s32(0x08))
+        _h = id(e) & 0x7FFFFFFF
+        self.p4_links[_h] = e
+        self._p4_ent43c(0x2900000D, e.s32(0x04), e.s32(0x08), _h)
     if t % 0xF0 == 0:
         e.d32(0x2C, 0x3C)
     ph = e.s32(0x2C)
