@@ -13051,6 +13051,45 @@ def _beh_433820(self, e) -> bool:
     return t < 0x3C and e.g32(0x18) != 0
 
 
+
+def _beh_4335F0(self, e) -> bool:
+    """`0x4335F0`（0x32000010 实际行为）：绕源点螺旋撒弹 + 后段每 8 帧发 0x3100001D。
+
+    t=++[0x20]；源=(par.x,par.y)（[0x1C] 句柄，无则自身）；半幅=t<0x30?t>>1:0x18；
+    k=(t&0xFF)*14；弹位=源+((cos(k)*half>>15), (sin(k)*half>>15))；
+    byte[0x20]&0x10 → 0x5A000003 入 4AD4FC，否则 0x4A000004 入 4AD4CC。
+    [0x24]++ >0x1A4 且 &7==0 → rec=([0x20]&0xF)|(t2<0x21C?0x10000:0) 发 0x3100001D。
+    return 父体存活（无父则 True）。"""
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)
+    par = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if par is not None:
+        bx = par.s32(0x04)
+        by = par.s32(0x08)
+    else:
+        bx = e.s32(0x04)
+        by = e.s32(0x08)
+    e.d32(0x04, bx & 0xFFFFFFFF)
+    e.d32(0x08, by & 0xFFFFFFFF)
+    half = (t >> 1) if (t & 0xFFFFFFFE) < 0x30 else 0x18
+    k = (t & 0xFF) * 14
+    c = page4_cos((k * 8 + 0x71) & 0xFFFFFFFF)
+    dx = (page4_cos(k) * c * half) >> 15
+    dy = (page4_sin(k) * c * half) >> 15
+    if e.s32(0x20) & 0x10:
+        self.spawn(self._p4_q("ui4fc"), 0x5A000003, (bx + dx) & 0xFFFFFFFF,
+                   (by + dy) & 0xFFFFFFFF, 0)
+    else:
+        self.spawn(self._p4_q("ui4cc"), 0x4A000004, (bx + dx) & 0xFFFFFFFF,
+                   (by + dy) & 0xFFFFFFFF, 0)
+    t2 = (e.s32(0x24) + 1) & 0xFFFFFFFF
+    e.d32(0x24, t2)
+    if t2 > 0x1A4 and (t2 & 7) == 0:
+        rec = (e.s32(0x20) & 0xF) | (0x10000 if t2 < 0x21C else 0)
+        self.spawn(self._p4_q("ui49c"), 0x3100001D, bx, by, rec)
+    return par.m[0x34] != 0 if par is not None else True
+
+
 P4_BEH: dict[int, object] = {
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
