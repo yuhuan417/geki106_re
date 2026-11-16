@@ -10399,9 +10399,10 @@ def _p4_45ac70(self, tgt: list, cur: list, lim: int) -> bool:
     （[tgt]==0 且 [cur]==0 → return 0）。"""
     if tgt[0] == 0 and cur[0] == 0:
         return False
-    # exe 0x45AC8A：push [ebx](cur)、push [edi](tgt) → 0x45A9A0(row=tgt, col=cur)
-    # 包装器 (dx, dy) → p4_45a9a0(cur[0], tgt[0])；cos→tgt、sin→cur 均为**覆盖**
-    a = self.p4_45a9a0(cur[0], tgt[0])
+    # exe 0x45AC8A 原始字节 50 8b 03 50：push [edi](tgt) 先→a2、push [ebx](cur)
+    # 后→a1 ⇒ 0x45A9A0(row=cur, col=tgt)；包装器 (dx, dy)→row=dy ⇒ p4_45a9a0(tgt[0], cur[0])；
+    # cos→tgt（0x45ACAD mov [edi]）、sin→cur（0x45ACC2 mov [ebx]）均为**覆盖**
+    a = self.p4_45a9a0(tgt[0], cur[0])
     s_ = page4_sin(a)
     c = page4_cos(a)
     cur[0] = ((s_ * lim + 0x80) >> 8) & 0xFFFFFFFF   # 0x45ACB4.. mov [ebx]
@@ -11631,7 +11632,10 @@ def _beh_408540(self, e) -> bool:
                 hit = (_c_rem(_s16(ang), 0x19) == 0)     # 0x408E83..0x408E8A
             if hit:
                 # 0x408E92..0x408EC9：0x430400(&rec, e, 0, 0x2D000019, 0) → 0x4AD43C
-                self._p4_ent43c(0x2D000019, e, 0, 0)
+                # rec0 = boss 对象指针 → 复刻传句柄（原直传对象会 TypeError）
+                _h13 = id(e) & 0x7FFFFFFF
+                self.p4_links[_h13] = e
+                self._p4_ent43c(0x2D000019, _h13, 0, 0)
             pc = INC
             continue
 
