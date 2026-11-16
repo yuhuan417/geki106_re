@@ -12326,7 +12326,143 @@ def _beh_423980(self, e) -> bool:
 
 # 12 项武器槽行为（P4_SPAWN_SLOTS 生成的 _beh_p4slot_*）按真址登记——
 # pod ctor 0x42C4D0 把它们写进 [pod+0x40]，0x446450 按 [e+0x40] 分派。
+# ---- 0x31 弹族行为（0x4321C0..，逐条对 0x4308A0 各 case 的 [+0x40] 实现） ----
+def _beh_4321C0(self, e) -> bool:
+    """`0x4321C0`：8.8 速度积分；屏内(±0x10) 且 HP!=0。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    x = (e.s32(0x24)) >> 8
+    y = (e.s32(0x28)) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.disp is not None:
+        e.disp.dst = [x - 0xC, y - 0xC]
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x10) == 1
+
+
+def _beh_432250(self, e) -> bool:
+    """`0x432250`（0x31000003）：8.8 积分 + 每 2 帧在原地生成 0x31000004；屏内且 HP。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    t = (e.s32(0x2C) + 1) & 0xFFFFFFFF
+    e.d32(0x2C, t)
+    if t & 1:
+        self.spawn(self._p4_q("ui49c"), 0x31000004, e.s32(0x04), e.s32(0x08))
+    x = (e.s32(0x24)) >> 8
+    y = (e.s32(0x28)) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.disp is not None:
+        e.disp.dst = [x - 0xC, y - 0xC]
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x10) == 1
+
+
+def _beh_432340(self, e) -> bool:
+    """`0x432340`（0x31000004）：t++; [0x10]=(t<6)；t 偶数 → rect.l/r +=0x18；存活 t<0xA。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    e.raw[0x10] = 1 if t < 6 else 0
+    if (t & 1) == 0 and e.disp is not None:
+        e.disp.rect = [e.disp.rect[0] + 0x18, e.disp.rect[1],
+                       e.disp.rect[2] + 0x18, e.disp.rect[3]]
+    return t < 0xA
+
+
+def _beh_4325E0(self, e) -> bool:
+    """`0x4325E0`（0x31000006）：8.8 积分；dst=(x−0x10,y−0x10)；屏内(±0x10)且 HP。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    x = (e.s32(0x24)) >> 8
+    y = (e.s32(0x28)) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.disp is not None:
+        e.disp.dst = [x - 0x10, y - 0x10]
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x10) == 1
+
+
+def _beh_432820(self, e) -> bool:
+    """`0x432820`（0x3100000C）：x−=0x10、y+=[0x1C]；[0x20] 与 y 比较修正 [0x1C] ±2；
+    dst=(x−0x10,y−0x10)；存活 x>−0x18 且 HP。"""
+    x = (e.s32(0x04) - 0x10) & 0xFFFFFFFF
+    y = (e.s32(0x08) + e.s32(0x1C)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.disp is not None:
+        e.disp.dst = [e.s32(0x04) - 0x10, e.s32(0x08) - 0x10]
+    ty = e.s32(0x20)
+    if ty > e.s32(0x08):
+        e.d32(0x1C, (e.s32(0x1C) + 2) & 0xFFFFFFFF)
+    elif ty < e.s32(0x08):
+        e.d32(0x1C, (e.s32(0x1C) - 2) & 0xFFFFFFFF)
+    return e.s32(0x04) > -0x18 and e.s32(0x18) != 0
+
+
+def _beh_4328B0(self, e) -> bool:
+    """`0x4328B0`（0x3100000D）：8.4 双轴积分；t==9 随机方向（cos/sin(r)>>2）；
+    dst=(x−0xC,y−0xC)；屏内(±0xC)且 HP。"""
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x24)) & 0xFFFFFFFF)
+    x = (e.s32(0x28)) >> 4
+    y = (e.s32(0x2C)) >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 9:
+        r = self.p4_rand() % 0xE10
+        e.d32(0x20, (page4_cos(r) >> 2) & 0xFFFFFFFF)
+        e.d32(0x24, (page4_sin(r) >> 2) & 0xFFFFFFFF)
+    if e.disp is not None:
+        e.disp.dst = [x - 0xC, y - 0xC]
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0xC) == 1
+
+
+def _beh_433390(self, e) -> bool:
+    """`0x433390`（0x31000019）：8.8 积分 + 每 4 帧 rect 动画（按 rect.t/rect.l 选伸缩）；
+    dst=(x−0xC,y−0xC)；屏内(±0x10)且 HP。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    x = (e.s32(0x24)) >> 8
+    y = (e.s32(0x28)) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    t = (e.s32(0x2C) + 1) & 0xFFFFFFFF
+    e.d32(0x2C, t)
+    if (t & 3) == 0 and e.disp is not None:
+        l, tp, r, b = e.disp.rect
+        if tp == 0x1C8:
+            e.disp.rect = [l, tp + 0x18, r, b + 0x18]
+        elif l == 0xF0:
+            e.disp.rect = [l + 0x18, tp - 0x18, r + 0x18, b - 0x18]
+        else:
+            e.disp.rect = [l - 0x18, tp - 0x18, r - 0x18, b - 0x18]
+    if e.disp is not None:
+        e.disp.dst = [x - 0xC, y - 0xC]
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x10) == 1
+
+
+def _beh_433480(self, e) -> bool:
+    """`0x433480`（0x3100001B）：屏内(±0x10)才继续；8.4 积分；每帧生成 0x3100001C
+    @(x,y) param=[0x2C] 并 [0x2C]++；return 1。"""
+    if self.p4_4305f0(e, 0x10) != 1:
+        return False
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    x = (e.s32(0x24)) >> 4
+    y = (e.s32(0x28)) >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    prm = e.s32(0x2C)
+    e.d32(0x2C, (prm + 1) & 0xFFFFFFFF)
+    self.spawn(self._p4_q("ui49c"), 0x3100001C, x, y, prm)
+    return True
+
+
 P4_BEH: dict[int, object] = {
+    0x4321C0: _beh_4321C0, 0x432250: _beh_432250, 0x432340: _beh_432340,
+    0x4325E0: _beh_4325E0, 0x432820: _beh_432820, 0x4328B0: _beh_4328B0,
+    0x433390: _beh_433390, 0x433480: _beh_433480,
     **{ _a: globals()[f"_beh_p4slot_{_a:06X}"] for _a in P4_SPAWN_SLOTS },
     0x43AEB0: _beh_43AEB0,
     0x40E9B0: _beh_23000009,        # 类型 0x23000009（thunk 0x4015AA）

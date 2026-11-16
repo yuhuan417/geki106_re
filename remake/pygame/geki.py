@@ -1095,6 +1095,19 @@ class Flags:
 
 # ---------------------------------------------------------------------------- UI 实体
 # 0x4308A0 的 0x32 道具族各型源矩形（0x4317C4..0x431B2C 的四参 push，层 1 bm_cm32）
+# 0x31 弹族 ctor 表（0x431B30，31 项）：type → (行为真址, 半径, 层, 源矩形)
+# 只登记已逐条读定 rect 且行为已实现的型；其余走共通移动体，逐型补录见 docs/p4_enemy_matrix.md
+P31_CTOR = {
+    0x31000001: (0x4321C0, 0x0A, 0, (0xD8, 0x168, 0xEF, 0x17F)),
+    0x31000003: (0x432250, 0x0C, 0, (0x00, 0x1F8, 0x17, 0x20F)),
+    0x31000004: (0x432340, 0x0C, 0, (0x00, 0x1F8, 0x17, 0x20F)),
+    0x31000006: (0x4325E0, 0x0E, 2, (0x150, 0x60, 0x16F, 0x7F)),
+    0x3100000A: (0x4321C0, 0x0A, 2, (0x180, 0xD8, 0x197, 0xEF)),
+    0x3100000C: (0x432820, 0x10, 2, (0x120, 0x120, 0x13F, 0x15F)),
+    0x3100000D: (0x4328B0, 0x0C, 2, (0x00, 0x120, 0x17, 0x137)),
+    0x31000019: (0x433390, 0x0A, 2, (0xF0, 0x1C8, 0x107, 0x1DF)),
+}
+
 P32_RECTS = {
     0x32000002: (0x00, 0x60, 0x1F, 0x7F),
     0x32000003: (0xA0, 0x60, 0xBF, 0x7F),
@@ -2582,18 +2595,50 @@ class Pages(Page4Mixin):
             # [+0x18]=|vx|+|vy|、[+0xC]=半径、[+0x40]=行为 0x4321C0（直线移动）。
             # 每种类型的 rect/层/额外行为在 0x431B30 的 31 项跳表里；这里先落
             # **移动+出屏自灭**（门 0x61000002 需要队列清空），逐型 rect 见表 §15。
-            e.beh = "p31"
-            vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
             e.d32(0x14, type_word)
-            e.d32(0x1C, int(vx) & 0xFFFFFFFF)
-            e.d32(0x20, int(vy) & 0xFFFFFFFF)
-            e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
-            e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
-            e.d32(0x18, (abs(int(vx)) + abs(int(vy))) & 0xFFFFFFFF)
-            e.d32(0x0C, 0x18)
-            e.raw[0x10] = 1
-            e.disp = DisplayNode(layer=0, rect=[0, 0, 0, 0],
-                                 dst=[int(x) - 0xC, int(y) - 0xC])
+            spec = P31_CTOR.get(type_word)
+            if spec is not None:
+                beh, rad, layer, rect = spec
+                e.beh = beh
+                e.d32(0x0C, rad)
+                vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
+                e.d32(0x1C, int(vx) & 0xFFFFFFFF)
+                e.d32(0x20, int(vy) & 0xFFFFFFFF)
+                e.d32(0x04, int(x) & 0xFFFFFFFF)
+                e.d32(0x08, int(y) & 0xFFFFFFFF)
+                e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
+                e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
+                e.d32(0x18, (abs(int(vx)) + abs(int(vy))) & 0xFFFFFFFF)
+                if type_word == 0x31000004:          # ctor 0x430A57：[0x1C]=0、[0x18]=1
+                    e.d32(0x1C, 0)
+                    e.d32(0x18, 1)
+                elif type_word == 0x3100000C:        # ctor 0x430E37：[0x1C]=rec3<<3、[0x20]=rec1
+                    e.d32(0x1C, (int(a3) << 3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                    e.d32(0x20, int(y) & 0xFFFFFFFF)
+                    if isinstance(a3, int) and a3 >= 0:
+                        rect = (0x120, 0x120, 0x13F, 0x15F)
+                    else:
+                        rect = (0x120, 0x120, 0x13F, 0x13F)
+                elif type_word == 0x3100000D:        # ctor 0x430EE1：8.4 累加器 [0x28]/[0x2C]，[0x20]=−0x100
+                    e.d32(0x20, 0xFFFFFF00)
+                    e.d32(0x24, 0)
+                    e.d32(0x28, (int(x) << 4) & 0xFFFFFFFF)
+                    e.d32(0x2C, (int(y) << 4) & 0xFFFFFFFF)
+                e.raw[0x10] = 1
+                e.disp = DisplayNode(layer=layer, rect=list(rect),
+                                     dst=[int(x) - 0xC, int(y) - 0xC])
+            else:
+                e.beh = "p31"
+                vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
+                e.d32(0x1C, int(vx) & 0xFFFFFFFF)
+                e.d32(0x20, int(vy) & 0xFFFFFFFF)
+                e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
+                e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
+                e.d32(0x18, (abs(int(vx)) + abs(int(vy))) & 0xFFFFFFFF)
+                e.d32(0x0C, 0x18)
+                e.raw[0x10] = 1
+                e.disp = DisplayNode(layer=0, rect=[0, 0, 0, 0],
+                                     dst=[int(x) - 0xC, int(y) - 0xC])
         else:
             e.beh = "default"                     # 0x43DA4F / 0x449AA7
         queue.append(e)
