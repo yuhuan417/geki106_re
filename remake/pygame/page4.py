@@ -380,7 +380,9 @@ ENT23_INIT = {
     0x23000015: {"beh": 0x4017EE, "imm": {0x20: 0}, "d_to": 0x1C,
                  "r01sh4": ((0x24, 0), (0x28, 1))},
     0x23000016: {"beh": 0x401D48, "imm": {}},
-    0x23000017: {"beh": 0x401951, "imm": {}},
+    0x23000017: {"beh": 0x401951,
+                 "imm": {0x24: 0, 0x28: 0x1E, 0x2C: 0, 0x30: 0},
+                 "p3pair": (0x1C, 0x20)},   # ctor 0x40DDB6：[0x1C]=p3[0]、[0x20]=p3[1]
     # 0x23000018（0x40DDE4）：[+0x1C]=payload[0xC]、[+0x20]=-0x18、[+0x24]=0xF、
     #   [+0x28]=0 —— 旧表全空。
     0x23000018: {"beh": 0x4013BB, "imm": {0x20: -0x18, 0x24: 0xF, 0x28: 0},
@@ -937,6 +939,10 @@ class Ent:
                 if "vtup" in info and isinstance(d, tuple):
                     self.d32(0x1C, d[0] & 0xFFFFFFFF)
                     self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)
+                if "p3pair" in info and isinstance(d, tuple):   # 0x40DDB6：p3[0]/p3[1]
+                    o1, o2 = info["p3pair"]
+                    self.d32(o1, int(d[0]) & 0xFFFFFFFF)
+                    self.d32(o2, int(d[1]) & 0xFFFFFFFF)
         self._apply_family_init(typ, a, b, d)          # 0x24-0x2D 各族（ENT24_INIT 等）
 
     def _deref_link(self, h: int):
@@ -5918,7 +5924,7 @@ def _beh_4145A0(self, e) -> bool:
             spd += 0x100
     if (t & 7) == 0:
         self.p4_414010(e)
-    if e.g32(0x18) != -1:                           # 0x4146BC
+    if e.g32(0x18) != 0xFFFFFFFF:                           # 0x4146BC
         if linked is not None:
             linked.d32(0x24, (linked.s32(0x24) - 1) & 0xFFFFFFFF)
         else:
@@ -5973,7 +5979,7 @@ def _beh_4148B0(self, e) -> bool:
         self.p4_43B360(e, self.p4_player_x(), y + self.p4_player_y() - 0x140, 0)
     if (t & 0xF) == 0xF:
         self.p4_414010(e)
-    if e.g32(0x18) != -1:
+    if e.g32(0x18) != 0xFFFFFFFF:
         e.d32(0x18, -1 & 0xFFFFFFFF)
         if linked is not None:
             linked.d32(0x24, (linked.s32(0x24) - 1) & 0xFFFFFFFF)
@@ -8825,22 +8831,21 @@ def _beh_40FEA0(self, e) -> bool:
     if st <= 0xB:
         if st == 0:
             if t2s >= 0 and (t2 & 0x1F) == 0:
-                sy = self.p4_player_y() + ((0x30 if e.s32(0x24) < 0 else -0x30)
-                                           ^ ((~t2 >> 5) & 1) * 0x30)
+                flip = (((~t2 >> 5) & 1) ^ (1 if e.s32(0x24) < 0 else 0))
+                sy = self.p4_player_y() + (0x18 if flip else -0x18)   # 0x40FED7
                 self.p4_43B360(e, self.p4_player_x(), sy, 0x300)
         elif st == 1:
             if t2s == 0 and e.s32(0x24) < 0:
                 e.d32(0x28, 0)
-                self._p4_ent43c(0x23000017, x, y)
+                self._p4_ent43c(0x23000017, x, y, (id(main) & 0x7FFFFFFF, 0))
         elif st == 3:
             if t2s >= 0x28 and (t2 & 3) == 0:
                 self.p4_43B070(e, ((t2s - 0xA0) << 4) & 0xFFFFFFFF)
         elif st == 4:
             if t2s == 0 and e.s32(0x24) > 0:
                 e.d32(0x28, 0)
-                c = self._p4_ent43c(0x23000017, x, y)
-                c.d32(0x18, (id(main) & 0x7FFFFFFF))
-                c.d32(0x1C, 0x10000)
+                self._p4_ent43c(0x23000017, x, y,
+                                (id(main) & 0x7FFFFFFF, 0x10000))
         elif st in (5, 10):
             v24 = e.s32(0x24)
             if v24 < 0:
@@ -8866,9 +8871,9 @@ def _beh_40FEA0(self, e) -> bool:
         elif st in (9, 11):
             if t2s == 0:
                 e.d32(0x28, 0)
-                c = self._p4_ent43c(0x23000017, x, y)
-                c.d32(0x18, id(main) & 0x7FFFFFFF)
-                c.d32(0x1C, 0x10000 if e.s32(0x24) >= 0 else 0)
+                self._p4_ent43c(0x23000017, x, y,
+                                (id(main) & 0x7FFFFFFF,
+                                 0x10000 if e.s32(0x24) >= 0 else 0))
     v20 = e.s32(0x20)
     v24 = e.s32(0x24)
     x = (main.s32(0x04) + v20) & 0xFFFFFFFF
@@ -8902,7 +8907,8 @@ def _beh_410470(self, e) -> bool:
         return False
     t = e.s32(0x20) & 0xFFFF
     if main.g16(0x24) == 0 and t < 0xF:
-        self._p4_ent43c(0x23000017, main.s32(0x04), main.s32(0x08))
+        self._p4_ent43c(0x23000017, main.s32(0x04), main.s32(0x08),
+                        (id(main) & 0x7FFFFFFF, (t + 1) & 0xFFFFFFFF))
     if main.g16(0x24) < 0x6E:
         w26 = main.g16(0x26)
         if (w26 - 0x10000 if w26 & 0x8000 else w26) < ((3 * t + 3) << 3):
@@ -8920,7 +8926,7 @@ def _beh_410470(self, e) -> bool:
         else:
             v = main.s32(0x28)
             main.d32(0x28, (v + ((main.s32(0x28) - v + 2) >> 2)) & 0xFFFFFFFF)
-    if e.g32(0x18) != -1:
+    if e.g32(0x18) != 0xFFFFFFFF:
         e.d32(0x18, -1 & 0xFFFFFFFF)
         e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
     if t != 0:
@@ -8940,7 +8946,9 @@ def _beh_410470(self, e) -> bool:
     amp_s = amp - 0x10000 if amp & 0x8000 else amp
     w30 = e.g32(0x30)
     bx = w30 & 0xFFFF
+    bx = bx - 0x10000 if bx & 0x8000 else bx           # movsx word[+0x30]
     by = (w30 >> 0x10) & 0xFFFF
+    by = by - 0x10000 if by & 0x8000 else by           # movsx word[+0x32]
     x = (((c * amp_s) >> 8) + bx) & 0xFFFFFFFF
     y = (((s_ * amp_s) >> 8) + by) & 0xFFFFFFFF
     if e.s32(0x20) & 0xFFFF0000:
