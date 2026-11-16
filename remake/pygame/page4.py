@@ -12459,7 +12459,99 @@ def _beh_433480(self, e) -> bool:
     return True
 
 
+def _beh_4324B0(self, e) -> bool:
+    """`0x4324B0`（0x31000005）：母体（[0x20]==0）朝自机正弦追踪并每帧生成子体
+    （prm=1，子体只计时 0xB4 后自灭）；母体 t==0x78 自灭。"""
+    if e.s32(0x20) == 0:                           # 0x4324B6
+        t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+        e.d32(0x1C, t)
+        if t == 0x78:                              # 0x4324CA
+            return False
+        ang = (t * 40) & 0xFFFFFFFF
+        px, py = self.p4_player_x(), self.p4_player_y()
+        x = e.s32(0x04)
+        x += ((page4_cos(ang) * 9 >> 4) - x + px) >> 3
+        y = e.s32(0x08)
+        y += ((page4_sin(ang) * 9 >> 4) - y + py) >> 3
+        e.d32(0x04, x & 0xFFFFFFFF)
+        e.d32(0x08, y & 0xFFFFFFFF)
+        if e.disp is not None:
+            e.disp.dst = [x - 8, y - 8]
+        self.spawn(self._p4_q("ui49c"), 0x31000005, x, y, 1)
+        return True
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF            # 0x43257B 子体
+    e.d32(0x1C, t)
+    return t != 0xB4                               # 0x432584
+
+
+def _beh_432670(self, e) -> bool:
+    """`0x432670`（0x31000008）：t<0x20 每 4 帧 rect.y −=0x20（rect.l==0x130 时额外
+    l/r +=0x60、t/b −=0x20）；t≥0x20 生成 0x31000009、x −= (t−0x20)>>1、y −=0x10。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < 0x20:                                   # 0x43267F
+        if (t & 3) == 0 and e.disp is not None:
+            l, tp, r, b = e.disp.rect
+            e.disp.rect = [l, tp - 0x20, r, b - 0x20]
+            if l == 0x130:                         # 0x4326A9
+                e.disp.rect = [l + 0x60, tp - 0x40, r + 0x60, b - 0x40]
+        return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x10) == 1
+    self.spawn(self._p4_q("ui49c"), 0x31000009, e.s32(0x04), e.s32(0x08), 0)
+    x = (e.s32(0x04) - ((t - 0x20) >> 1)) & 0xFFFFFFFF
+    y = (e.s32(0x08) - 0x10) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.disp is not None:
+        e.disp.dst = [e.s32(0x04) - 0x10, e.s32(0x08) - 0x10]
+    return e.s32(0x18) != 0 and self.p4_4305f0(e, 0x10) == 1
+
+
+def _beh_4327A0(self, e) -> bool:
+    """`0x4327A0`（0x31000009）：t<0x10 内每 2 帧 rect.y +=0x20（rect.l==0x1B0 时
+    l/r −=0x60、t/b +=0x20）；t≥0x10 自灭；存活 HP!=0。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t >= 0x10:
+        return False
+    if (t & 1) == 0 and e.disp is not None:
+        l, tp, r, b = e.disp.rect
+        e.disp.rect = [l, tp + 0x20, r, b + 0x20]
+        if l == 0x1B0:
+            e.disp.rect = [l - 0x60, tp + 0x40, r - 0x60, b + 0x40]
+    return e.s32(0x18) != 0
+
+
+def _beh_432C80(self, e) -> bool:
+    """`0x432C80`（0x31000010）：每帧生成 0x31000011；t 从 [0x1C] 起，[0x20] 为相位界：
+    t<[0x20] → t+=2、螺旋（[0x24]/[0x28] += cos/sin(t·30)·3>>3、x=>>3）；
+    t≥[0x20] → t+=1、x=[0x24]+cos·d>>5、y=[0x28]+sin·d>>5（d=t−[0x20]），d>0x64 自灭。"""
+    self.spawn(self._p4_q("ui49c"), 0x31000011, e.s32(0x04), e.s32(0x08), 0)
+    t = e.s32(0x1C)
+    if t == e.s32(0x20):                           # 0x432CCE
+        e.d32(0x24, e.s32(0x04))
+        e.d32(0x28, e.s32(0x08))
+    ang = (t * 30) & 0xFFFFFFFF
+    if t < e.s32(0x20):                            # 0x432CDE
+        t2 = (t + 2) & 0xFFFFFFFF
+        e.d32(0x1C, t2)
+        e.d32(0x24, (e.s32(0x24) + ((page4_cos(ang) * 3) >> 3)) & 0xFFFFFFFF)
+        e.d32(0x28, (e.s32(0x28) + ((page4_sin(ang) * 3) >> 3)) & 0xFFFFFFFF)
+        e.d32(0x04, (e.s32(0x24) >> 3) & 0xFFFFFFFF)
+        e.d32(0x08, (e.s32(0x28) >> 3) & 0xFFFFFFFF)
+        return e.s32(0x18) != 0
+    t2 = (t + 1) & 0xFFFFFFFF                      # 0x432D33
+    e.d32(0x1C, t2)
+    d = t2 - e.s32(0x20)
+    e.d32(0x04, (e.s32(0x24) + ((page4_cos(ang) * d) >> 5)) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x28) + ((page4_sin(ang) * d) >> 5)) & 0xFFFFFFFF)
+    if d > 0x64:
+        return False
+    return e.s32(0x18) != 0
+
+
 P4_BEH: dict[int, object] = {
+    0x4327A0: _beh_4327A0, 0x432C80: _beh_432C80,
+    0x4324B0: _beh_4324B0, 0x432670: _beh_432670,
     0x4321C0: _beh_4321C0, 0x432250: _beh_432250, 0x432340: _beh_432340,
     0x4325E0: _beh_4325E0, 0x432820: _beh_432820, 0x4328B0: _beh_4328B0,
     0x433390: _beh_433390, 0x433480: _beh_433480,
