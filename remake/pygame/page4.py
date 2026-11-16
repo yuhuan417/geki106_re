@@ -8630,7 +8630,7 @@ def _beh_40BB60(self, e) -> bool:
             elif sub == 10:
                 if (t & 0x1F) == 0:
                     self.p4_43B070(e, 0x300)
-                    self.p4_43B150(e, 0, 0, 0x300)
+                    self.p4_43B150(e, 0x300)
             elif sub == 11:
                 if t == 0:
                     dx = self.p4_player_x() - x
