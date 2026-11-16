@@ -2639,9 +2639,10 @@ class Pages(Page4Mixin):
                 t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
                 e.d32(0x1C, t)
                 if e.disp is not None and (t & 9) in (1, 9):
+                    # 0x4323A2 的压栈序 (0,0x20,0,0x20)→0x45A790 写 out[0]/out[2]：只滑 rect.l/r
                     d = 0x20 if (t & 9) == 1 else -0x20
                     l, tp, r, b = e.disp.rect
-                    e.disp.rect = [l, tp + d, r, b + d]
+                    e.disp.rect = [l + d, tp, r + d, b]
                 acc = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF
                 drift = e.s32(0x24) - 1
                 if drift <= -0x10:
