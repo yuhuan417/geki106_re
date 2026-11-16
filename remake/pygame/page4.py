@@ -7692,19 +7692,16 @@ def _beh_41F860(self, e) -> bool:
     y28 = e.s32(0x28)
     v20 = (e.s32(0x20) - y28) & 0xFFFFFFFF
     e.d32(0x20, v20)
-    if done == 0:
+    if done == 0:                                  # 0x41FAC7
         if y28 < 0xDC:
             e.d32(0x28, (y28 + 0xA) & 0xFFFFFFFF)
         else:
-            if done == 0:
-                pass
-            if y28 < 0xF0:
-                e.d32(0x28, (y28 + 5) & 0xFFFFFFFF)
-            else:
-                e.d32(0x18, 0)
-    else:
+            e.d32(0x18, 0)                         # 0x41FAD6 → HP=0（终局）
+    else:                                          # 0x41FADB
         if y28 < 0xF0:
             e.d32(0x28, (y28 + 5) & 0xFFFFFFFF)
+        else:
+            e.d32(0x18, 0)
     if e.s32(0x04) < 0x230 and e.s32(0x24) != 0:
         e.d32(0x24, (e.s32(0x24) + 1) & 0xFFFFFFFF)
     v24 = e.s32(0x24)
@@ -7712,10 +7709,9 @@ def _beh_41F860(self, e) -> bool:
     e.d32(0x04, x)
     if e.node is not None:
         e.node.dst = (e.node.dst[0], e.node.dst[1] + v24)
-    if e.s32(0x20) == 0 and e.g32(0x18) != 0:
-        e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)
-    if e.s32(0x20) == 0:
-        e.d32(0x20, -1 & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)     # 0x41FB19 无条件 dec
+    if e.g32(0x18) == 0:                           # 0x41FB1F test HP / je
+        e.d32(0x20, 0xFFFFFFFF)
         self.p4_spawn52c_flash(x, e.s32(0x08), 0x61000004, 0x48)
         return False
     return True
