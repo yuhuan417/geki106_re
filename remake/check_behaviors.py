@@ -51,6 +51,32 @@ def missing_behaviours() -> list[tuple[str, str, str]]:
     return miss
 
 
+def undefined_self_calls() -> list[tuple[str, int]]:
+    """扫描 page4.py 里 `self.X(...)`，X 在 page4+geki 的任何类方法/实例属性里都找不到。"""
+    import ast
+    root = Path(__file__).resolve().parent / "pygame"
+    srcs = [(root / "page4.py").read_text(encoding="utf-8"),
+            (root / "geki.py").read_text(encoding="utf-8")]
+    defined: set[str] = set()
+    for src in srcs:
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.FunctionDef):
+                defined.add(node.name)
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and node.value.id == "self" and isinstance(node.ctx, ast.Store)):
+                defined.add(node.attr)
+    tree = ast.parse(srcs[0])
+    out = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "self"
+                and node.func.attr not in defined):
+            if not hasattr(page4.Page4Mixin, node.func.attr):
+                out.append((node.func.attr, node.lineno))
+    return out
+
+
 def main() -> int:
     data = geki.load_data()
     palette = geki.load_palette()
@@ -107,8 +133,14 @@ def main() -> int:
         print("0x31 跑帧异常：")
         for b in bad:
             print("  ", b)
-    if not miss and not bad:
-        print(f"OK：行为全登记，ENT 表 {tested} 型各 20 帧、0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
+    undef = undefined_self_calls()
+    if undef:
+        print("未定义的 self 方法调用：")
+        for u in undef:
+            print("  ", u)
+    if not miss and not bad and not undef:
+        print(f"OK：行为全登记、无未定义 self 调用，ENT 表 {tested} 型各 20 帧、"
+              f"0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
         return 0
     return 1
 
