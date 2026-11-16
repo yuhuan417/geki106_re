@@ -7430,12 +7430,12 @@ def _p4_41ae20_dying_common(e, x: int, y: int) -> bool:
                     e.d32(0x28, nxt)
                     if nxt == 7:
                         if gate & 0xF:
-                            return _p4_41ae20_tail(e, x, y, t)
+                            return _p4_41ae20_tail(self, e, x, y, t)
                         continue
                     if nxt == 5 and (gate & 0xF0):
                         continue
                     break
-                return _p4_41ae20_tail(e, x, y, t)
+                return _p4_41ae20_tail(self, e, x, y, t)
         elif st == 2:
             if t == 1:
                 e.d32(0x1C, self.p4_player_x() & 0xFFFFFFFF)
@@ -7536,10 +7536,10 @@ def _p4_41ae20_dying_common(e, x: int, y: int) -> bool:
                 self.spawn(self._p4_q("ui4cc"), 0x41000004,
                            x + rx - 0x30, y + ry - 0x30, (jx, jy))
             self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
-    return _p4_41ae20_tail(e, x, y, t)
+    return _p4_41ae20_tail(self, e, x, y, t)
 
 
-def _p4_41ae20_tail(e, x: int, y: int, t: int) -> bool:
+def _p4_41ae20_tail(self, e, x: int, y: int, t: int) -> bool:
     """`0x41AE20` 公共尾 0x41B316：t/total 推进、HP 钳、死亡转态 9、node dst。"""
     t = (t + 1) & 0xFFFFFFFF
     e.d32(0x24, t)
