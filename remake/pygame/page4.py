@@ -8157,8 +8157,7 @@ def _beh_40BB60(self, e) -> bool:
             if t1 < 0x74:
                 a = (45 * t1) & 0xFFFFFFFF
                 self.spawn(self._p4_q("ui49c"), 0x32000010, x,
-                           y + ((page4_sin(a) >> 4) - page4_sin(a)), 0) \
-                    if False else None
+                           y + ((page4_sin(a) >> 4) - page4_sin(a)), 0)
             else:
                 pass
         elif mt == 4:
@@ -8184,8 +8183,7 @@ def _beh_40BB60(self, e) -> bool:
                     self.p4_player_y() - (main.s32(0x24) >> 6) - y)
                 a = ((main.s32(0x1C) - 0x1E) >> 1) * 180
                 a = (a + da + 0x55F) & 0xFFFFFFFF
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0) \
-                    if False else None
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
             elif t1 < 0xF0:
                 if 0xD2 <= t1 < 0xD6:
                     pass
@@ -8640,8 +8638,7 @@ def _beh_4047E0(self, e) -> bool:
             sx = page4_sin(edi)
             c2 = page4_cos(edi)
             self.p4_43B430(e, (0x2E + 0x38) + sx, (0xDE + 0x3C) + c2,
-                           -0x500 & 0xFFFFFFFF) \
-                if False else None
+                           -0x500 & 0xFFFFFFFF)
             edi -= 0xC8
     if e.g32(0x28) & 1:
         if t % 0xA0 == 0x20:
@@ -8678,11 +8675,9 @@ def _beh_404D00(self, e) -> bool:
         xx = -0x40
         while xx <= 0x20:
             self.spawn(self._p4_q("ui4fc"), 0x5C000001,
-                       x - 0x60 if False else x + xx, y + 0x50, 0) \
-                if False else None
-            self.spawn(self._p4_q("ui4fc"), 0x5C000001, x + xx, y + 0x50, 0)
+                       e.s32(0x04) + xx, e.s32(0x08) + 0x50, 0)
             xx += 0x18
-        self._p4_4047e0_se(0x14, (x - 0x140) << 4)
+        self._p4_4047e0_se(0x14, (e.s32(0x04) - 0x140) << 4)
     e.d32(0x24, a24)
     c = page4_cos((a24 + 0x12C) & 0xFFFFFFFF)
     s_ = page4_sin(a24)
@@ -8709,8 +8704,7 @@ def _beh_404D00(self, e) -> bool:
             sx = page4_sin(edi)
             c2 = page4_cos(edi)
             self.p4_43B430(e, (0x2E + 0x38) + sx, (0xDE + 0x3C) + c2,
-                           -0x500 & 0xFFFFFFFF) \
-                if False else None
+                           -0x500 & 0xFFFFFFFF)
             edi -= 0xC8
     return True
 
@@ -9006,11 +9000,10 @@ def _beh_40FEA0(self, e) -> bool:
             v24 = e.s32(0x24)
             if v24 < 0:
                 if (t2 & (0x3F if st == 5 else 0xF)) == (0x30 if st == 5 else 4):
-                    self._p4_ent43c(0x23000019, x, y)
-                    e.d32(0x24, -0x48 & 0xFFFFFFFF) if False else None
+                    self._p4_ent43c(0x23000019, x, y, -0x48)
             elif v24 > 0:
                 if (t2 & (0x3F if st == 5 else 0xF)) == (0x10 if st == 5 else 0xB):
-                    self._p4_ent43c(0x23000019, x, y)
+                    self._p4_ent43c(0x23000019, x, y, 0x48)
             # 0x23000019 的 prm=±0x48 由 ctor 键控（此处仅铺件）
         elif st == 6:
             self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
@@ -9868,10 +9861,8 @@ def _beh_405510(self, e) -> bool:
         if x < self.p4_player_x():
             dx = 0
             while dx >= -0xC00:
-                self.p4_43B290(e, 0, dx, -0xC00 & 0xFFFFFFFF) \
-                    if False else None
-                self.p4_43B290(e, dx, 0, -0xC00 & 0xFFFFFFFF) \
-                    if False else None
+                self.p4_43B290(e, 0, dx, -0xC00 & 0xFFFFFFFF)
+                self.p4_43B290(e, dx, 0, -0xC00 & 0xFFFFFFFF)
                 dx -= 0x80
             # 字面：(push edi(−0xC00..), push 0xFFFFFF00(=−0x100? y 向), push 0)
             # 0x43B290(e, −0x100? ...) —— 参数序：arg1=−0xC00..、arg2=−0x100、arg3=0
@@ -10509,8 +10500,7 @@ def _beh_407350(self, e) -> bool:
                 xx = 0x28
                 ebx = 0xC8
                 while ebx >= -0xC8:
-                    self._p4_ent43c(0x2C000013, 0x298 + (abs(ebx) if False else (ebx ^ 0xF100 if False else ebx)) if False else 0x298 + (ebx ^ 0) if False else 0x298, 0) \
-                        if False else None
+                    self._p4_ent43c(0x2C000013, 0x298 + (abs(ebx) if False else (ebx ^ 0xF100 if False else ebx)) if False else 0x298 + (ebx ^ 0) if False else 0x298, 0)
                     self._p4_ent43c(0x2C000013, 0x298 + (ebx if ebx >= 0 else -ebx), xx)
                     ebx -= 0x32
                     xx += 0x32
@@ -19338,7 +19328,16 @@ class Page4Mixin:
 # 但调用点一律是 `self.p4_xxx(...)`。缺了这层注入，任何走到这些调用点的行为都会
 # AttributeError（例：0x26 族的 0x414010 弹流贴图滚动）。只补类里没有的同名函数，
 # 不覆盖类内已有实现。
+import inspect as _p4_inspect
 for _p4_name, _p4_fn in list(globals().items()):
-    if (_p4_name.startswith("p4_") and callable(_p4_fn)
-            and not hasattr(Page4Mixin, _p4_name)):
+    if not (_p4_name.startswith("p4_") or _p4_name.startswith("_p4_")):
+        continue
+    if not callable(_p4_fn) or hasattr(Page4Mixin, _p4_name):
+        continue
+    try:
+        _p4_params = list(_p4_inspect.signature(_p4_fn).parameters)
+    except (TypeError, ValueError):
+        continue
+    # 只挂“第一个参数是 self”的辅助函数（纯函数如 _p4_s16(x) 不能当方法）
+    if _p4_params and _p4_params[0] == "self":
         setattr(Page4Mixin, _p4_name, _p4_fn)
