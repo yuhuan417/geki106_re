@@ -2519,14 +2519,16 @@ def _beh_410E10(self, e) -> bool:
         e.d32(0x24, 0xFFFFFFFF)        # 反转：加速衰减
     elif accel_s == -0x20:
         e.d32(0x24, 1)
-    # 帧动画：x 低 2 位=0 时
-    if (e.s32(4) & 3) == 0:
-        e.d32(0x28, e.s32(0x28))       # 原版 0x45A790(node,0,0x28,0,0x28)（src 步进）
-    # y 门：node dst.x == 0x120 → [0x28]=−0x30；== 0 → [0x28]=0x30
+    # 0x410E46：x 低 2 位=0 → 0x45A790(node+4, [0x28],0,[0x28],0)，只滑 rect.l/r
+    if (e.s32(4) & 3) == 0 and e.node is not None:
+        v = e.s32(0x28)
+        e.node.rect = (e.node.rect[0] + v, e.node.rect[1],
+                       e.node.rect[2] + v, e.node.rect[3])
+    # 0x410E5E：比较 node+4（rect.l）0x120 / 0
     if e.node is not None:
-        if e.node.dst[0] == 0x120:
+        if e.node.rect[0] == 0x120:
             e.d32(0x28, 0xFFFFFFD0)
-        elif e.node.dst[0] == 0:
+        elif e.node.rect[0] == 0:
             e.d32(0x28, 0x30)
     # 开火
     if accel_s == 0 and flip == e.s32(0x2C):
@@ -2541,10 +2543,38 @@ def _beh_410E10(self, e) -> bool:
 
 
 def _beh_411200(self, e) -> bool:
-    """`0x411200`（0x24000005/06，×25）： scripted 移动 + 方向朝敌 + 周期开火。
-    逐条对 0x411200 反汇编（读定时追加精修）。"""
-    # 暂用 v0 式匀速近似：[0x20] 为打包速度
-    return _beh_411990(self, e)
+    """`0x411200`（0x24000005；0x24000006 共用）：**16 位双通道摆动 + 打包速度**。
+
+    word[0x20] -= 2；低字节==0 且 [0x1C]!=0 → 0x43B070(e,0)。
+    [0x28]<=0 → word[0x24]+=1 否则 −1；[0x2C]<=0 → word[0x26]+=1 否则 −1；
+    [0x28]+=(int16)word[0x24]、[0x2C]+=(int16)word[0x26]；
+    x=(int16)word[0x20] + ([0x28]+1)>>1、y=(int16)word[0x22] + ([0x2C]+2)>>2。
+    存活 = HP!=0 && ((int16)word[0x20]>=0 || x>=-0x18)。
+    """
+    w20 = (e.g16(0x20) - 2) & 0xFFFF
+    e.d16(0x20, w20)
+    if (w20 & 0xFF) == 0 and e.s32(0x1C) != 0:
+        self.p4_43B070(e, 0)
+    v28, v2c = e.s32(0x28), e.s32(0x2C)
+    e.d16(0x24, (e.g16(0x24) + (1 if v28 <= 0 else -1)) & 0xFFFF)
+    e.d16(0x26, (e.g16(0x26) + (1 if v2c <= 0 else -1)) & 0xFFFF)
+    def s16(v):
+        return v - 0x10000 if v & 0x8000 else v
+    v28 = (v28 + s16(e.g16(0x24))) & 0xFFFFFFFF
+    v2c = (v2c + s16(e.g16(0x26))) & 0xFFFFFFFF
+    e.d32(0x28, v28)
+    e.d32(0x2C, v2c)
+    sx = s16(e.g16(0x20))
+    sy = s16(e.g16(0x22))
+    v28s = v28 - 0x100000000 if v28 & 0x80000000 else v28
+    v2cs = v2c - 0x100000000 if v2c & 0x80000000 else v2c
+    x = (sx + ((v28s + 1) >> 1)) & 0xFFFFFFFF
+    y = (sy + ((v2cs + 2) >> 2)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = ((x - 0x18) & 0xFFFFFFFF, (y - 0x18) & 0xFFFFFFFF)
+    return e.g32(0x18) != 0 and (sx >= 0 or e.s32(0x04) >= -0x18)
 
 
 def _beh_411040(self, e) -> bool:
@@ -2577,8 +2607,35 @@ def _beh_411040(self, e) -> bool:
 
 
 def _beh_411120(self, e) -> bool:
-    """`0x411120`（0x24000004，×5）：[0x20]=rec1<<3 匀速。"""
-    return _beh_411990(self, e)
+    """`0x411120`（0x24000004，×5）：三段式（0x50/0x68/0x69/0x91）。
+
+    t=++[0x1C]；t>0x50：
+      t<=0x68 且 t&3==0 → [0x24]=0、rect.l/r −=0x30；
+      否则 x+=3、[0x24]−−，t==0x69 或 0x91 → 0x43B070(e,0)。
+    [0x20]+=[0x24]；y=[0x20]>>3；dst=(x−0x18,y−0x18)；
+    存活 = x<0x298 && y>−0x18 && HP!=0。
+    """
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t > 0x50:
+        if t <= 0x68 and (t & 3) == 0:
+            e.d32(0x24, 0)
+            if e.node is not None:
+                e.node.rect = (e.node.rect[0] - 0x30, e.node.rect[1],
+                               e.node.rect[2] - 0x30, e.node.rect[3])
+        else:
+            e.d32(0x04, (e.s32(0x04) + 3) & 0xFFFFFFFF)
+            e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+            if t == 0x69 or t == 0x91:
+                self.p4_43B070(e, 0)
+    v20 = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x20, v20)
+    v20s = v20 - 0x100000000 if v20 & 0x80000000 else v20
+    y = v20s >> 3
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, y - 0x18)
+    return (e.s32(0x04) < 0x298 and y > -0x18 and e.g32(0x18) != 0)
 
 
 def _beh_411C10(self, e) -> bool:
@@ -2743,12 +2800,14 @@ def _beh_410F20(self, e) -> bool:
         e.d32(0x24, 0xFFFFFFFF)
     elif accel_s == -0x40:
         e.d32(0x24, 1)
-    if (e.s32(4) & 3) == 0:
-        e.d32(0x28, e.s32(0x28))
+    if (e.s32(4) & 3) == 0 and e.node is not None:
+        v = e.s32(0x28)
+        e.node.rect = (e.node.rect[0] + v, e.node.rect[1],
+                       e.node.rect[2] + v, e.node.rect[3])
     if e.node is not None:
-        if e.node.dst[0] == 0x120:
+        if e.node.rect[0] == 0x120:
             e.d32(0x28, 0xFFFFFFD0)
-        elif e.node.dst[0] == 0:
+        elif e.node.rect[0] == 0:
             e.d32(0x28, 0x30)
     if accel_s == 0 or abs(accel_s) == 0x40:
         if e.s32(0x2C) != 0:
@@ -3904,7 +3963,7 @@ def _beh_4113E0(self, e) -> bool:
     `0x45A6B0(node+0x14, [0x20]>>1, −2)`（dst 同步）；return y > −0x18 且 HP≠0。"""
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
-    step = -1 if (t & 0x40) else 1                  # 0x4113EC 两分支同语义
+    step = 1 if ((t & 0x10) == (t & 0x40)) else -1   # 0x4113EC test 0x10 / 0x4113FC 两分支
     acc = (e.s32(0x20) + step) & 0xFFFFFFFF
     e.d32(0x20, acc)
     acc_s = acc - 0x100000000 if acc & 0x80000000 else acc
@@ -8991,8 +9050,8 @@ def _beh_4114C0(self, e) -> bool:
         xx = (((v - 1) & 7) + 2) * 80
         self._p4_ent43c(0x24000009, xx, -0x18)
         e.m[0x10] = 1
-    x = (e.s32(0x04) + (t >> 3)) & 0xFFFFFFFF
-    y = (e.s32(0x08) - (t >> 4)) & 0xFFFFFFFF
+    x = (e.s32(0x04) - (t >> 4)) & 0xFFFFFFFF     # 0x411530/535：x -= t>>4
+    y = (e.s32(0x08) + (t >> 3)) & 0xFFFFFFFF     # 0x41152D/533：y += t>>3
     e.d32(0x04, x)
     e.d32(0x08, y)
     if e.node is not None:
@@ -9013,11 +9072,11 @@ def _beh_411790(self, e) -> bool:
     if t == 0:
         e.m[0x10] = 1
         if e.s32(0x24) != 0:
-            rx = self.p4_rand() % 0xF0 + 0x1F8
-            ry = self.p4_rand() % 0x1E0 + 0x140
+            rx = self.p4_rand() % 0x1E0 + 0x140   # 0x4117E9/0x4117F4：x
+            ry = self.p4_rand() % 0xF0 + 0x1F8    # 0x4117DD/0x4117EF：y
             self._p4_ent43c(0x2400000C, rx, ry, e.s32(0x24) - 1)
     v = e.s32(0x20)
-    v = (v + (-1 if v == 0 else 0)) & 0xFFFFFFFF
+    v = (v + (-1 if v != 0 else 0)) & 0xFFFFFFFF
     e.d32(0x20, v)
     x = (e.s32(0x04) - 4) & 0xFFFFFFFF
     y = (e.s32(0x08) - (v >> 1)) & 0xFFFFFFFF
