@@ -12568,7 +12568,47 @@ def _beh_432C80(self, e) -> bool:
     return e.s32(0x18) != 0
 
 
+def _beh_432DC0(self, e) -> bool:
+    """`0x432DC0`（0x31000011）：t<3 有碰撞；t==5 自灭；t!=1 时 rect.y +=0x20。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    e.raw[0x10] = 1 if t < 3 else 0
+    if t == 5:
+        return False
+    if t != 1 and e.disp is not None:
+        e.disp.rect = [e.disp.rect[0], e.disp.rect[1] + 0x20,
+                       e.disp.rect[2], e.disp.rect[3] + 0x20]
+    return e.s32(0x18) != 0
+
+
+def _beh_432FE0(self, e) -> bool:
+    """`0x432FE0`（0x31000014）：t<0xA0 有碰撞；每 0x10 帧 rect.y +=0x18；
+    node.active=(−0xC<y<0x1EC)；存活 = rect.l != 0x108。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    e.raw[0x10] = 1 if t < 0xA0 else 0
+    if (t & 0xF) == 0 and e.disp is not None:
+        e.disp.rect = [e.disp.rect[0], e.disp.rect[1] + 0x18,
+                       e.disp.rect[2], e.disp.rect[3] + 0x18]
+    if e.disp is not None:
+        y = e.s32(0x08)
+        e.disp.active = 1 if (-0xC < y < 0x1EC) else 0
+        return e.disp.rect[0] != 0x108
+    return True
+
+
+def _beh_433340(self, e) -> bool:
+    """`0x433340`（0x31000018）：t 偶数帧 rect.y +=0x18；t==5 自灭。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if (t & 1) == 0 and e.disp is not None:
+        e.disp.rect = [e.disp.rect[0], e.disp.rect[1] + 0x18,
+                       e.disp.rect[2], e.disp.rect[3] + 0x18]
+    return t != 5
+
+
 P4_BEH: dict[int, object] = {
+    0x432DC0: _beh_432DC0, 0x432FE0: _beh_432FE0, 0x433340: _beh_433340,
     0x4327A0: _beh_4327A0, 0x432C80: _beh_432C80,
     0x4324B0: _beh_4324B0, 0x432670: _beh_432670,
     0x4321C0: _beh_4321C0, 0x432250: _beh_432250, 0x432340: _beh_432340,
