@@ -12822,6 +12822,121 @@ _P4_27_TAIL_TYPES = frozenset((
     0x2700000C, 0x2700000D, 0x2700000E,
 ))
 
+
+def _beh_432C00(self, e) -> bool:
+    """`0x432C00`（0x3100000F ×5）：静止 5 帧换一档，共 4 档；前 3 档可碰撞。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 5:
+        if e.node is not None:
+            e.node.rect = (e.node.rect[0] + 0x20, e.node.rect[1],
+                           e.node.rect[2] + 0x20, e.node.rect[3])
+        e.d32(0x1C, 0)
+        c = (e.s32(0x20) + 1) & 0xFFFFFFFF
+        e.d32(0x20, c)
+        e.m[0x10] = 1 if c < 3 else 0
+        if c == 4:
+            return False
+    return e.g32(0x18) != 0
+
+
+def _beh_4331C0(self, e) -> bool:
+    """`0x4331C0`（0x31000010/16 定格动画）：t=++[0x1C]，t−2 索引字节表 0x433230，
+    跳表 0x43321C：0→rect.y−=0x18；1→rect.x−=0x18、y+=0x48；2→关碰撞再 y−=0x18；
+    3→return 0；4→无操作。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    idx = t - 2
+    if idx < 0 or idx > 0xE:
+        return True
+    sel = _P4_433230[idx]
+    if sel == 3:
+        return False
+    if sel == 4:
+        return True
+    if e.node is not None:
+        r = e.node.rect
+        if sel == 1:
+            e.node.rect = (r[0] - 0x18, r[1] + 0x48, r[2] - 0x18, r[3] + 0x48)
+        else:
+            if sel == 2:
+                e.m[0x10] = 0
+            e.node.rect = (r[0], r[1] - 0x18, r[2], r[3] - 0x18)
+    elif sel == 2:
+        e.m[0x10] = 0
+    return True
+
+
+_P4_433230 = (0, 4, 0, 4, 0, 4, 1, 4, 2, 4, 0, 4, 0, 4, 3)
+
+
+def _beh_432E30(self, e) -> bool:
+    """`0x432E30`（0x31000012）：8.4 定点直线；每 0xF 帧 rect 右移 8 并加大半径。"""
+    a24 = e.s32(0x24)
+    e.d32(0x28, (e.s32(0x28) + ((page4_cos(a24) * 3) >> 4)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + ((page4_sin(a24) * 3) >> 4)) & 0xFFFFFFFF)
+    x = (e.s32(0x28) >> 4) & 0xFFFFFFFF
+    y = (e.s32(0x2C) >> 4) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if (t & 0xF) == 0 and e.s32(0x20) != 0x40:
+        if e.node is not None:
+            r = e.node.rect
+            e.node.rect = (r[0] + e.s32(0x20), r[1], r[2] + e.s32(0x20) + 8, r[3] + 8)
+        e.d32(0x0C, (e.s32(0x0C) + 4) & 0xFFFFFFFF)
+        e.d32(0x20, (e.s32(0x20) + 8) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - e.s32(0x0C), y - e.s32(0x0C))
+    return t < 0x100 and e.g32(0x18) != 0
+
+
+def _beh_433260(self, e) -> bool:
+    """`0x433260`（0x31000017）：2.2 定点 + 每帧 0x31000018 拖尾；出屏自灭。"""
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    x = (e.s32(0x24) >> 2) & 0xFFFFFFFF
+    y = (e.s32(0x28) >> 2) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    self.spawn(self._p4_q("ui49c"), 0x31000018, x, y, 0)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0xC)
+    return not (x < -0x18 or x > 0x298 or y < -0x18 or y > 0x1E0) and e.g32(0x18) != 0
+
+
+def _beh_433AD0(self, e) -> bool:
+    """`0x433AD0`（0x3100001F）：8.8 积分，四边界反号，反弹 4 次后消失。"""
+    x = (e.s32(0x24) >> 8) & 0xFFFFFFFF
+    y = (e.s32(0x28) >> 8) & 0xFFFFFFFF
+    vx = e.s32(0x1C)
+    vy = e.s32(0x20)
+    bounce = False
+    if x < 0 and vx < 0:
+        vx = (-vx) & 0xFFFFFFFF; bounce = True
+    if x > 0x280 and vx > 0:
+        vx = (-vx) & 0xFFFFFFFF; bounce = True
+    if y < 0 and vy < 0:
+        vy = (-vy) & 0xFFFFFFFF; bounce = True
+    if y > 0x1E0 and vy > 0:
+        vy = (-vy) & 0xFFFFFFFF; bounce = True
+    if bounce:
+        e.d32(0x1C, vx)
+        e.d32(0x20, vy)
+        c = (e.s32(0x2C) + 1) & 0xFFFFFFFF
+        e.d32(0x2C, c)
+        if e.s32(0x2C) < 5:
+            self._p4_4047e0_se(0xF, (x - 0x140) << 4)
+    e.d32(0x24, (e.s32(0x24) + vx) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + vy) & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x24) >> 8) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x28) >> 8) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0xC, e.s32(0x08) - 0xC)
+    return e.s32(0x2C) < 4
+
+
 P4_BEH: dict[int, object] = {
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
