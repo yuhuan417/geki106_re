@@ -1568,3 +1568,6 @@ Stage1 的 res_46 有两条：`t=1260 (664,160,0x21000001,0x32000002)`、
 命中 → 返回 0，流永久冻结但 VM 不算耗尽。复刻此前置 `vm.term=1`（被当作耗尽、可能触发
 重启/换流）。改为 `vm.halt=True`：step 当帧 return 1、不推进；下帧由 `p4_flow_vm` 把
 sysf 镜像到 `vm.flags` 后返回 0。
+- 0x2A00000A ctor（0x40A767）：beh 0x401E29(→0x40D030)、r=0x78、HP=0x3E80、
+  byte[+0x10]=0、层2、rect(0,0,0xEF,0xEF)、dst=(x−0x78,y−0x78)。表内原有一条重复项
+  （无 node）已删。
