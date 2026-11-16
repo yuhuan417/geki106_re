@@ -994,6 +994,13 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s2c05"):                          # 0x403C31：0x2C000005
+            self.d32(0x18, 1)
+            self.m[0x10] = 1
+            self.d32(0x24, (a << 8) & 0xFFFFFFFF)
+            self.d32(0x28, (b << 8) & 0xFFFFFFFF)
+            if self.node is not None:
+                self.node.dst = (a - 0x18, b - 0x18)
         if info.get("s2907"):                          # 0x41C16E：0x29000007..0B 共用
             tgt = self._deref_link(d) if d else None
             if a != 0:                                  # rec0 != 0：普通僚机
@@ -2648,7 +2655,7 @@ ENT2C_INIT = {
     0x2C000004: {"beh": 0x401A55, "imm": {0x0C: 0x18, 0x18: 0x100, 0x20: -0x2F,
                                           0x24: 0x11, 0x28: 0}, "d_to": 0x1C,
                  "node": (2, 0xC0, 0x30, 0xEF, 0x5F), "dst": (0, 0), "b10_1": True},
-    0x2C000005: {"beh": 0x40101E, "imm": {0x0C: 0x18},
+    0x2C000005: {"beh": 0x40101E, "imm": {0x0C: 0x18}, "s2c05": True,
                  "node": (2, 0xC0, 0x30, 0xEF, 0x5F), "dst": (0, 0), "b10_1": True},
     0x2C000006: {"beh": 0x401EE7, "imm": {0x0C: 0x18, 0x18: 0x20, 0x1C: -0x618},
                  "r1sh": (0x20, 8),
