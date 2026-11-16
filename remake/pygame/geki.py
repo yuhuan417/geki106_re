@@ -346,6 +346,18 @@ class Layers:
         if n in self.tab:
             self.tab[n].ckey = idx & 0xFF
 
+    def fill(self, n: int, rect, idx: int) -> None:
+        """0x401794(0x4AA7B0, n, &rect, color)：COLORFILL 到第 n 层表面。"""
+        lay = self.tab.get(n)
+        if lay is None:
+            return
+        l, t, r, b = (int(v) for v in rect)
+        l = max(0, min(l, lay.w)); r = max(0, min(r, lay.w))
+        t = max(0, min(t, lay.h)); b = max(0, min(b, lay.h))
+        if r > l and b > t:
+            lay.buf[t:b, l:r] = idx & 0xFF
+            lay.dirty = True
+
     def ggd_path(self, ggd_id: int) -> Path | None:
         name = self.strings.get(str(ggd_id))
         if not name:

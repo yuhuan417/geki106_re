@@ -8464,7 +8464,10 @@ def _beh_40B040(self, e) -> bool:
         elif mt == 0xE:
             tt = main.s32(0x1C)
             if tt in (0x78, 0xA3, 0xCD):
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+                # exe 0x40B114 push ebp（=自挂件实体）→ rec3 = 自句柄
+                _h = id(e) & 0x7FFFFFFF
+                self.p4_links[_h] = e
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, _h)
         m28 = main.s32(0x28)
         sub = (main.s32(0x20) - 1) if m28 == 0 else -1
         if 0 <= sub <= 0xC:
@@ -8589,6 +8592,25 @@ def _beh_40CE90(self, e) -> bool:
             and e.g32(0x18) != 0)
 
 
+def _p4_40b940(self, e, arg: int) -> None:
+    """`0x402202→0x40B940`（0x2A000004 旗文字横幅）：[e+0x30] 相位字节。
+
+    bit0==1 → 节点矩形 (−0x28,−8,0x37,0x27)，否则 (−0x38,−8,0x37,0x27)
+    （0x40238D 0x45A750 压栈序）；0x44D4F0(0x4AA7B0, 2, 块B{矩形(0x1E0,0xA0/0,
+    0x27F,0x13F/0x9F), 0x138, 0x98}, 块A, arg) = **波形文字**（sin/cos(arg) 波、
+    byte[0x4AA7B0+0x84] 门）——0x44D4F0 未建模（§16.384 簇，矩阵标注）。
+    bit0 且文字门开 → 0x401794(0x4AA7B0, 2, 节点+4, 0) 矩形填色 0。
+    [e+0x30]++（无返回值，ret 4）。"""
+    ph = e.s32(0x30)
+    r1 = (-0x28, -8, 0x37, 0x27) if (ph & 1) else (-0x38, -8, 0x37, 0x27)
+    r2 = (0x1E0, 0xA0, 0x27F, 0x13F) if (ph & 2) else (0x1E0, 0, 0x27F, 0x9F)
+    if (ph & 1) and getattr(self, "_p4_text84", True):
+        if e.node is not None:
+            e.node.rect = r1
+            self.layers.fill(2, r1, 0)                 # 0x40BA34 0x401794(…,2,rect,0)
+    e.d32(0x30, (ph + 1) & 0xFFFFFFFF)
+
+
 def _beh_40BB60(self, e) -> bool:
     """`0x40BB60`（0x2A000004，0x40A930 三件套之三）：**挂件体（镜像十三态）**。
 
@@ -8631,12 +8653,10 @@ def _beh_40BB60(self, e) -> bool:
         mt = main.s32(0x20)
         if mt == 3:
             t1 = main.s32(0x1C)
-            if t1 < 0x74:
-                a = (45 * t1) & 0xFFFFFFFF
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x,
-                           y + ((page4_sin(a) >> 4) - page4_sin(a)), 0)
+            if t1 < 0x74:                              # 0x40BBEE jge
+                self._p4_40b940(e, ((t1 >> 1) * 180) & 0xFFFFFFFF)   # 0x40BBF3..0x40BC01
             else:
-                pass
+                self._p4_40b940(e, 0)                  # 0x40BC0B push 0
         elif mt == 4:
             a = (45 * main.s32(0x1C) - 0x5F) & 0xFFFFFFFF
             s_ = page4_sin(a)
@@ -8658,12 +8678,11 @@ def _beh_40BB60(self, e) -> bool:
                 da = self.p4_45a9a0(
                     self.p4_player_x() - (main.s32(0x20) >> 6) - x,
                     self.p4_player_y() - (main.s32(0x24) >> 6) - y)
-                a = ((main.s32(0x1C) - 0x1E) >> 1) * 180
-                a = (a + da + 0x55F) & 0xFFFFFFFF
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+                s_ = page4_sin(((main.s32(0x1C) - 0x1E) >> 1) * 180)
+                self._p4_40b940(e, (da + 3 * s_ + 0x55F) & 0xFFFFFFFF)  # 0x40BD0A..0x40BD1B
             elif t1 < 0xF0:
                 if 0xD2 <= t1 < 0xD6:
-                    pass
+                    pass                               # 0x40BD30 call 0x402202（edx 栈残留，标 unclear）
                 main.d32(0x20, (main.s32(0x20)
                                 + main.s32(0x28) * (0xD2 - t1)) & 0xFFFFFFFF)
                 main.d32(0x24, (main.s32(0x24)
@@ -8673,7 +8692,10 @@ def _beh_40BB60(self, e) -> bool:
         elif mt == 0xE:
             t1 = main.s32(0x1C)
             if t1 in (0, 0x2B, 0x55):
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+                # exe 0x40BDA0 push ebx（=自挂件实体）→ rec3 = 自句柄
+                _h = id(e) & 0x7FFFFFFF
+                self.p4_links[_h] = e
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, _h)
         sub = (main.s32(0x20) - 1) if main.s32(0x28) == 0 else -1
         if 0 <= sub <= 0xC:
             t = main.s32(0x1C)
@@ -8804,7 +8826,10 @@ def _beh_40C590(self, e) -> bool:
         elif mt == 0xE:
             t1 = main.s32(0x1C)
             if t1 in (0x3C, 0x67, 0x91):
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, 0)
+                # exe 0x40C664 push ebp（=自挂件实体）→ rec3 = 自句柄
+                _h = id(e) & 0x7FFFFFFF
+                self.p4_links[_h] = e
+                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, _h)
         sub = (main.s32(0x20) - 1) if main.s32(0x28) == 0 else -1
         if 0 <= sub <= 0xC:
             t = main.s32(0x1C)
