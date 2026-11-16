@@ -8147,7 +8147,7 @@ def _beh_41F010(self, e) -> bool:
                 e.d32(0x1C, 6)
                 e.d32(0x28, -0x40 & 0xFFFFFFFF)
             nt = e.s32(0x1C)
-            if nt <= 0x405 and (nt & 0xF) == 5:
+            if nt <= 0x405 and (nt & 0xFF) == 5:      # 0x41F1AC：cmp al,5（低字节）
                 c30 = e.s32(0x30)
                 if c30 != 0:
                     odd = (nt & 0x200) != 0
