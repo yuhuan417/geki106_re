@@ -7518,11 +7518,20 @@ def _beh_41D080(self, e) -> bool:
     if t > 0x1518:
         e.d32(0x18, 0)
     if e.g32(0x18) != 0:
-        # 0x430860(0x4AD43C) == 1：队列 +0x24 忙标志（复刻侧暂以 False 处理）
-        if e.s32(0x2C) != 0 and e.s32(0x04) > 0x118:
-            e.d32(0x04, (e.s32(0x04) - 1) & 0xFFFFFFFF)
+        if self.p4_430860(self.p4_q43c) == 1:      # 0x41D206 队列只剩自身 → 爆炸
+            self.spawn(self._p4_q("ui4cc"), 0x49000005, e.s32(0x04), e.s32(0x08),
+                       e.s32(0x2C))
+            return False
+        x = e.s32(0x04)
+        if e.s32(0x2C) != 0 and x > 0x118:
+            x = (x - 1) & 0xFFFFFFFF
+            e.d32(0x04, x)
+        if x <= 0x118:                            # 0x41D22A → 发 0x49000005
+            self.spawn(self._p4_q("ui4cc"), 0x49000005, x, e.s32(0x08),
+                       e.s32(0x2C))
+            return False
         if e.node is not None:
-            e.node.dst = (e.s32(0x04) - 0x60, e.s32(0x08) - 0x60)
+            e.node.dst = (x - 0x60, e.s32(0x08) - 0x60)
         return True
     self.spawn(self._p4_q("ui4cc"), 0x49000005, e.s32(0x04), e.s32(0x08),
                e.s32(0x2C))
