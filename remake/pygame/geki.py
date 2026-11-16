@@ -3326,9 +3326,16 @@ class Pages(Page4Mixin):
 
     def _beh_425CD0(self, e: UiEntity) -> bool:
         """0x425CD0（0x5F00000D 3 値窓、thunk 0x401C17）：
-        v = 0x45AFC0(0x4AB5B0, [0x1C]) & 3；rect.l = {0, 0x60, 0xC0}[v]、rect.r = l+0x5F；可視=1。"""
+
+        `v = 0x45AFC0(0x4AB5B0, [+0x1C]) & 3`；查**4 项**栈表
+        `{0:0, 1:0x60, 2:0, 3:0xC0}`（0x425CD6..0x425CF1 依次写 local[0]=0、
+        local[1]=0x60、local[2]=0、local[3]=0xC0；`0x45AFC0` 是 `ret 4`，调用后
+        esp 回到 local 基址），再 `rect.l=tbl[v]`、`rect.r=l+0x5F`、可視=1。
+        ⚠ 旧实现只写了 3 项 `(0,0x60,0xC0)` ⇒ 调整页把 0x18 字段切到 3 时
+        `v&3==3` 直接 IndexError（用户崩溃栈 0x425CD0）。
+        """
         v = self.keys.field(e.s32(0x1C) & 0xFFFFFFFF) & 3
-        l = (0, 0x60, 0xC0)[v & 3]
+        l = (0, 0x60, 0, 0xC0)[v & 3]
         if e.node is not None:
             e.node.active = 1
             e.node.rect[0] = l
