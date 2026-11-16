@@ -180,6 +180,7 @@ class ScriptVM:
     # 0x4602D0(this, chain)
     def load_chain(self, chain: int) -> None:
         self.flags = 0                       # 0x4602D4 0x401064
+        self.halt = False                    # 0x4606C2 当帧 return 1 但不置 [+0x34]
         # 0x460280 的 reset：queue/frame/cur/buf/term 全清（旧实现只 append，二次装链会残留）
         self.queue = []
         self.frame = 0
@@ -256,7 +257,10 @@ class ScriptVM:
                     return 1
                 continue                      # 游标已重置，不叠加 edi
             self.exec_op(op, self.buf[self.cur + 4:self.cur + edi])
-            if self.term:                     # 0x4606C2：op0B 装层失败 → 当帧 return 1，不推进
+            if self.halt:                     # 0x4606C2：op0B 失败 → 当帧 return 1、不推进、不置 term
+                self.halt = False
+                return 1
+            if self.term:
                 return 1
             self.cur += edi                   # 0x4603EE
             if not self.buf:                  # 0x460404
@@ -19532,7 +19536,7 @@ class Page4Mixin:
                     print(f"[p4layers] bind FAIL layer={i} id={v} res={res}")
                 self.flags.set(2)                 # 0x4606B3
                 self.sysf.set(1)                  # 0x4606BD：冻结门 0x56CC84 |= 1
-                self.vm.term = 1                  # 0x4606C2：当帧 return 1
+                self.vm.halt = True               # 0x4606C2：当帧 return 1、不推进、不置 [+0x34]
                 break
             self.layers.color_key(i, 0)           # 0x460635 0x44CE60(i,0)
 
