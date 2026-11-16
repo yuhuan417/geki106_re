@@ -8114,7 +8114,8 @@ def _beh_41F010(self, e) -> bool:
         elif st == 2:
             e.d32(0x28, (e.s32(0x28) + 2) & 0xFFFFFFFF)
             c30 = e.s32(0x30)
-            e.d32(0x2C, (e.s32(0x2C) + (-1 if c30 != 0 else 1)) & 0xFFFFFFFF)
+            # 0x41F0B4：neg/sbb/and 6/add −3 ⇒ [0x30]!=0 ? +3 : −3
+            e.d32(0x2C, (e.s32(0x2C) + (3 if c30 != 0 else -3)) & 0xFFFFFFFF)
             if e.s32(0x2C) == 0:
                 e.d32(0x1C, 3)
         elif st == 3:
@@ -8132,10 +8133,10 @@ def _beh_41F010(self, e) -> bool:
             e.d32(0x28, v)
             v_s = v - 0x100000000 if v & 0x80000000 else v
             c30 = e.s32(0x30)
-            if v_s < 0:
-                e.d32(0x2C, (e.s32(0x2C) + 3) & 0xFFFFFFFF)
-            else:
-                e.d32(0x2C, (e.s32(0x2C) - 3) & 0xFFFFFFFF)
+            # 0x41F140/[0x30]≠0：([0x28]<0 ? −3 : +3)；0x41F152/[0x30]==0：相反
+            neg_side = (v_s < 0)
+            d3 = (-3 if neg_side else 3) if c30 != 0 else (3 if neg_side else -3)
+            e.d32(0x2C, (e.s32(0x2C) + d3) & 0xFFFFFFFF)
             if e.s32(0x2C) == 0:
                 e.d32(0x1C, 5)
                 e.d32(0x28, 0)
@@ -8163,7 +8164,8 @@ def _beh_41F010(self, e) -> bool:
         elif st == 6:
             e.d32(0x28, (e.s32(0x28) + 2) & 0xFFFFFFFF)
             c30 = e.s32(0x30)
-            e.d32(0x2C, (e.s32(0x2C) + (1 if c30 < 0 else -1)) & 0xFFFFFFFF)
+            # 0x41F24A：neg/sbb/and −2/inc ⇒ [0x30]==0 ? +1 : −1
+            e.d32(0x2C, (e.s32(0x2C) + (1 if c30 == 0 else -1)) & 0xFFFFFFFF)
     s24 = (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF
     e.d32(0x24, s24)
     s20 = (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF
