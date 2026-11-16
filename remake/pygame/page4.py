@@ -5198,6 +5198,9 @@ def _beh_422A90(self, e) -> bool:
     y = e.s32(0x08)
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)             # 0x422AE8
+    if main.m[0x34] == 0:                             # 0x422AE8 父死 → 切掉落自爆行为
+        e.d32(0x40, 0x401852)
+        e.beh = 0x422DD0
     if e.g32(0x18) == 0 or ts == 0x29E:               # 0x422B15
         return False
     if ts >= 0:                                       # 0x422B66 jge → 存活尾
