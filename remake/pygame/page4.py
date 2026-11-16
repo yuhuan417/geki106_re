@@ -9867,13 +9867,7 @@ def _beh_405510(self, e) -> bool:
         y = 0x1CC
         x = (x - 4) & 0xFFFFFFFF
         if x < self.p4_player_x():
-            dx = 0
-            while dx >= -0xC00:
-                self.p4_43B290(e, 0, dx, -0xC00 & 0xFFFFFFFF)
-                self.p4_43B290(e, dx, 0, -0xC00 & 0xFFFFFFFF)
-                dx -= 0x80
-            # 字面：(push edi(−0xC00..), push 0xFFFFFF00(=−0x100? y 向), push 0)
-            # 0x43B290(e, −0x100? ...) —— 参数序：arg1=−0xC00..、arg2=−0x100、arg3=0
+            # 0x4055E8 只有一个九连环：(dx, −0x100, 0)，dx=−0xC00..−0x400 步 0x80
             dx = -0xC00
             while dx <= -0x400:
                 self.p4_43B290(e, dx, -0x100, 0)
