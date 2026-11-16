@@ -6336,7 +6336,7 @@ def _beh_417410(self, e) -> bool:
         if e.node is not None:
             e.node.active = 1
     e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
-    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x28)) & 0xFFFFFFFF)   # 0x406D4E [0x2C]+=[0x28]
     a28 = e.s32(0x28)
     a2c = e.s32(0x2C)
     x = (a28 - 0x100000000 if a28 & 0x80000000 else a28) >> 3
@@ -8778,9 +8778,9 @@ def _beh_4051A0(self, e) -> bool:
         elif t2 < 0x40:
             if (t2 & 3) == 0:
                 nd = e.node
-                if nd is not None:
-                    nd.rect = (nd.rect[0], nd.rect[1] - 0x30,
-                               nd.rect[2], nd.rect[3] - 0x30)
+                if nd is not None:                     # 0x4051C5 压栈 (0,-0x30,0,-0x30) → x
+                    nd.rect = (nd.rect[0] - 0x30, nd.rect[1],
+                               nd.rect[2] - 0x30, nd.rect[3])
         elif 0x50 <= t2 < 0xC8:
             if (t2 & 7) == 0:
                 esi = -0x32
@@ -8790,9 +8790,9 @@ def _beh_4051A0(self, e) -> bool:
         elif 0xC8 <= t2 < 0xE8:
             if (t2 & 3) == 0:
                 nd = e.node
-                if nd is not None:
-                    nd.rect = (nd.rect[0], nd.rect[1] + 0x30,
-                               nd.rect[2], nd.rect[3] + 0x30)
+                if nd is not None:                     # 0x40521E 压栈 (0,0x30,0,0x30) → x
+                    nd.rect = (nd.rect[0] + 0x30, nd.rect[1],
+                               nd.rect[2] + 0x30, nd.rect[3])
         elif t2 < 0x118:
             e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
         x = (host.rect[0] if hasattr(host, 'rect') else 0)
@@ -10282,8 +10282,8 @@ def _beh_406BD0(self, e) -> bool:
     if a > 0:
         e.d32(0x28, (e.s32(0x28) + (a >> 2)) & 0xFFFFFFFF)
     v28 = e.s32(0x28)
-    x = (main.s32(0x04) + self._p4_div3(page4_sin(v28))) & 0xFFFFFFFF
-    y = (main.s32(0x08) + self._p4_div3(page4_cos(v28))) & 0xFFFFFFFF
+    x = (main.s32(0x04) + self._p4_div3(page4_cos(v28))) & 0xFFFFFFFF  # 0x40159B=cos
+    y = (main.s32(0x08) + self._p4_div3(page4_sin(v28))) & 0xFFFFFFFF  # 0x401A50=sin
     e.d32(0x04, x)
     e.d32(0x08, y)
     base = e.s32(0x0C)
@@ -10328,6 +10328,8 @@ def _beh_406D30(self, e) -> bool:
         e.m[0x10] = 1
     if e.g32(0x18) == 0:
         a = self.p4_45a9a0(self.p4_player_x() - x, self.p4_player_y() - y)
+        self.p4_43B290(e, (self.p4_player_x() - x) & 0xFFFFFFFF,
+                       (self.p4_player_y() - y) & 0xFFFFFFFF, -0x280 & 0xFFFFFFFF)
         for da, spd in ((0x15E, -0x280), (-0x15E, -0x280),
                         (0xC8, -0x200), (-0xC8, -0x200)):
             ang = (a + da) & 0xFFFFFFFF
@@ -10355,8 +10357,8 @@ def _beh_406F60(self, e) -> bool:
         v28 -= 0x20
     a = self.p4_45a9a0(self.p4_player_x() - e.s32(0x04),
                        self.p4_player_y() - e.s32(0x08))
-    e.d32(0x20, (e.s32(0x20) + ((page4_sin(a) * v28) >> 8)) & 0xFFFFFFFF)
-    e.d32(0x24, (e.s32(0x24) + ((page4_cos(a) * v28) >> 8)) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) + ((page4_cos(a) * v28) >> 8)) & 0xFFFFFFFF)  # cos→x
+    e.d32(0x24, (e.s32(0x24) + ((page4_sin(a) * v28) >> 8)) & 0xFFFFFFFF)  # sin→y
     a20 = e.s32(0x20)
     a24 = e.s32(0x24)
     x = (a20 - 0x100000000 if a20 & 0x80000000 else a20) >> 8
