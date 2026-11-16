@@ -17097,6 +17097,8 @@ class Page4Mixin:
             self.p4_trace_bg = True
         if getattr(self, "p4_trace_bg", False):
             print(f"[bgrec] op{op} ch={ch} count={vals[10]} flags=0x{flags:X} rep={rep}", flush=True)
+        if op == 6 and not (0 <= ch < 12):            # 0x457C00 无边界检查（exe UB）
+            return
         targets = range(12) if (op == 7 and ch >= 12) else [ch]   # 只有 op7/op8 广播
         for i in targets:
             slot = self.p4_bg[i]
