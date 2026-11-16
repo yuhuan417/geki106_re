@@ -388,7 +388,9 @@ ENT23_INIT = {
     0x23000018: {"beh": 0x4013BB, "imm": {0x20: -0x18, 0x24: 0xF, 0x28: 0},
                  "d_to": 0x1C},
     0x23000019: {"beh": 0x401B31, "imm": {0x24: 0x60}, "r01sh4": ((0x1C, 0), (0x20, 1)), "d_to": 0x28},
-    0x2300001A: {"beh": 0x40242D, "imm": {}},
+    0x2300001A: {"beh": 0x40242D,
+                 "imm": {0x1C: 0, 0x24: 0xFFFFFFC0, 0x28: 0},
+                 "slot1": True, "d20_y78": True, "r01sh4_2C30": True},
     # —— 2026-11-11 补齐缺失 5 型（ctor case 0x40DB0D/0x40DB2D/0x40DBD6/0x40DBF5/0x40DCAA）——
     0x2300000B: {"beh": 0x401D75, "imm": {0x1C: 0, 0x20: -0x1E, 0x24: 0}},
     0x2300000C: {"beh": 0x401609, "imm": {}, "d_to": 0x1C},
@@ -939,6 +941,15 @@ class Ent:
                 if "vtup" in info and isinstance(d, tuple):
                     self.d32(0x1C, d[0] & 0xFFFFFFFF)
                     self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)
+                if info.get("slot1"):        # 0x40DE43：[0x18]=0x45AFC0(0x4AB5B0,0xC000)+1
+                    pg = getattr(self, "_pages", None)
+                    if pg is not None:
+                        self.d32(0x18, (pg.keys.field(0xC000) + 1) & 0xFFFFFFFF)
+                if info.get("d20_y78"):      # 0x40DE5A：[0x20]=(y>=0x78)?+1:-1
+                    self.d32(0x20, 1 if b >= 0x78 else 0xFFFFFFFF)
+                if info.get("r01sh4_2C30"):  # 0x40DE6E：[0x2C]=x<<4、[0x30]=y<<4
+                    self.d32(0x2C, (a << 4) & 0xFFFFFFFF)
+                    self.d32(0x30, (b << 4) & 0xFFFFFFFF)
                 if "p3pair" in info and isinstance(d, tuple):   # 0x40DDB6：p3[0]/p3[1]
                     o1, o2 = info["p3pair"]
                     self.d32(o1, int(d[0]) & 0xFFFFFFFF)
