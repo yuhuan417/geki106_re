@@ -2434,8 +2434,12 @@ class Pages(Page4Mixin):
                 e.d32(0x20, 0)
                 l, t = row * 128, col * 32
                 if prm >= 0x10 and not self.keys.test(0x80):
+                    # 0x424849..0x424853 压栈 (b=0, r=-0x80, t=0, l=-0x80) ⇒
+                    # 0x45A790 只把 **l/r 左移 0x80**（t/b 不动）：第二窃块
+                    # （x=128）的行 16/17 没有自己的"他設定/完了"字模，复用第一
+                    # 窃块同列（x=0）。旧实现多减了 t ⇒ 取到块内第 3/4 行，
+                    # 再叠上"再入重复生成"的整套标签 = 整页重叠。
                     l -= 0x80
-                    t -= 0x80
                 e.disp = DisplayNode(1, [l, t, l + 127, t + 31], [0x88, col * 32 + 0x60])
                 e.node = e.disp
                 e.disp.active = 1                 # 0x42481F byte[node+0x1C] = 1
@@ -2985,9 +2989,13 @@ class Pages(Page4Mixin):
         尾 0x444F7A：旗标[帧+0x12] → BGM 表 {7,8,9,0xA,0xB,0xC,0xD,0xE,1,2,4,3,6}
         按 [0x28]（9/0xA→0）→ 0x401F69(0x4AB514, …)；旗标[帧+0x13] →
         亮度/对比度重算调色板（0x44CDF0×2）。"""
-        seg = _adjust_magic_div(int(getattr(self.inp, "y", 0)) & 0xFFFFFFFF)
+        seg0 = _adjust_magic_div(int(getattr(self.inp, "y", 0)) & 0xFFFFFFFF)
+        # 0x444A5A..0x444A67：`esi = [ent+0x30]*9; edx(段) += esi` —— 行分发用**全域段**
+        # （第一页 0..8、他設定页 9..17）。悬停行为 0x425AD0 另读 [0x4AB5A0] 的
+        # **基段**（0..8）与行标签 [+0x1C] 比较，故这里只给 _adjust_row 加页基。
+        seg = seg0 + (e.g32(0x30) & 0xFFFF) * 9
         bl = 1 if seg != e.aux else 0
-        e.aux = seg                                  # [+0x20] = 段
+        e.aux = seg                                  # [+0x20] = 段（全域）
         st = e.t
         if st != e.p.get("last_st", -1):
             # 0x4453C3：态变化 ⇒ [0x24]=0（驻留计数重启）——旧实现不清 ⇒
@@ -3200,12 +3208,16 @@ class Pages(Page4Mixin):
         旧实现：初回に 08(0) 説明行が漏れ、デバイス桁を初回でも生成 ⇒ 0A 行と重複
         （2026-11-15 用户实测"右侧文字重叠"）。"""
         self.ui4fc.clear()                               # 0x4018B6(0x4AD4FC)
-        self.spawn(self.ui4fc, 0x5F000008, 0, 0, -1)     # 0x444382 説明塊
-        self.spawn(self.ui4fc, 0x5F000008, 0, 0, 0)      # 0x4443A7 説明行
-        for i in range(9):                               # 0x4443BA..0x444412
-            self.spawn(self.ui4fc, 0x5F000009, 0, 0, i)
+        # ★ 0x44439B `test al,al; jne 0x4445E9`：再入（他設定）**跳过**初回的三段
+        #   0x444382 説明塊 / 0x4443A7 説明行 / 0x4443BA 的 9 行标签，直接走
+        #   0x4445E9 的第二页生成。旧实现把这三段放在分支之前，再入时又追加第二页
+        #   08(9)+9 行（prm 9..17）⇒ 两套标签叠在同一 dst（用户实测"渲染重叠混乱"）。
         if not reentry:
             # ---- 初回ページ 0x444414..0x4445E4＋尾 ----
+            self.spawn(self.ui4fc, 0x5F000008, 0, 0, -1)     # 0x444382 説明塊
+            self.spawn(self.ui4fc, 0x5F000008, 0, 0, 0)      # 0x4443A7 説明行
+            for i in range(9):                               # 0x4443BA..0x444412
+                self.spawn(self.ui4fc, 0x5F000009, 0, 0, i)
             self.spawn(self.ui4fc, 0x5F00000A, 0x60, 0, 0x200)     # 0x444414 自動爆破
             self.spawn(self.ui4fc, 0x5F00000D, 0x80, 0x140, 0x18)  # 0x44444B 画像要素
             self.spawn(self.ui4fc, 0x5F00000A, 0xA0, 0, 4)         # 0x444485 音楽
