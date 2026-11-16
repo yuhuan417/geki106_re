@@ -7588,21 +7588,26 @@ def _beh_41D330(self, e) -> bool:
             if tm == 0:
                 e.d32(0x28, self.p4_player_x() & 0xFFFFFFFF)
                 e.d32(0x2C, self.p4_player_y() & 0xFFFFFFFF)
-            if tm < 0x40:
+            if tm < 0x40:                            # 0x41D3B9：行切换与开火互斥
                 _p4_41d330_row(e)
-            if (tm & 3) == 3 and tm >= 0:
+            elif (tm & 3) == 3:
                 lx = e.s32(0x28)
                 ly = e.s32(0x2C)
                 self.p4_43B360(e, lx + dx, ly + dy, -0x400 & 0xFFFFFFFF)
         elif sub == 2:
-            if tm < 0x40 or tm == 0x40:
-                _p4_41d330_row(e)
-            if (tm >> 2) + tm == 0x5A:
+            if tm < 0x40:                            # 0x41D486 固定行 B
+                if e.node is not None:
+                    e.node.rect = (0x30, 0x18, 0x47, 0x2F)
+            elif tm == 0x40:                         # 0x41D4A0 固定行 A
+                if e.node is not None:
+                    e.node.rect = (0x30, 0x00, 0x47, 0x17)
+            elif (e.s32(0x20) >> 2) + tm == 0x5A:    # 0x41D4D4
                 self.p4_43B610(e, self.p4_player_x(), self.p4_player_y(),
                                -0x500 & 0xFFFFFFFF)
         elif sub == 3:
-            if tm == 0:
-                _p4_41d330_row(e)
+            if tm == 0:                              # 0x41D504 固定行 B
+                if e.node is not None:
+                    e.node.rect = (0x30, 0x18, 0x47, 0x2F)
                 e.d32(0x28, 0x18)
                 e.d32(0x2C, 0x14)
             if tm == 0x60:
