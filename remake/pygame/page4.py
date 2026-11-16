@@ -975,6 +975,21 @@ class Ent:
         self.beh = ENT23_BEH_THUNK.get(thunk, thunk)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s04_fields"):                     # 0x418DBF：+0x28=rec1、+0x30=rec3
+            self.d32(0x28, b & 0xFFFFFFFF)
+            self.d32(0x30, d & 0xFFFFFFFF)
+        if info.get("s09_fields"):                     # 0x418F38：y += (y>=0xF0?+0x1E:−0x1E)、+0x20=rec1
+            yy = (b + (0x1E if b >= 0xF0 else -0x1E)) & 0xFFFFFFFF
+            self.d32(0x08, yy)
+            self.d32(0x20, b & 0xFFFFFFFF)
+            if self.node is not None:
+                self.node.dst = (a - 0x18, (yy - 0x18) & 0xFFFFFFFF)
+        if info.get("s11_fields"):                     # 0x418EAE：+0x20=rec1<<4、+0x24=±0x40、+0x28=rec3
+            self.d32(0x20, (b << 4) & 0xFFFFFFFF)
+            self.d32(0x24, (-0x40 if b >= 0xF0 else 0x40) & 0xFFFFFFFF)
+            self.d32(0x28, d & 0xFFFFFFFF)
+            if self.node is not None:
+                self.node.rect = (0, 0x180, 0x2F, 0x1AF)
         if info.get("randpos"):                        # 0x413BA3..0x413BDB：屏幕右侧外随机落点
             import random as _r
             self.d32(0x04, ((_r.randrange(0x100) & 0xFF) +
@@ -2341,7 +2356,7 @@ ENT26_INIT = {
 ENT27_INIT = {
     0x27000001: {"beh": 0x401E7E, "r0sh": (0x1C, 3), "r1sh": (0x20, 2),
                  "imm": {0x24: -0x30, 0x28: 0, 0x2C: 0}},
-    0x27000002: {"beh": 0x401DB1, "imm": {0x1C: -0x14, 0x24: 0},
+    0x27000002: {"beh": 0x401DB1, "imm": {0x1C: -0x14}, "d_to": 0x24,
                  "cmpgate": (0x20, 6, -3, "ge")},   # y≥F0: −3; y<F0: 6−3=3
     0x27000003: {"beh": 0x402239, "imm": {0x1C: -0x30, 0x20: 0}, "d_to": 0x24},
     0x27000004: {"beh": 0x401C71, "imm": {0x1C: -0x12, 0x24: 0, 0x2C: 0}, "r1sh": (0x20, 4)},
@@ -2380,7 +2395,7 @@ ENT28_INIT = {
                  "r0sh": (0x20, 4), "imm": {0x24: 0x1140},
                  "rand_pair2": True},
     0x28000004: {"beh": 0x4022E8, "z1c": True, "r0sh": (0x20, 4), "z24": True,
-                 "d_to": 0x28, "imm": {0x2C: 3, 0x30: 0}},  # rec3→[0x30]
+                 "imm": {0x2C: 3}, "s04_fields": True},   # [0x28]=rec1、[0x30]=rec3
     0x28000005: {"beh": 0x401B8B, "z1c": True, "r1_20": True, "d_to": 0x24},
     0x28000006: {"beh": 0x40248C, "z1c": True, "r1_20": True, "d_to": 0x24,
                  "imm": {0x28: -4}},
@@ -2388,9 +2403,7 @@ ENT28_INIT = {
                  "imm": {0x28: 0x60, 0x2C: 0, 0x30: 0}},
     0x28000008: {"beh": 0x4019F1, "z1c": True, "r1_20": True,
                  "r1sh": (0x24, 4), "imm": {0x28: 0x10}, "d_to": 0x2C},
-    0x28000009: {"beh": 0x4021C1, "z1c": True, "s12_gate2": (0x20, 0x1E, -0x3C),  # y≥F0: −0x3C; y<F0: 0x1E
-                 "r1_y8": True, "d_to": 0x20, "z24": True,
-                 "node_dst_18": True},                             # node dst=(x−0x18,y−0x18)
+    0x28000009: {"beh": 0x4021C1, "z1c": True, "s09_fields": True, "z24": True},
     0x2800000A: {"beh": 0x401B3B, "z1c": True, "r1sh": (0x20, 3), "d_to": 0x28},
     0x2800000B: {"beh": 0x401CE4, "z1c": True, "r1sh": (0x20, 2), "imm": {0x24: -0x20}},
     0x2800000C: {"beh": 0x402018, "z1c": True, "r0sh": (0x20, 4),
@@ -2402,7 +2415,7 @@ ENT28_INIT = {
     0x2800000F: {"beh": 0x4013AC, "z1c": True, "r1_20": True, "d_to": 0x24, "d3_28": True},
     0x28000010: {"beh": 0x4024B9, "z1c": True, "r0sh": (0x20, 2), "r1sh": (0x24, 2),
                  "imm": {0x28: 0x48, 0x2C: 0}},
-    0x28000011: {"beh": 0x4018BB, "z1c": True, "z20_24": True},       # 0x418E30 case体（r0sh/r1sh<<4+0x60）
+    0x28000011: {"beh": 0x4018BB, "z1c": True, "s11_fields": True},
     0x28000012: {"beh": 0x4010AA, "z1c": True, "imm": {0x20: 0x40},
                  "r0sh": (0x24, 3), "r1sh": (0x28, 3), "z2C": True},
     0x28000013: {"beh": 0x4018F2, "z1c_20_24_28_2C": True},
@@ -2787,11 +2800,27 @@ def _beh_416A50(self, e) -> bool:
 
 
 def _beh_416940(self, e) -> bool:
-    """`0x416940`（0x27000006，×32）：正弦摆动 + 定时开火。"""
-    t = e.s32(0x20)
-    e.d32(0x24, 2 if e.s32(8) <= 0xF0 else -2)     # 0x416004 的持续判断
-    # 0x401BEF → 0x416940 本体待精修，暂用匀速直线近似
-    return _beh_411990(self, e)
+    """`0x416940`（0x27000006）：x∈[0x1E0,0x230)→[0x1C]+=[0x24]；x∈[0x190,0x1E0)→−=[0x24]；
+    x==0x140 且 [0x20]==1 → 0x43B070；x −= (x≤−0x18 ? 1 : 4)；y += [0x1C]>>2；
+    x==0x190/0x78 → 0x43B070；0x416440；存活 HP && x>−0x54。"""
+    x = e.s32(0x04)
+    if 0x1E0 <= x < 0x230:
+        e.d32(0x1C, (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF)
+    elif 0x190 <= x < 0x1E0:
+        e.d32(0x1C, (e.s32(0x1C) - e.s32(0x24)) & 0xFFFFFFFF)
+    if x == 0x140 and e.s32(0x20) == 1:
+        self.p4_43B070(e, 0)
+    step = 1 if x <= -0x18 else 4
+    x = (x - step) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    y = (e.s32(0x08) + (e.s32(0x1C) >> 2)) & 0xFFFFFFFF
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, y - 0x18)
+    if x == 0x190 or x == 0x78:
+        self.p4_43B070(e, 0)
+    self.p4_416440(e)
+    return e.g32(0x18) != 0 and e.s32(0x04) > -0x54
 
 
 def _beh_416A50_wrap(e_self, e):
@@ -3012,6 +3041,8 @@ def _beh_416860(self, e) -> bool:
     e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
     e.d32(8, (e.s32(0x20) >> 3) & 0xFFFFFFFF)
     e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
+    if e.s32(4) < -0xF0:                             # 0x4168A1
+        e.d32(0x1C, 6)
     if e.s32(0x1C) == 6 and e.s32(4) == 0x1D8 and e.s32(0x28) != 0:
         self.p4_43B070(e, 0)
     if e.node is not None:
@@ -3041,7 +3072,7 @@ def _beh_4164B0(self, e) -> bool:
     y = (sub_y + 2) >> 2
     e.d32(4, x & 0xFFFFFFFF)
     e.d32(8, y & 0xFFFFFFFF)
-    if x < 0x133 and sub_y == 0:
+    if x < 0x133 and e.s32(0x28) == 0:            # 0x41651E 判 vy==0
         self.p4_43B070(e, 0)
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
@@ -3166,15 +3197,16 @@ def _beh_4165A0(self, e) -> bool:
     """`0x4165A0`（0x27000002 ×40）：正弦纵摆+渐进右移+y==0x1E0 开火。
     y∈(0x78,0x168) → [0x1C]++（≤0x28）；[0x20]≠0 → [0x20] += ±2（振荡）；
     x += [0x1C]>>3；y += [0x20]；y==0x1E0 && [0x24]≠0 → 开火。"""
-    if 0x78 < e.s32(8) <= 0x168:
-        e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    if 0x78 < e.s32(8) < 0x168:                      # 0x4165B1 jge 0x168 排除
+        if e.s32(0x1C) < 0x28:                       # 0x4165B3
+            e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
     osc = e.s32(0x20)
-    if osc != 0:
-        d = 2 if osc >= 0 else -2
+    if osc != 0:                                     # 0x4165CA：向 0 收敛 1
+        d = -1 if osc >= 0 else 1
         e.d32(0x20, (osc + d) & 0xFFFFFFFF)
     e.d32(4, (e.s32(4) + (e.s32(0x1C) >> 3)) & 0xFFFFFFFF)
     e.d32(8, (e.s32(8) + e.s32(0x20)) & 0xFFFFFFFF)
-    if e.s32(8) == 0x1E0 and e.s32(0x24) != 0:
+    if e.s32(4) == 0x1E0 and e.s32(0x24) != 0:       # 0x4165EC 判 x
         self.p4_43B070(e, 0)
     if e.node is not None:
         e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
@@ -3496,14 +3528,13 @@ def _beh_419EC0(self, e) -> bool:
     + 0x401BA4(0x10,1,0x30) 特效 + [0x24]>0 && [0x28]>0 && t%8==0 → 开火+衰减。
     """
     x, y = e.s32(4), e.s32(8)
-    vy = 2 if y >= 0xF0 else -2
-    e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
     osc = e.s32(0x28)
-    e.d32(0x24, (e.s32(0x24) + vy) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + (1 if osc != 0 else -1)) & 0xFFFFFFFF)   # 0x419ED4
     e.d32(4, ((e.s32(0x20)) >> 4) & 0xFFFFFFFF)
-    e.d32(8, osc & 0xFFFFFFFF)
+    e.d32(8, e.s32(0x2C) & 0xFFFFFFFF)                                  # 0x419EE4 y=[0x2C]
     # 0x401BA4 特效
-    if e.s32(0x24) > 0 and osc != 0 and (e.p4_frame_no() & 7) == 0:
+    if e.s32(0x24) > 0 and osc != 0 and (e.s32(0x24) & 7) == 0:         # 0x419EFA 门用 [0x24]&7
         self.p4_43B070(e, 0)
         e.d32(0x28, (osc - 1) & 0xFFFFFFFF)
     if e.node is not None:
@@ -3516,12 +3547,12 @@ def _beh_41A090(self, e) -> bool:
     0x401BA4(0x18,1,0x30) 特效；[0x20] < −0x1E0 时 [0x20]=4 加速回屏；
     y≥F0 门同前。"""
     e.d32(4, (e.s32(4) + e.s32(0x20)) & 0xFFFFFFFF)
-    vy = 2 if e.s32(8) >= 0xF0 else -2
+    vy = -1 if e.s32(8) >= 0xF0 else 1                 # 0x41A09D
     e.d32(0x28, (e.s32(0x28) + vy) & 0xFFFFFFFF)
-    e.d32(0x24, e.s32(0x28) & 0xFFFFFFFF)
-    e.d32(8, ((e.s32(0x28)) >> 3) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x28)) & 0xFFFFFFFF)   # 0x41A0B5 累加
+    e.d32(8, ((e.s32(0x24)) >> 3) & 0xFFFFFFFF)        # 0x41A0C2 y=[0x24]>>3
     e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
-    if e.s32(4) < -0x1E0:
+    if e.s32(4) < -0x140:                              # 0x41A0CE
         e.d32(0x20, 4)
     # 0x401BA4(0x18,1,0x30) 特效
     if e.s32(0x28) == 0 and e.s32(0x20) > 0 and e.s32(4) > 0x140 and e.s32(0x2C) != 0:
@@ -3532,38 +3563,42 @@ def _beh_41A090(self, e) -> bool:
 
 
 def _beh_416BE0(self, e) -> bool:
-    """`0x416BE0`（0x27000009 ×18）：三态纵振荡——[0x20]==0 → 渐进 y 靠近自机
-    （[0x1C]++，x+=(t+1)>>1，y 向自机 y 移动 (t−1)>>1）；[0x20]==−1 → x += t>>2；
-    [0x20]>0 → [0x24]==0 → [0x20]=−1；[0x20]>0 && [0x20]&0x2F==0x2F && t>0x5A
-    → 开火+[0x24]−−。"""
+    """`0x416BE0`（0x27000009）：三态纵振荡。
+
+    [0x20]==0：t=++[0x1C]；t==0 → [0x20]=1；x += (t+1)>>1；
+      y += (y<0xF0 ? (−1−t)>>1 : (t+1)>>1)。
+    [0x20]==−1：x −= [0x1C]>>2；[0x1C]++。
+    other：[0x24]==0 → [0x20]=−1；否则 [0x20]++，`(v&0x2F)==0x2F && v>0x5A`
+      → [0x24]−− + 0x43B070。尾 0x416440；存活 HP && x>−0x18。
+    """
     osc = e.s32(0x20)
-    cnt = e.s32(0x1C)
     if osc == 0:
-        cnt = (cnt + 1) & 0xFFFFFFFF
-        e.d32(0x1C, cnt)
-        sy = self.p4_stat.get(0x56CC90, 0)
-        e.d32(4, (e.s32(4) + ((cnt + 1) >> 1)) & 0xFFFFFFFF)
-        dy = 0 if sy >= 0xF0 else -1
-        dy = 1 if cnt == 0 else dy                       # t==0 → +1
-        y = e.s32(8) + ((cnt + (1 if cnt == 0 else 0) - cnt) >> 1) if cnt != 0 else e.s32(8)
-        y = e.s32(8) + (((cnt + 1) >> 1) * (1 if sy < 0xF0 else -1)) if True else y
-        e.d32(8, y & 0xFFFFFFFF)
+        t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+        e.d32(0x1C, t)
+        if t == 0:
+            e.d32(0x20, 1)
+        x = (e.s32(0x04) + ((t + 1) >> 1)) & 0xFFFFFFFF
+        e.d32(0x04, x)
+        y = e.s32(0x08)
+        dy = (((-1) - t) >> 1) if y < 0xF0 else ((t + 1) >> 1)
+        e.d32(0x08, (y + dy) & 0xFFFFFFFF)
     elif osc == -1:
-        e.d32(4, (e.s32(4) + (cnt >> 2)) & 0xFFFFFFFF)
-        e.d32(0x1C, (cnt + 1) & 0xFFFFFFFF)
+        t = e.s32(0x1C)
+        e.d32(0x04, (e.s32(0x04) - (t >> 2)) & 0xFFFFFFFF)
+        e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
     else:
         if e.s32(0x24) == 0:
             e.d32(0x20, 0xFFFFFFFF)
         else:
-            osc = (osc + 1) & 0xFFFFFFFF
-            e.d32(0x20, osc)
-            if (osc & 0x2F) == 0x2F and osc > 0x5A:
-                self.p4_43B070(e, 0)
+            v = (osc + 1) & 0xFFFFFFFF
+            e.d32(0x20, v)
+            if (v & 0x2F) == 0x2F and v > 0x5A:
                 e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+                self.p4_43B070(e, 0)
     if e.node is not None:
-        e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
-    # 0x401F91 → 0x416440 boss spawner 检查
-    return e.g32(0x18) != 0 and e.s32(4) > -0x18
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    self.p4_416440(e)
+    return e.g32(0x18) != 0 and e.s32(0x04) > -0x18
 
 
 def _p4_41e1f0(e) -> None:
@@ -4170,6 +4205,15 @@ def p4_414010(self, e) -> None:
         dy = 0x30
     nd.rect = (nd.rect[0], t + dy, nd.rect[2], nd.rect[3] + dy)
 
+def p4_416440(self, e) -> None:
+    """`0x416440`：HP==0 时向 0x4AD43C 生成 boss 0x27000011（prm=父实体）。"""
+    if e.g32(0x18) != 0:
+        return
+    _h = id(e) & 0x7FFFFFFF
+    self.p4_links[_h] = e
+    self._p4_ent43c(0x27000011, e.s32(0x04), e.s32(0x08), _h)
+
+
 def p4_43B290(self, e, dx: int, dy: int, arg: int) -> None:
     """`0x43B290`（thunk 0x40165E）：**定向速度弹**——arg=0x43AF90 表速，
     (dx,dy) 为显式方向：v = (4096/|d|)*d*(spd>>4)>>8；弹型 0x43B020(e)，
@@ -4284,7 +4328,7 @@ def _beh_419E30(self, e) -> bool:
     # 0x401BA4 → 0x417BA0 特效（帧动画）
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
-    return e.g32(0x18) != 0 and e.s32(0x08) < 0x1F8 and e.s32(0x24) < 0
+    return e.g32(0x18) != 0 and (e.s32(0x08) < 0x1F8 or e.s32(0x24) < 0)
 
 
 def _beh_41DCE0(self, e) -> bool:
@@ -6113,7 +6157,7 @@ def _beh_416770(self, e) -> bool:
         e.node.dst = (x - 0x18, yy - 0x18)
     if (c & 0x6F) == 0x6F:
         self.p4_43B070(e, (-e.s32(0x58)) & 0xFFFFFFFF)
-        self.p4_43B150(e, 0, 0, 0)
+        self.p4_43B150(e, 0)
     # 0x401F91 → 0x416440 boss spawner（op2 直生成，跳过）
     return x < 0x298 and e.g32(0x18) != 0
 
@@ -6140,7 +6184,7 @@ def _beh_417160(self, e) -> bool:
     if (t & 0x10) == 0x10:
         v20 = (e.s32(0x20) + (1 if e.s32(0x28) != 0 else -1)) & 0xFFFFFFFF
         e.d32(0x20, v20)
-        ang = (45 * v20) & 0xFFFFFFFF
+        ang = (225 * v20) & 0xFFFFFFFF   # 0x4171E7 25v*9=225
         self.p4_43B290(e, page4_cos(ang), page4_sin(ang), 0)
     # 0x401F91 → 0x416440（跳过）
     return e.g32(0x18) != 0 and self.p4_4305f0(e, 0x30)
@@ -6156,7 +6200,7 @@ def _beh_417280(self, e) -> bool:
     return HP≠0 且 [0x24]>0。"""
     v = e.s32(0x20)
     if abs(v) < 0x28:
-        v = (v + (1 if v <= 0 else -1)) & 0xFFFFFFFF
+        v = (v + (-1 if v <= 0 else 1)) & 0xFFFFFFFF   # 0x417299 setle/dec/and 2/dec
         e.d32(0x20, v)
     x = e.s32(0x04)
     if x < -0x168:
@@ -6407,7 +6451,7 @@ def _beh_419A30(self, e) -> bool:
             self.p4_43B070(e, 0)
     else:
         linked = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF)
-        if linked is None or linked.m[0x34] != 0:
+        if linked is None or linked.m[0x34] == 0:      # 0x419ADA：死才脱链
             e.d32(0x2C, -1 & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
@@ -6522,11 +6566,13 @@ def _beh_41A300(self, e) -> bool:
             spd -= 0x100
     t = (e.s32(0x2C) + 1) & 0xFFFFFFFF
     e.d32(0x2C, t)
-    if t == 0xC0:
-        e.d32(0x20, 0)
+    if t == 0xC0:                                  # 0x41A3B6
+        e.d32(0x20, -1 & 0xFFFFFFFF)
     elif t == 0x110:
+        e.d32(0x20, 0)
+    elif t == 0x5D2:
         e.d32(0x20, 0x50)
-    elif t == 0x5D2 or t == 0x82A:
+    elif t == 0x82A:
         e.d32(0x20, -1 & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = (x - 0x30, y - 0x30)
@@ -12668,6 +12714,12 @@ def _beh_432F20(self, e) -> bool:
         e.disp.dst = [x - 0xC, y - 0xC]
     return x > -0xC
 
+
+_P4_27_TAIL_TYPES = frozenset((
+    0x27000001, 0x27000002, 0x27000003, 0x27000004, 0x27000005,
+    0x27000007, 0x27000008, 0x27000009, 0x2700000A,
+    0x2700000C, 0x2700000D, 0x2700000E,
+))
 
 P4_BEH: dict[int, object] = {
     0x432F20: _beh_432F20,
@@ -18955,7 +19007,12 @@ class Page4Mixin:
             self.p4_beh_missing_types[(e.beh, e.s32(0x14))] = \
                 self.p4_beh_missing_types.get((e.beh, e.s32(0x14)), 0) + 1
             return True
-        return fn(self, e)
+        r = fn(self, e)
+        # 0x27000001..0x0E 的行为尾部都 `call 0x401F91`（0x416440）：HP==0 时生成
+        # boss 0x27000011。0x27000006 已在行为内调用，0x2700000B 无此尾，排除。
+        if (e.g32(0x14) in _P4_27_TAIL_TYPES):
+            self.p4_416440(e)
+        return r
 
     def p4_spawn_actor1(self, x: int, y: int, prm: int) -> None:
         """演员 **type 1 = 自机本体**（VM op1 / 流 46 t=0 生成于 (0x172,0xF0)）。
