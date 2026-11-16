@@ -7198,8 +7198,8 @@ def _beh_41BDA0(self, e) -> bool:
     leader = links.get(e.s32(0x20) & 0x7FFFFFFF) or leader
     if leader.s32(0x28) == 5 and leader.s32(0x24) == 0x78:
         self.p4_se_pan(0xE, (x - 0x140) << 4)
-        for i in range(0, 0x78 + 1, 0xC):
-            self.spawn(self._p4_q("ui49c"), 0x31000010, x, y + i, 0)
+        for i in range(0, 0x6D, 0xC):               # rec3=0,0xC,..,0x6C
+            self.spawn(self._p4_q("ui49c"), 0x31000010, x, y, i)
         return False
     if leader.m[0x34] != 0:
         self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
@@ -7299,6 +7299,9 @@ def _beh_41AE20(self, e) -> bool:
 
 def _p4_41ae20_dying_common(e, x: int, y: int) -> bool:
     """`0x41AE20` HP≤0x960 段：行闪特效 + 十态机 + 公共尾。"""
+    self = e._pages
+    _h = id(e) & 0x7FFFFFFF
+    self.p4_links[_h] = e
     hp = e.g32(0x18)
     if hp <= 0x960 and e.node is not None and e.node.dst[1] == 0xF0 \
             and (e.s32(0x24) & 7) == 0:
@@ -7309,7 +7312,7 @@ def _p4_41ae20_dying_common(e, x: int, y: int) -> bool:
     if st <= 9:
         if st == 0:
             if t == 0:
-                self._p4_ent43c(0x28000016, x, y)
+                self._p4_ent43c(0x28000016, x, y, _h)
             elif t == 0x5A:
                 e.m[0x10] = 1
                 e.d32(0x24, -0x1E & 0xFFFFFFFF)
@@ -7401,7 +7404,7 @@ def _p4_41ae20_dying_common(e, x: int, y: int) -> bool:
                 e.d32(0x1C, 0x280)
                 e.d32(0x20, -0x60 & 0xFFFFFFFF)
             elif t == 0x186:
-                self._p4_ent43c(0x28000016, x, y)
+                self._p4_ent43c(0x28000016, x, y, _h)
                 e.d32(0x1C, 0x1E0)
                 e.d32(0x20, 0xF0)
             elif t == 0x1A4:
