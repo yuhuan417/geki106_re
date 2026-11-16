@@ -8611,8 +8611,16 @@ def _beh_4047E0(self, e) -> bool:
             w22s -= 1
     w20 = (w20 + w22s) & 0xFFFF
     e.d16(0x20, w20)
-    ang = (((w20 - 0x10000 if w20 & 0x8000 else w20) >> 4) + 0xA0) & 0xFFFFFFFF
+    ang = (w22s + 0xA0) & 0xFFFFFFFF           # 0x4048B7 movsx word[+0x22]+0xA0
     a24 = (e.s32(0x24) + ang) % 0xE10
+    old24 = e.s32(0x24)
+    if old24 < 0x384 <= old24 + ang:           # 0x4048C3 冲击波
+        ebx = -0x40
+        while ebx <= 0x20:
+            self.spawn(self._p4_q("ui4fc"), 0x5C000001,
+                       e.s32(0x04) + ebx, e.s32(0x08) + 0x50, 0)
+            ebx += 0x18
+        self._p4_4047e0_se(0x14, (e.s32(0x04) - 0x140) << 4)
     e.d32(0x24, a24)
     c = page4_cos((a24 + 0x12C) & 0xFFFFFFFF)
     s_ = page4_sin(a24)
