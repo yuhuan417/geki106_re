@@ -7713,10 +7713,11 @@ def _beh_41E960(self, e) -> bool:
         e.d32(0x2C, 0x3C)
     ph = e.s32(0x2C)
     if ph != 0:
-        if ph - 0xE10 >= 0:
-            ph = (ph - 0xE10 - 0xE10 + 0x3C) & 0xFFFFFFFF
+        # 0x41E9D3：ph' = ph − 0xE10 + (ph==0xE10 ? 0 : 0xE4C) ⇒ ph+0x3C，满一圈归 0
+        if ph == 0xE10:
+            ph = 0
         else:
-            ph = (ph - 0xE10 + 0x3C) & 0xFFFFFFFF
+            ph = (ph + 0x3C) & 0xFFFFFFFF
         e.d32(0x2C, ph)
     else:
         v20 = (e.s32(0x20) - 1) & 0xFFFFFFFF
@@ -7730,8 +7731,11 @@ def _beh_41E960(self, e) -> bool:
     v24 = e.s32(0x24)
     c = page4_cos(ang)
     s_ = page4_sin(ang)
-    x = (((((c >> 2) - v20) + v20 + 4) >> 3) + v20) & 0xFFFFFFFF
-    y = (((((s_ >> 2) - v24) + v24 + 4) >> 3) + v24) & 0xFFFFFFFF
+    old_x = e.s32(0x04)
+    old_y = e.s32(0x08)
+    # 0x41EA32：x = ((cos>>2 − 旧x + [0x20] + 4)>>3) + [0x20]
+    x = (((((c >> 2) - old_x + v20 + 4) >> 3) + v20)) & 0xFFFFFFFF
+    y = (((((s_ >> 2) - old_y + v24 + 4) >> 3) + v24)) & 0xFFFFFFFF
     e.d32(0x04, x)
     e.d32(0x08, y)
     if 0x384 <= ph < 0xA8C and ph % 0xF0 == 0:
