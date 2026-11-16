@@ -989,6 +989,14 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s19_fields"):                     # 0x4084AE：0x2D000019
+            self.d32(0x1C, d & 0xFFFFFFFF)
+            self.d32(0x20, b & 0xFFFFFFFF)
+            self.d32(0x24, a & 0xFFFFFFFF)
+            self.d32(0x28, d & 0xFFFFFFFF)
+            self.d32(0x2C, typ & 0xFFFFFFFF)
+            self.d32(0x30, 0)
+            self.m[0x10] = 1
         if info.get("d30_yf0"):                        # 0x41C41A：[+0x30]=(y>0xF0)
             self.d32(0x30, 1 if b > 0xF0 else 0)
         if info.get("s0f_fields"):                     # 0x41C260：0x2900000F
@@ -2624,7 +2632,8 @@ ENT2D_INIT = {
                  "imm": {0x0C: 0x78, 0x18: 0x7080, 0x20: 0xF003200,
                          0x24: 0x780014, 0x28: -0x708},
                  "node": (2, 0, 0, 0xEF, 0xEF), "dst": (0, 0), "b10_1": True},
-    0x2D000019: {"beh": 0x4017DA, "node": (2, 0, 0, 0, 0), "dst": (0, 0)},
+    0x2D000019: {"beh": 0x4017DA, "node": (2, 0, 0, 0, 0), "dst": (0, 0),
+                 "s19_fields": True},
     # 0x2D00001B（0x4082CE）：+0xC=0x10、+0x18=-1、+0x1C=p0(主)、+0x20=0、+0x24=0、
     #   +0x28=p1（主铺=0 待机；链生子=p1≠0 即散开）、+0x2C=p3、+0x30=(p1==0)?2:0
     0x2D00001A: {"beh": 0x401690, "imm": {0x0C: 0x10, 0x18: -1, 0x20: 0, 0x24: 0},
