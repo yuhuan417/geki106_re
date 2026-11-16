@@ -993,6 +993,29 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s2907"):                          # 0x41C16E：0x29000007..0B 共用
+            tgt = self._deref_link(d) if d else None
+            if a != 0:                                  # rec0 != 0：普通僚机
+                self.d32(0x18, 0x14)
+                if tgt is not None:
+                    self.d32(0x1C, tgt.g32(0))
+                    self.d32(0x20, tgt.g32(4))
+                    self.d32(0x24, tgt.g32(8))
+                self.d32(0x28, 0)
+                self.d32(0x2C, 0)
+                self.d32(0x30, 0)
+            else:                                       # rec0==0：Boss 入场体
+                self.d32(0x40, 0x4016C7)
+                self.beh = 0x41DD70
+                self.d32(0x04, 0x298)
+                self.d32(0x18, 0xB4)
+                if tgt is not None:
+                    self.d32(0x1C, (tgt.g32(0) >> 8) & 0xFFFFFFFF)
+                self.d32(0x20, 0)
+                self.d32(0x24, -8 & 0xFFFFFFFF)
+                self.d32(0x28, 0)
+                if self.node is not None:
+                    self.node.dst = (0x298, b - 0x18)
         if info.get("s2a05"):                          # 0x40A65F：0x2A000005 + rec3 改写
             pg = getattr(self, "_pages", None)
             px = pg.p4_player_x() if pg is not None else 0
@@ -2531,11 +2554,11 @@ ENT29_INIT = {
     0x29000004: {"beh": 0x4015A5, "imm": {0x1C: 0, 0x20: 0x10}},
     0x29000005: {"beh": 0x40134D, "b10_0": True, "node_off": True},
     0x29000006: {"beh": 0x401D7F},
-    0x29000007: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
-    0x29000008: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
-    0x29000009: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
-    0x2900000A: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
-    0x2900000B: {"beh": 0x4018A7, "imm": {0x18: 0x14}},
+    0x29000007: {"beh": 0x4018A7, "s2907": True},
+    0x29000008: {"beh": 0x4018A7, "s2907": True},
+    0x29000009: {"beh": 0x4018A7, "s2907": True},
+    0x2900000A: {"beh": 0x4018A7, "s2907": True},
+    0x2900000B: {"beh": 0x4018A7, "s2907": True},
     0x2900000C: {"beh": 0x40211C, "r0_20": True, "r1_24": True},
     0x2900000D: {"beh": 0x4011EF, "d_to": 0x1C},
     0x2900000E: {"beh": 0x4021C6, "imm": {0x28: 0x40, 0x2C: 0},
