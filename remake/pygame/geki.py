@@ -1188,8 +1188,18 @@ class Pages(Page4Mixin):
         self.p2_glyph: dict[int, bytes] = {}      # ⑩⑪ 字形条资源 80/81/82
         self.p2_text_on = True                    # 0x4AB5B0 的 flag 0x400（文字表示）
         self.p2_blits: list = []                  # ⑧ 静态页的待贴清单（draw 里执行）
+        # 0x4AB5B0 / 0x4AB5B8 的出厂默认值来自 state.dat 头 +0x10/+0x14 的
+        # "GRCD/106A" 默认头（0x45C6B6/0x45C6BD，state.dat 不存在时由 0x45C5F0 写入），
+        # 启动时 0x457FF2..0x458029 用 0x45AF10 整字写回这两个全局：
+        #   0x10181C：bit2=音楽ON、0x18=3=効果音複音、0x800/0x1000=1、0x3000=1、
+        #             0xF00000=1（第一幕已解锁）；0x200=自動爆破OFF、0x400=画像要素OFF
+        #   0x64C80210：0xF/0xF0/0xF00 = 0/1/2（攻撃/光撃/捕獲入力，DIK-0x20）、
+        #             0x3F000=0、0x1FC0000=50（明度）、0xFE000000=50（彩度）
+        # 旧实现从 0 起 ⇒ 调整页显示 効果音無音/音楽無、明度彩度 -200，全不对。
         self.keys = KeyMgr()                       # 0x4AB5B0
+        self.keys.bits = 0x0010181C
         self.disp_cfg = KeyMgr()                   # 0x4AB5B8（亮度/对比度等显示配置字段）
+        self.disp_cfg.bits = 0x64C80210
         # 0x4987F4 调色板重映射表 A（0x44D290 色带填充的色号变换；行 12 门控）
         try:
             import json as _json
