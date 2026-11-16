@@ -5066,7 +5066,7 @@ def _beh_4200C0(self, e) -> bool:
             p4_41fc60(self, e, 0x3E8)
             self._p4_ent43c(0x2900001D, 0x9C, -0xA8, id(e) & 0x7FFFFFFF)
         if t <= 0x80 and (t & 0xF) == 0 and (st & 0x8000) == 0:
-            self.spawn(self._p4_q("ui4fc"), 0x5100000A, (0x80 - t) * 5, 0x18, 0)
+            self.p4_51_spawn((0x80 - t) * 5, 0x18, 0x5100000A, 0)
     elif state == 5:                                  # 0x420743
         if t == 0:
             e.d32(0x2C, 0)
@@ -5183,9 +5183,9 @@ def _beh_4200C0(self, e) -> bool:
             v = e.s32(0x30)
             e.d32(0x30, (v - (1 if v != 0 else 0)) & 0xFFFFFFFF)
         if t == 0x1E:                                 # 0x4213DF
-            self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x18, 0x18, 0)
+            self.p4_51_spawn(0x18, 0x18, 0x5100000A, 0)
         elif t == 0xF0:
-            self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x1C8, 0x18, 0)
+            self.p4_51_spawn(0x1C8, 0x18, 0x5100000A, 0)
         if 0x5A < t < 0x1FE and (t & 1) == 0:         # 0x421461
             vy = e.s32(0x30)
             wob = (8 - (t & 0xF)) if vy > 0 else ((t & 7) - 4)
@@ -9222,7 +9222,7 @@ def _beh_404FA0(self, e) -> bool:
     if e.node is not None:
         e.node.dst = (x - 0x60, y - 0x60)
     if t2 == 0x3C0:
-        self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x33, 0xEA, 0)
+        self.p4_51_spawn(0x33, 0xEA, 0x5100000A, 0)
     if (t2 & 0x3FF) == 0:
         self._p4_ent43c(0x2C000004, 0, 0)
     if main.g32(0x18) != 0 and e.g32(0x18) != 0:
@@ -10403,7 +10403,7 @@ def _beh_405600(self, e) -> bool:
             e.d32(0x08, 0x78)
             e.d32(0x04, (0x2E4 - 45 * t) & 0xFFFFFFFF)
             if t == 0x78:
-                self.spawn(self._p4_q("ui4fc"), 0x5100000A, 0x18, 0x190, 0)
+                self.p4_51_spawn(0x18, 0x190, 0x5100000A, 0)
         elif t < 0x258:
             e.d32(0x08, 0x190)
         else:
@@ -14035,7 +14035,667 @@ def _beh_41DD70(self, e) -> bool:
     return e.s32(0x04) > -0x18 and e.g32(0x18) != 0
 
 
+# ---------------------------------------------------------------------------
+# op5 0x6x 族控制器（VM op5 → 0x445AA0(0x4AD52C)，基 ctor 0x430450 + 族分派
+# 0x43D430）。对象 0x48 字节：[+0x40]=行为 thunk、byte[+0x34]=存活、[+0x44]=next、
+# [+0x38]=同步节点（rec[0x10] 栈残留 → 0x45A0E0；复刻侧取 0，见 §16.384）。
+# 队列遍 0x445A30：byte[+0x34]==0 → 摘链；否则行为返回 0 → [[obj+0x38]+0x1C]=0
+# （同步释放）+byte[+0x34]=0，下一帧摘链。
+# ---------------------------------------------------------------------------
+P4_OP5_BEH_THUNK = {
+    0x401546: 0x441490,   # 0x63000001
+    0x401F14: 0x4417D0,   # 0x64000001
+    0x40168B: 0x442C70,   # 0x64000002
+    0x401587: 0x443090,   # 0x65000001
+    0x401CC6: 0x442980,   # 0x66000001
+    0x401622: 0x441E00,   # 0x66000002
+    0x401F37: 0x441D60,   # 0x66000003
+    0x402095: 0x442E70,   # 0x66000004
+    0x401F00: 0x442AE0,   # 0x67000001
+    0x401550: 0x442BD0,   # 0x67000002
+    0x401BF4: 0x443370,   # 0x69000001
+    0x401983: 0x4434A0,   # 0x69000002
+    0x402315: 0x442F60,   # 0x6A000001
+    0x40198D: 0x443040,   # 0x6A000002（脚本未用）
+    0x401479: 0x443210,   # 0x6A000003
+    0x401294: 0x4457F0,   # 0x6D000001
+}
+
+# (thunk, imm 字段, sysf 置位, rec3 落点) —— 0x43D430 各 case 逐条
+P4_OP5_CTOR = {
+    0x63000001: (0x401546, {0x1C: 0}, 0, None),
+    0x64000001: (0x401F14, {0x1C: 0, 0x20: 0, 0x24: 0, 0x28: 0, 0x2C: 1}, 0x20, 0x30),
+    0x64000002: (0x40168B, {0x1C: 0, 0x20: 0, 0x24: -0xA, 0x28: 0x280, 0x2C: 0x208}, 0, None),
+    0x65000001: (0x401587, {0x1C: 0x50, 0x24: -1, 0x28: -1, 0x2C: -1}, 0, 0x20),
+    0x66000001: (0x401CC6, {0x1C: 0x1E0}, 0, None),
+    0x66000002: (0x401622, {0x1C: 0, 0x20: 0, 0x24: 0, 0x28: 0}, 0x40, None),
+    0x66000003: (0x401F37, {0x1C: 0}, 0, 0x20),
+    0x66000004: (0x402095, {0x20: -1, 0x24: -1, 0x1C: 0x40}, 0, None),
+    0x67000001: (0x401F00, {0x1C: 0}, 0, None),
+    0x67000002: (0x401550, {0x1C: 0, 0x24: 0x14, 0x28: 0x14, 0x2C: 0}, 0, 0x20),
+    0x69000001: (0x401BF4, {0x1C: -1, 0x20: 0, 0x24: 0, 0x28: 0}, 0, 0x2C),
+    0x69000002: (0x401983, {0x1C: -1, 0x20: 0, 0x24: 0, 0x28: 0}, 0, None),
+    0x6A000001: (0x402315, {0x1C: 0}, 0, None),
+    0x6A000002: (0x40198D, {}, 0, None),           # [0x1C]=0x44F920()/0x3000（ctor 态）
+    0x6A000003: (0x401479, {0x1C: 0}, 0, None),
+    0x6D000001: (0x401294, {0x1C: 0}, 0, None),
+}
+
+
+class _P4Op5Slot:
+    """0x64000001 生成链的 rec3 槽（exe：栈上 {前件指针, 宿主指针} 双 dword；
+    0x24000011 ctor deref3 读 [0]=兄链、[1]=宿主）。"""
+
+    def __init__(self) -> None:
+        self.m = bytearray(8)
+
+    def g32(self, off: int) -> int:
+        return int.from_bytes(self.m[off:off + 4], "little")
+
+    def d32(self, off: int, v: int) -> None:
+        self.m[off:off + 4] = (v & 0xFFFFFFFF).to_bytes(4, "little")
+
+
+def _beh_441490(self, e) -> bool:
+    """`0x441490`（0x63000001）：每 8 帧（t&7==0）生成 0x23000013 @(rec0,rec1)
+    prm=t；t==0 或 t==0xB0 改生成 0x23000014。t=++[0x1C]；t≥0xB0 → 灭
+    （0x441500 cmp eax,0xB0 / jge，eax=旧 t）。"""
+    t = e.s32(0x1C)
+    if (t & 7) == 0:
+        typ = 0x23000014 if (t == 0 or t == 0xB0) else 0x23000013
+        self._p4_ent43c(typ, e.s32(0x04), e.s32(0x08), t)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    return t < 0xB0
+
+
+def _beh_4417D0(self, e) -> bool:
+    """`0x4417D0`（0x64000001，×1 关2 中盘挂件链控制器）。
+
+    t==0：生成 4 只 0x24000011 @(0x2B0+0x30k, 0x1B0−0x60k)（k=0..0x180 步 0x60），
+    rec3=槽{兄链,宿主}，生成后槽[0]=新件句柄（0x441846）；t=-0xC0。
+    状态机 [0x24]（0x441C24 表 6 项）：0=一次性（[0x20]=rand%0x3C−0xB4、
+    [0x24]=rand%5+1）；1=[0x20]==0 → [0x30]==0 ? 0x24000009@(0x2D0,−0x18,0xE)
+    : 0x2400000A@(0x298,rand%0x140+0x50)；2=[0x30]==0 ? (ph≥0 且 &0x1F==0 →
+    0x24000002) : (&0x3F==0 → 0x2400000B)（同位）；3=&0x3F==0 → [0x30]==0 ?
+    0x24000004@(rand%0x140+0xF0, 0x1F8) : 0x2400000F@(0x298,rand%0x140+0x50)；
+    4/5=[0x20]<0x78 奇帧 → 0x44000002@(rand%0x3C0,−0x18) 入 4CC；==0x78 →
+    [0x2C]=0；(0x78,0xF0) &0xF==0 → 0x24000003@(5t,5t−0x6E)；==0x1A4 →
+    [0x2C]=1（挂件开火门）。
+    尾：时限 = 0x1A4+([0x24]>3 ? 0x4C:0)，[0x20]==时限 → [0x24]=0；[0x20]++/t++。
+    [0x28]≥0x50（挂件死亡计数，_beh_411C10 尾累加）→ 清 sysf 0x20（0x45AF60）、
+    SE 0xB(0x1400)（0x450350）、灭。"""
+    if e.s32(0x1C) == 0:
+        h = id(e) & 0x7FFFFFFF
+        self.p4_links[h] = e
+        slot = _P4Op5Slot()
+        slot.d32(4, h)                                 # rec3[1] = 宿主
+        hs = id(slot) & 0x7FFFFFFF
+        self.p4_links[hs] = slot
+        y = 0x1B0
+        k = 0
+        while k < 0x180:                               # 0x4417F3..0x44184E
+            piece = self._p4_ent43c(0x24000011, 0x2B0 + (k >> 1), y, hs)
+            slot.d32(0, id(piece) & 0x7FFFFFFF)        # 0x441846 [esp+0x10]=eax
+            k += 0x60
+            y -= 0x60
+        e.d32(0x1C, 0xFFFFFFC0)                        # 0x441850 t = -0xC0
+    st = e.s32(0x24)
+    if st == 0:                                        # 0x44186A
+        e.d32(0x20, (self.p4_rand_mod(0x3C)[1] - 0xB4) & 0xFFFFFFFF)
+        e.d32(0x24, (self.p4_rand_mod(5)[1] + 1) & 0xFFFFFFFF)
+    elif st == 1:                                      # 0x4418A4
+        if e.s32(0x20) == 0:
+            if e.s32(0x30) == 0:
+                self._p4_ent43c(0x24000009, 0x2D0, -0x18, 0xE)
+            else:
+                self._p4_ent43c(0x2400000A, 0x298,
+                                (self.p4_rand_mod(0x140)[1] + 0x50) & 0xFFFFFFFF, 0)
+    elif st == 2:                                      # 0x441950
+        ph = e.s32(0x20)
+        if e.s32(0x30) == 0:
+            if ph >= 0 and (ph & 0x1F) == 0:
+                self._p4_ent43c(0x24000002, 0x298,
+                                (self.p4_rand_mod(0x140)[1] + 0x50) & 0xFFFFFFFF, 0)
+        else:
+            if ph >= 0 and (ph & 0x3F) == 0:
+                self._p4_ent43c(0x2400000B, 0x298,
+                                (self.p4_rand_mod(0x140)[1] + 0x50) & 0xFFFFFFFF, 0)
+    elif st == 3:                                      # 0x441A2D
+        ph = e.s32(0x20)
+        if ph >= 0 and (ph & 0x3F) == 0:
+            if e.s32(0x30) == 0:
+                self._p4_ent43c(0x24000004,
+                                (self.p4_rand_mod(0x140)[1] + 0xF0) & 0xFFFFFFFF, 0x1F8, 0)
+            else:
+                self._p4_ent43c(0x2400000F, 0x298,
+                                (self.p4_rand_mod(0x140)[1] + 0x50) & 0xFFFFFFFF, 0)
+    else:                                              # st 4/5 → 0x441AF5
+        ph = e.s32(0x20)
+        if ph >= 0:
+            if ph < 0x78:
+                if ph & 1:
+                    self.spawn(self._p4_q("ui4cc"), 0x44000002,
+                               self.p4_rand_mod(0x3C0)[1], -0x18, 0)
+            elif ph == 0x78:
+                e.d32(0x2C, 0)
+            else:
+                if ph < 0xF0 and (ph & 0xF) == 0:
+                    self._p4_ent43c(0x24000003, ph * 5, ph * 5 - 0x6E, 0)
+                if ph == 0x1A4:
+                    e.d32(0x2C, 1)
+    lim = 0x1A4 + (0x4C if e.s32(0x24) > 3 else 0)     # 0x441BB8 状态时限
+    if e.s32(0x20) == lim:
+        e.d32(0x24, 0)
+    e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    if e.s32(0x28) >= 0x50:                            # 0x441BEC
+        self.p4_45af60(0x20)                           # 0x402400→0x45AF60(0x56CC84,0x20)
+        self.p4_se_pan(0x0B, 0x1400)                   # 0x4013A2→0x450350(0x4AB4B0,0xB,0x1400)
+        return False
+    return True
+
+
+def _beh_442C70(self, e) -> bool:
+    """`0x442C70`（0x64000002，关2 背景板条控制器）。
+
+    态0：[0x2C]-=2（x 漂移）；[0x20]==0x3C → 态1。态1：sysb8 bit0 置 → 态2、
+    [0x20]=[0x24]=0。态2：[0x20]==0x78 → 态3、[0x24]=0x24、[0x28]=0。
+    态3：sysb8 bit0 清 → [0x20]=0、态4。态4：[0x20]==0x78 → 灭。
+    尾（0x442C9D）：[0x20]++、[0x28]+=[0x24]；态≤1 且新 [0x28]<0x280 →
+    0x54000001 @([0x28],[0x2C]) 入 4FC、[0x28]+=0x60；态3 且 >−0x60 → 同型、
+    [0x28]-=0x60（注意 rec0=[0x28]、rec1=[0x2C] 的字面槽位）。"""
+    st = e.s32(0x1C)
+    if st == 0:                                        # 0x442C85
+        e.d32(0x2C, (e.s32(0x2C) - 2) & 0xFFFFFFFF)
+        if e.s32(0x20) == 0x3C:
+            e.d32(0x1C, 1)
+    elif st == 1:                                      # 0x442D10
+        if self.p4_bit_any(1):
+            e.d32(0x1C, 2)
+            e.d32(0x20, 0)
+            e.d32(0x24, 0)
+    elif st == 2:                                      # 0x442D38
+        if e.s32(0x20) == 0x78:
+            e.d32(0x1C, 3)
+            e.d32(0x24, 0x24)
+            e.d32(0x28, 0)
+    elif st == 3:                                      # 0x442D5C
+        if self.p4_bit_none(1):                        # 0x40145B→0x45B030(1) 位清
+            e.d32(0x20, 0)
+            e.d32(0x1C, 4)
+    elif st == 4:                                      # 0x442D83
+        if e.s32(0x20) == 0x78:
+            return False
+    st = e.s32(0x1C)                                   # 0x442CA0 尾用新态
+    e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    y = (e.s32(0x28) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x28, y)
+    ys = y - 0x100000000 if y & 0x80000000 else y
+    if st <= 1:
+        if ys < 0x280:                                 # 0x442CBF jge（有符号）
+            self.p4_op5_ui4fc_spawn(0x54000001, y, e.s32(0x2C), id(e) & 0x7FFFFFFF)
+            e.d32(0x28, (y + 0x60) & 0xFFFFFFFF)
+    elif st == 3:
+        if ys > -0x60:                                 # 0x442D99 jle
+            self.p4_op5_ui4fc_spawn(0x54000001, y, e.s32(0x2C), id(e) & 0x7FFFFFFF)
+            e.d32(0x28, (y - 0x60) & 0xFFFFFFFF)
+    return True
+
+
+def _beh_443090(self, e) -> bool:
+    """`0x443090`（0x65000001，×60 行溶解 wipe）：96 位掩码 [0x24..0x2C]（初 -1）、
+    [0x1C]=0x50 帧数、[0x20]=rec3（色号）、[+8]=rec1（起始行）。
+    每帧：r=rand%[0x1C]，走 96 位选第 r 个置位位并清位（0x4430B8..0x4430FF，
+    位 0x20/0x40 依次换 dword、0x2C 后驻留）；再对 0..0x4F 行逐位检查，
+    **清位行**填 (0, y+i, 0x280, y+i+1)（0x401794(0x4AA7B0,0,rect,color)）。
+    [0x1C]--；新值==0 → 灭。"""
+    cnt = e.s32(0x1C)
+    masks = (0x24, 0x28, 0x2C)
+    edx = self.p4_rand_mod(cnt)[1] if cnt else 0       # 0x443099 rand%[0x1C]
+    bit = 0
+    off = 0
+    while edx >= 0:                                    # 0x4430B8..0x4430E6
+        if bit == 0x20:                                # 0x4430B8 cmp ecx,0x20
+            bit = 0                                    # 0x4430C0 xor ecx,ecx
+            off = 1 if off == 0 else 2                 # 0x4430C2 指针驻留链
+        if e.s32(masks[off]) & (1 << bit):
+            edx -= 1
+        bit += 1
+    k = bit - 1                                        # 0x4430E8 dec ecx
+    e.d32(masks[off], (e.s32(masks[off]) - (1 << (k & 0x1F))) & 0xFFFFFFFF)
+    y0 = e.s32(0x08)
+    col = e.g32(0x20) & 0xFF
+    ctr = 0
+    off2 = 0
+    for _i in range(0x50):                             # 0x443101..0x443195
+        if ctr == 0x20:                                # 0x443101 cmp,0x20
+            ctr = 0                                    # 0x44310B 复位
+            off2 = 1 if off2 == 0 else 2
+        if not (e.s32(masks[off2]) & (1 << ctr)):
+            self.canvas.fill_rect((0, y0 + _i, 0x280, y0 + _i + 1), col)
+        ctr += 1
+    e.d32(0x1C, (cnt - 1) & 0xFFFFFFFF)
+    return (cnt - 1) != 0                              # 0x44319F dec/setne（新值）
+
+
+def _beh_442980(self, e) -> bool:
+    """`0x442980`（0x66000001，×1 关4 演出波纹）：[0x1C]>0xA0 → -8/帧（缓动）。
+    遍 0x4AD40C 节点链（[node]==0 层0 且 byte[+0x1C]!=0 → 自机）生成
+    0x46000002 @(dst.x+0x17, dst.y+[0x1C])；遍 0x4AD43C 节点（byte[+0x1C]!=0）
+    生成 0x46000002 @(dst.x+0x17, dst.y+0x2A)；均入 0x4AD4CC。
+    返回 !!(sysb8 & 2)（0x45AFF0(0x56CCB8,2)）。"""
+    t = e.s32(0x1C)
+    if t > 0xA0:
+        e.d32(0x1C, (t - 8) & 0xFFFFFFFF)
+    t = e.s32(0x1C)
+    for a in self.actorq:
+        n = getattr(a, "node", None)
+        if n is not None and getattr(n, "layer", 1) == 0 and getattr(n, "active", 0):
+            self.spawn(self._p4_q("ui4cc"), 0x46000002,
+                       n.dst[0] + 0x17, n.dst[1] + t, 0)
+    for b in self.p4_q43c:
+        n = getattr(b, "node", None)
+        if n is not None and getattr(n, "active", 0):
+            self.spawn(self._p4_q("ui4cc"), 0x46000002,
+                       n.dst[0] + 0x17, n.dst[1] + 0x2A, 0)
+    return bool(self.p4_sys_bits() & 2)
+
+
+def _beh_441D60(self, e) -> bool:
+    """`0x441D60`（0x66000003，×4 关4 陨石雨）：byte[0x1C]&0xF==0 帧 →
+    [0x20]--、0x2600000A @(rand%0x168+0x3C, ([0x20]+2)<<6, 0) 入 0x4AD43C。
+    [0x1C]++；返回 [0x20]!=0（0x441DD2 setne）。"""
+    if (e.s32(0x1C) & 0xF) == 0:                       # 0x441D66 test byte,0xF
+        v = (e.s32(0x20) - 1) & 0xFFFFFFFF
+        e.d32(0x20, v)
+        self._p4_ent43c(0x2600000A,
+                        (self.p4_rand_mod(0x168)[1] + 0x3C) & 0xFFFFFFFF,
+                        ((v + 2) << 6) & 0xFFFFFFFF, 0)
+    e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
+    return e.s32(0x20) != 0
+
+
+def _beh_442E70(self, e) -> bool:
+    """`0x442E70`（0x66000004，×2 关4/关7 槽机）：64 位掩码 [0x20]/[0x24]（初 -1）、
+    [0x1C]=0x40。每帧 r=rand%[0x1C]：走 64 位选第 r 个置位位 k（0x442E93..），
+    0x56000001 @(0,k) 入 0x4AD4FC；清位 k（[0x20]/[0x24] -= 1<<k）；
+    [0x1C]--；新值==0 → 灭。"""
+    cnt = e.s32(0x1C)
+    edx = self.p4_rand_mod(cnt)[1] if cnt else 0
+    bit = 0
+    while edx >= 0:                                    # 0x442E93..0x442EBB
+        if bit < 0x20:
+            v, k = e.s32(0x20), bit
+        else:
+            v, k = e.s32(0x24), bit - 0x20
+        if v & (1 << (k & 0x1F)):
+            edx -= 1
+        bit += 1
+    k = bit - 1                                        # 0x442EBF dec ebx
+    self.p4_op5_ui4fc_spawn(0x56000001, 0, k, 0)
+    if k < 0x20:
+        e.d32(0x20, (e.s32(0x20) - (1 << k)) & 0xFFFFFFFF)
+    else:
+        e.d32(0x24, (e.s32(0x24) - (1 << (k - 0x20))) & 0xFFFFFFFF)
+    e.d32(0x1C, (cnt - 1) & 0xFFFFFFFF)
+    return (cnt - 1) != 0                              # 0x442F1A dec/setne
+
+
+def _beh_442AE0(self, e) -> bool:
+    """`0x442AE0`（0x67000001，×4 关5 自机吸附火花）：t=++[0x1C]；
+    (t&0x2F)==0x2F → 0x47000001 @(px−rand%0x18, py−rand%0x18) prm=rand%0x10+8
+    入 0x4AD4CC（rand 序 0x10/0x18/0x18）。返回 !!(sysb8 & 4)。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if (t & 0x2F) == 0x2F:                             # 0x442AED and 0x2F / cmp 0x2F
+        r1 = self.p4_rand_mod(0x10)[1]
+        r2 = self.p4_rand_mod(0x18)[1]
+        r3 = self.p4_rand_mod(0x18)[1]
+        self.spawn(self._p4_q("ui4cc"), 0x47000001,
+                   (self.p4_player_x() - r3) & 0xFFFFFFFF,
+                   (self.p4_player_y() - r2) & 0xFFFFFFFF, r1 + 8)
+    return bool(self.p4_sys_bits() & 4)
+
+
+def _beh_442BD0(self, e) -> bool:
+    """`0x442BD0`（0x67000002，×2 关5 循环散布）：t=++[0x1C]；(t&7)==0 且
+    [0x28]!=0 → 0x2700000A @(rec0,rec1) prm=[0x20](rec3) 入 0x4AD43C、[0x28]--。
+    返回 !([0x2C]>=0x14 或 [0x24]<=0)——两字段无写点（0x442C2C/0x442C32），
+    初值 0/0x14 ⇒ 常驻，仅随页面回收。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if (t & 7) == 0 and e.s32(0x28) != 0:
+        self._p4_ent43c(0x2700000A, e.s32(0x04), e.s32(0x08), e.s32(0x20))
+        e.d32(0x28, (e.s32(0x28) - 1) & 0xFFFFFFFF)
+    if e.s32(0x2C) >= 0x14 or e.s32(0x24) <= 0:
+        return False
+    return True
+
+
+def _beh_443370(self, e) -> bool:
+    """`0x443370`（0x69000001，×24 关7 母舰下沉）：t=++[0x1C]。
+    t==0（-1→0 首帧）→ 0x2900000F ×8 @(i,0) prm=本实体句柄（0x443381 push ebx）。
+    t≤0x64：y+=[0x2C](rec3)、x+=2、[0x20]+=([0x2C]≥0 ? +0xB4 : −0xB4)
+    （0x4433F7 setge/dec/and 0xFFFFFE98/add 0xB4）。
+    t>0x64：[0x20]=0、x−=(t−0x5A)>>2（sar，0x443416）。
+    [0x24]>0x100 且 [0x28]==0 → [0x28]=1（0x443430；子体 _beh_41EC40 反向写 [0x24]）。
+    [0x28]==2 或 x≤−0x30 → 灭。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0:                                         # 0x44337E（inc 后为 0）
+        h = id(e) & 0x7FFFFFFF
+        self.p4_links[h] = e
+        for i in range(8):
+            self._p4_ent43c(0x2900000F, i, 0, h)
+    elif t <= 0x64:                                    # 0x4433DC
+        v = e.s32(0x2C)
+        e.d32(0x08, (e.s32(0x08) + v) & 0xFFFFFFFF)
+        e.d32(0x04, (e.s32(0x04) + 2) & 0xFFFFFFFF)
+        e.d32(0x20, (e.s32(0x20) + (0xB4 if v >= 0 else -0xB4)) & 0xFFFFFFFF)
+    else:                                              # 0x443413
+        e.d32(0x20, 0)
+        e.d32(0x04, (e.s32(0x04) - ((t - 0x5A) >> 2)) & 0xFFFFFFFF)
+    if e.s32(0x24) > 0x100 and e.s32(0x28) == 0:       # 0x443430
+        e.d32(0x28, 1)
+    if e.s32(0x28) == 2 or e.s32(0x04) <= -0x30:       # 0x443442
+        return False
+    return True
+
+
+def _beh_4434A0(self, e) -> bool:
+    """`0x4434A0`（0x69000002，×6 关7 环阵母舰）：t=++[0x1C]。
+    t==0 → 0x29000010 ×35 @(i(0..4), j(0..6)) prm=本实体句柄（7×5 双层循环，
+    0x4434EE/0x4434F6）。t≤0x3C：x-=4；t<0xD2：[0x20]+=0x28（自转加速）；
+    t≥0xD2：x+=(t−0xD2)>>2。 [0x24]>0x200 且 [0x28]==0 → [0x28]=1。
+    [0x28]==2 或 x>0x298 → 灭。"""
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0:                                         # 0x4434AD
+        h = id(e) & 0x7FFFFFFF
+        self.p4_links[h] = e
+        for i in range(5):
+            for j in range(7):
+                self._p4_ent43c(0x29000010, i, j, h)
+    elif t <= 0x3C:                                    # 0x443523
+        e.d32(0x04, (e.s32(0x04) - 4) & 0xFFFFFFFF)
+    elif t < 0xD2:                                     # 0x44352E
+        e.d32(0x20, (e.s32(0x20) + 0x28) & 0xFFFFFFFF)
+    else:                                              # 0x44353B
+        e.d32(0x04, (e.s32(0x04) + ((t - 0xD2) >> 2)) & 0xFFFFFFFF)
+    if e.s32(0x24) > 0x200 and e.s32(0x28) == 0:       # 0x443553
+        e.d32(0x28, 1)
+    if e.s32(0x28) == 2 or e.s32(0x04) > 0x298:        # 0x443565
+        return False
+    return True
+
+
+def _beh_442F60(self, e) -> bool:
+    """`0x442F60`（0x6A000001，×3 残留光标拖尾）：t=[0x1C]++；偶帧（test al,1）
+    遍 0x4AD40C 节点链（层0 且 byte[+0x1C]!=0 → 自机）生成 0x4A000003
+    @([0x56CC8C], [0x56CC90])（全局自机坐标）入 0x4AD4CC。恒返回 1。"""
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if not (t & 1):                                    # 0x442F66 test al,1
+        for a in self.actorq:
+            n = getattr(a, "node", None)
+            if n is not None and getattr(n, "layer", 1) == 0 and getattr(n, "active", 0):
+                self.spawn(self._p4_q("ui4cc"), 0x4A000003,
+                           self.p4_player_x(), self.p4_player_y(), 0)
+    return True
+
+
+def _beh_443040(self, e) -> bool:
+    """`0x443040`（0x6A000002，脚本未用）：n=0x44F920()/0x3000（魔数
+    0x2AAAAAB·sar7+校正 = 有符号除 12288）；[0x1C]==n 或 n&3 → 活；
+    否则 0x44FF00(0x4AB514)（停）+ 灭。音频层未建模 MIDI 播放位置（恒 0），
+    ctor [0x1C]=0 → 常驻（标 unclear，随 §16.384）。"""
+    pos = int(self.p4_stat.get("midi_pos", 0))
+    n = _idiv_trunc(pos, 12288)
+    if e.s32(0x1C) == n or (n & 3):
+        return True
+    return False                                       # 0x44306D 0x4019A6(停)
+
+
+def _beh_443210(self, e) -> bool:
+    """`0x443210`（0x6A000003，×3 全屏残骸铺满）：t==0 帧 → 0x4A000002 四条带
+    入 0x4AD4CC：(r0=0, r1=0..0x13F)、(1, 0..0x5F)、(2, 0x40..0x9F)、
+    (3, 0x32..0x135)，prm 全 0；t=++[0x1C] 返回 1。旧 t≠0 → 灭。"""
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t != 0:
+        return False
+    q = self._p4_q("ui4cc")
+    for i in range(0x140):                             # 0x44325D
+        self.spawn(q, 0x4A000002, 0, i, 0)
+    for i in range(0x60):                              # 0x443287
+        self.spawn(q, 0x4A000002, 1, i, 0)
+    for i in range(0x40, 0xA0):                        # 0x4432B1
+        self.spawn(q, 0x4A000002, 2, i, 0)
+    for i in range(0x32, 0x136):                       # 0x4432DE
+        self.spawn(q, 0x4A000002, 3, i, 0)
+    return True
+
+
+def _beh_4457F0(self, e) -> bool:
+    """`0x4457F0`（0x6D000001，×1 流74 背景 12 槽切换）：
+    t==0x59/0x86 → 槽 (t==0x59 ? 0..5 : 6..11) 逐个 p4_bg_record(7, ch,
+    块{[4]=0x8580, [0x10]=0x164, byte[0x4C]=1}, 0x1000, 1)；
+    t==0x5A/0x87 → 同形块 {[4]=-0x180, [0x10]=-4}、flag=0x87（0x4015A0→0x457C40）。
+    t=++[0x1C]；==0x8C → 回卷 0x32。返回 !!(sysb8 & 0x400)。"""
+    t = e.s32(0x1C)
+    if t in (0x59, 0x86, 0x5A, 0x87):                  # 0x4457FB..0x445811
+        blk = bytearray(0x50)
+        if t in (0x59, 0x86):                          # 0x44586A 分支
+            blk[4:8] = (0x8580).to_bytes(4, "little")
+            blk[0x10:0x14] = (0x164).to_bytes(4, "little")
+            flag = 1
+            base = 0 if t == 0x59 else 6               # 0x44588E cmp 0x59
+        else:                                          # 0x445817 分支
+            blk[4:8] = ((-0x180) & 0xFFFFFFFF).to_bytes(4, "little")
+            blk[0x10:0x14] = ((-4) & 0xFFFFFFFF).to_bytes(4, "little")
+            flag = 0x87
+            base = 0 if t == 0x5A else 6               # 0x44583B cmp 0x5A
+        blk[0x4C] = 1                                  # byte[esp+0x58]
+        for i in range(6):
+            self.p4_bg_record(7, base + i, bytes(blk), 0x1000, flag)
+    t2 = (t + 1) & 0xFFFFFFFF
+    if t2 == 0x8C:                                     # 0x4458C1
+        t2 = 0x32
+    e.d32(0x1C, t2)
+    return bool(self.p4_sys_bits() & 0x400)
+
+
+# 0x66000002（0x441E00）每帧重建的栈上调度表（0x441E39..0x442501，dword 平铺；
+# 窗口 = {t, x, y, type, prm} 5 dword，t<0 = 检查点）。栈残留槽（exe 未写）记 0
+# ——0x48/0x78 两处 0x18 与 0x2C..0x14C 段已按写点逐条录入；0x170/0x184/0x198/
+# 0x1AC/0x1C0/0x1D4/0x1E8/0x1FC（每 5 dword 一处）exe 依赖栈残留（§16.384），
+# 复刻取 0 ⇒ 路由跳过（原作该槽随机值经 0xFF000000 过滤后多数也落 skip）。
+_P4_66_02_TABLE = (
+    0, 7, 0xC, 0x61000001, 0x26000001,                 # 群生门（掩码7、12只、型0x26000001）
+    -1, 0, 0x18, 0xF0, 0x5100000A,                     # 检查点
+    0, 0x3C, -0x18, 0xF0, 0x26000002,                  # type槽 0xF0 → skip
+    0, -1, 0, 0x258, 0x18,                             # type槽 0x258 → skip
+    0x5100000A, 0, 0, 0x258, 0x1C8,                    # t 巨大不触发
+    0x5100000A, -1, 0x3C, 0x258, -0x7D,                # 同上
+    0x26000003, 0, 0x46, 0x258, 0x254,
+    0x26000003, 0, 0x50, 0x258, -0x88,
+    0x26000003, 0, 0x5A, 0x258, 0x256,
+    0x26000003, 0, 0x64, 0x258, -0x8A,
+    0x26000003, 0, 0x6E, 0x258, 0x25A,
+    0x26000003, 0, 0x78, 0x258, -0x86,
+    0x26000003, 0, 0x82, 0x258, 0x258,
+    -1, 0, 0x190, 0x18, 0x5100000A,                    # 检查点
+    0, 0, 0x190, 0x1C8, 0x5100000A,
+    -1, 0x3C, 0x190, -0x8B, 0,
+    0, 0x46, 0x190, 0x25C, 0,
+    0, 0x50, 0x190, -0x88, 0,
+    0, 0x5A, 0x190, 0x258, 0,
+    0, 0x64, 0x190, -0x8C, 0,
+    0, 0x6E, 0x190, 0x257, 0,
+    0, 0x78, 0x190, -0x83, 0,
+    0, 0x82, 0x190, 0x253, 0,
+    0, 0x8C, 0x190, -0xB0, 0,
+    0x2600000F, 1, 0x96, 0x190, 0x230,
+    0x2600000F, 1, -1, 0x3C, 0x2600000F,
+    0x78, 0x26000004, 0, 0x3C, 0x2600000F,
+    0x168, 0x26000004, 0, -1, 0x3C,
+    0, 0, 0x26000005, 0, -1,
+    0x3C, 0, 0, 0x26000006, 0,
+    -1, 0x3C, 0xF, 8, 0x61000001,
+    0x26000007, -1, 0x3C, 0x2600000F, 0xF0,
+    0x26000008, 0, -1, 0x3C, 0x2600000F,
+    0x3C, 0x26000009, 0, 0x3C, 0x2600000F,
+    0xB4, 0x26000009, 0, 0x3C, 0x2600000F,
+    0x12C, 0x26000009, 0, 0x3C, 0x2600000F,
+    0x1A4, 0x26000009, 0, -1, 0x3C,
+    0, 0, 0x66000002, 8, -1,
+    0x3C, 0, 0, 0x66000002, 8,
+    -1, 0x3C, 0x2600000F, 0xF0, 0x2600000B,
+    0, -1, 0x268, 0x190, 0x5100000A,
+    0, 0x3C, 0x2600000C, 0, 0,
+    8, -2, 0, 0, 0,
+)
+
+
+def _beh_441E00(self, e) -> bool:
+    """`0x441E00`（0x66000002，×1 关4 波次调度器，ctor 置 sysf 0x40）。
+
+    每帧重建调度表（_P4_66_02_TABLE）；窗口 idx=[0x24]：
+    t=[idx]：t<0 → 检查点 0x4425E5（0x430860(0x4AD43C)==0 敌清 + sysb8 0x8000 清
+    + [0x1C]≥阈值{0x960,0x708,0x4B0}[选机] 或 t==-2 → 终局 0x442681：清 sysf 0x40、
+    [0x1C]≥阈值 → 直接灭；否则 0x32000005 @(0x298, y=0x3C 步 0x3C 至 >0x1A4、
+    末尾补 0x1A4) 入 0x4AD49C、灭；t==-1 → [0x1C]-=0x10E、[0x20]=-1（段帧归零）、
+    idx+=1（0x442652））。t==[0x20] → 生成 {x,y,type,prm} 并按 type 高字节路由
+    （0x61/0x66 → 0x4AD52C 复归、0x26 → 0x4AD43C、0x51 → 0x4AD4FC、其它跳过）、
+    idx+=5，且**下一窗口 t 仍等于本帧**时同帧连发（0x4425DA je 0x442517）。
+    尾：[0x1C]++、[0x20]++、返回 1。"""
+    tb = _P4_66_02_TABLE
+    while True:
+        idx = e.s32(0x24)
+        if idx + 4 >= len(tb):
+            break
+        tv = tb[idx]
+        if tv < 0:                                     # 0x442508 jl → 0x4425E5
+            if self.p4_430860(self.p4_q43c) == 0 and not (self.p4_sys_bits() & 0x8000):
+                sel = self.keys.field(0xC000) & 3
+                thr = (0x960, 0x708, 0x4B0)[min(sel, 2)]
+                if e.s32(0x1C) >= thr or tv == -2:     # 0x442646/0x442650
+                    self.p4_45af60(0x40)               # 0x442681 清 sysf 0x40
+                    sel2 = self.keys.field(0xC000) & 3
+                    if e.s32(0x1C) >= (0x960, 0x708, 0x4B0)[min(sel2, 2)]:
+                        return False                   # 0x4426A5 jge → 0x442720
+                    y = 0x3C                           # 0x4426E5 [esp+0x18]=ebp(0x3C)
+                    while True:                        # 0x4426E9..0x442707
+                        self.spawn(self._p4_q("ui49c"), 0x32000005, 0x298, y, 0)
+                        y += 0x3C
+                        if y > 0x1A4:
+                            break
+                    self.spawn(self._p4_q("ui49c"), 0x32000005, 0x298, 0x1A4, 0)
+                    return False                       # 0x442723 xor al,al
+                if tv != -2:                           # 0x442648 cmp -2
+                    e.d32(0x1C, (e.s32(0x1C) - 0x10E) & 0xFFFFFFFF)  # 0x442652
+                    e.d32(0x20, 0xFFFFFFFF)            # 0x44265C [0x20]=edi(-1)
+                    e.d32(0x24, (idx + 1) & 0xFFFFFFFF)  # 0x442659 inc eax
+            break
+        if tv != e.s32(0x20):                          # 0x44250E cmp [ecx+0x20]
+            break
+        rec = tb[idx + 1:idx + 5]
+        hi = rec[2] & 0xFF000000                       # 0x44256A 路由槽 = type
+        if hi == 0x61000000 or hi == 0x66000000:       # 0x442573/0x4425AC
+            self.p4_vm_op5_ctl(rec[0], rec[1], rec[2], rec[3])
+        elif hi == 0x26000000:                         # 0x44257C → 0x4AD43C
+            self._p4_ent43c(rec[2], rec[0], rec[1], rec[3])
+        elif hi == 0x51000000:                         # 0x442583 → 0x4AD4FC
+            self.p4_op5_ui4fc_spawn(rec[2], rec[0], rec[1], rec[3])
+        e.d32(0x24, (idx + 5) & 0xFFFFFFFF)            # 0x4425C5 add ecx,5
+        if idx + 9 < len(tb) and tb[idx + 5] != e.s32(0x20):
+            break                                      # 0x4425D8 je 0x442517 同帧连发
+    e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)        # 0x442666 尾
+    e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    return True
+
+
+def _beh_44A000(self, e) -> bool:
+    """`0x44A000`（0x54000001 输送带板条，ctor 0x44924F）：父 = [0x1C]（生成方
+    0x64000002 句柄）；x += 父[0x24]（滚动 −0xA/0x24）、y += 父[0x2C]（行漂 −2）；
+    0x401753(x,y) → 节点 dst；存活 −0x90 < x < 0x310（0x44A035）。"""
+    parent = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if parent is not None:
+        x = (x + parent.s32(0x24)) & 0xFFFFFFFF
+        y = (y + parent.s32(0x2C)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (x, y)
+    xs = x - 0x100000000 if x & 0x80000000 else x
+    return -0x90 < xs < 0x310                      # 0x44A035 两向出屏
+
+
+def _beh_44A070(self, e) -> bool:
+    """`0x44A070`（0x54000003 定宽横条，ctor 0x4491F3）：node.dst.x −= 0xF；
+    返回 dst.x > −0x180（0x44A081 setg）。"""
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] - 0xF, e.node.dst[1])
+        return e.node.dst[0] > -0x180
+    return False
+
+
+def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
+    """op5 控制器对 0x4AD4FC 的直生成（0x430400 + 0x40128A→0x44B140，ctor 0x449150）。
+    0x54000001/0x54000003/0x56000001 的 ctor case + 0x51 族转 p4_51_spawn。"""
+    if (typ & 0xFF000000) == 0x51000000:
+        return self.p4_51_spawn(x, y, typ, prm)
+    e = Ent(int(x) & 0xFFFFFFFF, int(y) & 0xFFFFFFFF, typ, 0)
+    e.d32(0x14, typ & 0xFFFFFFFF)
+    if typ == 0x54000001:                          # 0x44924F
+        e.d32(0x40, 0x402252)
+        e.beh = 0x44A000
+        e.d32(0x1C, prm & 0xFFFFFFFF)              # rec3 = 生成方句柄
+        e.d32(0x20, (self.p4_rand_mod(0x20)[1] - 0x10) & 0xFFFFFFFF)  # 0x449264 ±抖动
+        e.node = DNode(2, 0x180, 0x60)
+        e.node.rect = (0x180, 0x60, 0x1DF, 0xBF)
+        e.node.dst = (int(x), int(y))              # 0x4492C0 0x401753(rec0, rec1)
+        e.node.active = 1
+    elif typ == 0x54000003:                        # 0x4491F3
+        e.d32(0x40, 0x40191A)
+        e.beh = 0x44A070
+        e.d32(0x1C, 0)
+        e.node = DNode(0xD, 0, 0)
+        e.node.rect = (0, 0, 0x17F, 0x3F)
+        e.node.dst = (int(x), int(y))
+        e.node.active = 1
+    elif typ == 0x56000001:                        # 0x4494A8
+        e.d32(0x40, 0x4022F7)
+        e.beh = 0x430520
+        e.d32(0x1C, 0x80)
+        k = int(y)
+        e.node = DNode(0xD, 0, k)
+        e.node.rect = (0, k, 0x17F, k + 1)         # 0x4494E1 (0, k, 0x17F, k+1)
+        e.node.dst = (0x80, k + 0xD0)              # 0x449504 0x401753(0x80, k+0xD0)
+        e.node.active = 1
+    else:
+        self.p4_other.setdefault("op5_4fc", []).append((typ, x, y, prm))
+        e.d32(0x40, 0)
+        e.beh = 0
+        self._p4_q("ui4fc").append(e)
+        return e
+    self._p4_q("ui4fc").append(e)
+    return e
+
+
 P4_BEH: dict[int, object] = {
+    # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
+    0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
+    0x442C70: _beh_442C70, 0x443090: _beh_443090,
+    0x442980: _beh_442980, 0x441E00: _beh_441E00,
+    0x441D60: _beh_441D60, 0x442E70: _beh_442E70,
+    0x442AE0: _beh_442AE0, 0x442BD0: _beh_442BD0,
+    0x443370: _beh_443370, 0x4434A0: _beh_4434A0,
+    0x442F60: _beh_442F60, 0x443040: _beh_443040,
+    0x443210: _beh_443210, 0x4457F0: _beh_4457F0,
+    0x44A000: _beh_44A000, 0x44A070: _beh_44A070,   # 0x54 族板条（op5 控制器子体）
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
     0x432DC0: _beh_432DC0, 0x432FE0: _beh_432FE0, 0x433340: _beh_433340,
@@ -15586,7 +16246,7 @@ class Page4Mixin:
         self._tick_spark4cc()                     # 0x4AD4CC → 0x43A350（同上，不是独立队列）
         self._p4_tick_4cc()                       # 0x4AD4CC → 0x43A350 的行为派发（0x42 家族）
         self.tick_ui(self.ui4fc)                  # 0x4AD4FC → 0x44B0D0
-        self.tick_ui(self.ui52c)                  # 0x4AD52C → 0x445A30
+        self._p4_tick_52c()                       # 0x4AD52C → 0x445A30
 
     # ---- 自机输入/队列辅助（0x448C70 用）----------------------------------
     # ---- 碰撞（0x451461..0x4514A6 三组）------------------------------
@@ -20423,8 +21083,55 @@ class Page4Mixin:
             # VM 记录是无符号 dword，音量/步进/掩码都是带符号语义 ⇒ 先转有符号。
             _s = lambda v: v - 0x100000000 if v & 0x80000000 else v
             self.spawn(self._p4_q("ui52c"), c, _s(a), _s(b), _s(d))
+        elif op == 5 and (c & 0xFF000000) in (0x63000000, 0x64000000, 0x65000000,
+                                             0x66000000, 0x67000000, 0x69000000,
+                                             0x6A000000, 0x6D000000):
+            # 0x63/64/65/66/67/69/6A/6D 族：0x43D430 分派表余部（0x6B/0x6E/0x6F 另有
+            # 专路；0x6B 仅开场直生成、0x6E 走 0x4277D0=0x61 init、0x6F 已在上方）。
+            self.p4_vm_op5_ctl(a, b, c, d)
         else:
             self.p4_other.setdefault(op, []).append(rec)
+
+    def p4_vm_op5_ctl(self, a: int, b: int, c: int, d: int):
+        """op5 → `0x445AA0(0x4AD52C)`：0x48 字节控制器对象（基 ctor 0x430450 +
+        族分派 0x43D430）。基 ctor：[+4]=rec0、[+8]=rec1、[+0x14]=rec2、
+        byte[+0x34]=1、[+0x3C]=rec[0x10]（栈残留，复刻取 0）、
+        [+0x38]=0x4020D1(rec[0x10]) 同步节点（复刻取 0，§16.384）。
+        族 ctor：[+0x40]=行为 thunk、imm 字段、rec3 落点、部分型置 sysf 位。"""
+        spec = P4_OP5_CTOR.get(c)
+        if spec is None:
+            self.p4_other.setdefault(("op5", c), []).append((a, b, c, d))
+            return None
+        thunk, imm, sysf_set, rec3_to = spec
+        e = Ent(int(a) & 0xFFFFFFFF, int(b) & 0xFFFFFFFF, int(c), int(d))
+        e.d32(0x14, c & 0xFFFFFFFF)
+        e.d32(0x40, thunk)
+        e.beh = P4_OP5_BEH_THUNK[thunk]
+        for off, val in imm.items():
+            e.d32(off, val & 0xFFFFFFFF)
+        if rec3_to is not None:
+            e.d32(rec3_to, int(d) & 0xFFFFFFFF)
+        if c == 0x6A000002:
+            # 0x43D7ED：[+0x1C] = 0x44F920()/0x3000（魔数 0x2AAAAAB·sar7 =
+            # 有符号除 12288）。音频层未建模播放位置（恒 0）。
+            e.d32(0x1C, _idiv_trunc(int(self.p4_stat.get("midi_pos", 0)), 12288)
+                  & 0xFFFFFFFF)
+        if sysf_set:
+            self.p4_45af30(sysf_set)                       # 0x401E1F→0x45AF30(0x56CC84)
+        self._p4_q("ui52c").append(e)                      # 0x445AA0 尾插
+        return e
+
+    def _p4_tick_52c(self) -> None:
+        """`0x445A30`（0x4AD52C 队列遍）：沿 [+0x44] 链；byte[+0x34]==0 →
+        0x4018D4 摘链（上一帧标记的，本帧不再调行为）；否则
+        0x4012AD→0x43DC90 = jmp [obj+0x40]，行为返回 0 →
+        `[[obj+0x38]+0x1C]=0`（同步节点清零；复刻侧无宿主映射，见 §16.384）
+        + byte[+0x34]=0，下一帧摘链。0x61/0x6F 族 UiEntity（无 m）走 tick_ui。"""
+        q = self.ui52c
+        q[:] = [x for x in q
+                if not (hasattr(x, "m") and getattr(x, "m", None) is not None
+                        and x.m[0x34] == 0)]
+        self.tick_ui(q)
 
     def p4_load_layers(self, res: list[int]) -> None:
         """op 0x0B → `0x460600`：`0x44CEE0` 清层，再 14 层 `0x44C640(i,res[i])`+`0x44CE60(i,0)`，
