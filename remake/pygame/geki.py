@@ -2621,7 +2621,7 @@ class Pages(Page4Mixin):
                 beh, rad, layer, rect = spec
                 e.beh = beh
                 e.d32(0x0C, rad)
-                vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
+                vx, vy = a3 if (isinstance(a3, tuple) and len(a3) == 2) else (0, 0)
                 e.d32(0x1C, int(vx) & 0xFFFFFFFF)
                 e.d32(0x20, int(vy) & 0xFFFFFFFF)
                 e.d32(0x04, int(x) & 0xFFFFFFFF)
@@ -2677,6 +2677,31 @@ class Pages(Page4Mixin):
                     e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
                     e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
                     e.d32(0x2C, 0)
+                elif type_word == 0x31000015:        # ctor 0x4311B7：三元组 + 半速
+                    rec = a3 if isinstance(a3, (tuple, list)) else (0, 0, 0)
+                    e.d32(0x20, (int(x) << 1) & 0xFFFFFFFF)
+                    e.d32(0x24, (int(y) << 1) & 0xFFFFFFFF)
+                    for k in range(3):
+                        e.d32(0x28 + 4 * k, int(rec[k]) & 0xFFFFFFFF)
+                    e.d32(0x18, 1)
+                    e.raw[0x10] = 0
+                    if e.disp is not None:
+                        e.disp.active = 0
+                elif type_word == 0x3100000E:        # ctor 0x430F3A：父子弹
+                    e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                    e.d32(0x20, (0x40 - self.p4_rand() % 0x18) & 0xFFFFFFFF)
+                    e.d32(0x24, (self.p4_rand() % 0x40 - 0x20) & 0xFFFFFFFF)
+                    e.d32(0x18, 1)
+                elif type_word == 0x3100001D:        # ctor 0x43157A：隐形螺旋发射器
+                    v = int(a3) if isinstance(a3, int) else 0
+                    e.d32(0x1C, 0)
+                    e.d32(0x20, v & 0xFFFF)
+                    e.d32(0x24, int(x) & 0xFFFFFFFF)
+                    e.d32(0x28, int(y) & 0xFFFFFFFF)
+                    e.d32(0x2C, v & 0x10000)
+                    e.d32(0x18, 1)
+                    if e.disp is not None:
+                        e.disp.active = 0
                 elif type_word == 0x3100001B:        # ctor 0x431419：8.4 累加器/朝向速度
                     ax, by = a3 if isinstance(a3, tuple) else (0, 0)
                     if not isinstance(a3, tuple):

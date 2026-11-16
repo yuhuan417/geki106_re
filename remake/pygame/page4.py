@@ -12937,6 +12937,120 @@ def _beh_433AD0(self, e) -> bool:
     return e.s32(0x2C) < 4
 
 
+
+def _beh_432990(self, e) -> bool:
+    """`0x432990`（0x3100000E）：半速移动 + 每帧发 0F + 朝父体转向 + 命中脱钩。"""
+    x = (e.s32(0x04) + (e.s32(0x20) >> 1)) & 0xFFFFFFFF
+    y = (e.s32(0x08) + (e.s32(0x24) >> 1)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    self.spawn(self._p4_q("ui49c"), 0x3100000F, x, y, 0)
+    par = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if par is not None:
+        vx = e.s32(0x20)
+        if x < par.s32(0x04):
+            vx += 1 if vx >= 0 else 4
+        else:
+            vx -= 4 if vx >= 0 else 1
+        e.d32(0x20, vx & 0xFFFFFFFF)
+        vy = e.s32(0x24)
+        if y < par.s32(0x08):
+            vy += 1 if vy >= 0 else 4
+        else:
+            vy -= 4 if vy >= 0 else 1
+        e.d32(0x24, vy & 0xFFFFFFFF)
+        if self.p4_430640(par, x, y, 0x10):
+            par.d32(0x24, 0)
+            e.d32(0x1C, 0)
+    if e.g32(0x18) == 0:
+        par2 = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+        if par2 is not None:
+            par2.d32(0x24, 0)
+        for _ in range(4):
+            self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                       x + (self.p4_rand() & 0x1F) - 0xF,
+                       y + (self.p4_rand() & 0x1F) - 0xF, 0)
+        self._p4_4047e0_se(9, (x - 0x140) << 4)
+        return False
+    if e.node is not None:
+        e.node.dst = (x - 0x10, y - 0x10)
+    if e.s32(0x1C) == 0 and (x < -0x10 or x > 0x290 or y < -0x10 or y > 0x1F0):
+        return False
+    return True
+
+
+def _beh_433060(self, e) -> bool:
+    """`0x433060`（0x31000015）：半速移动 + 每帧发 16；交叉耦合转向（[0x30] 只反相 x）。"""
+    px = self.p4_player_x()
+    py = self.p4_player_y()
+    vx = e.s32(0x28)
+    vy = e.s32(0x2C)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    if e.s32(0x30) != 0:
+        if x > px:
+            if vy >= 0:
+                vx -= 1
+        elif vy <= 0:
+            vx += 1
+    else:
+        if x > px:
+            if vy <= 0:
+                vx -= 1
+        elif vy >= 0:
+            vx += 1
+    if y > py:
+        if vx <= 0:
+            vy -= 1
+    elif vx >= 0:
+        vy += 1
+    e.d32(0x28, vx & 0xFFFFFFFF)
+    e.d32(0x2C, vy & 0xFFFFFFFF)
+    ax = (e.s32(0x20) + vx) & 0xFFFFFFFF
+    ay = (e.s32(0x24) + vy) & 0xFFFFFFFF
+    e.d32(0x20, ax)
+    e.d32(0x24, ay)
+    nx = (ax >> 1) & 0xFFFFFFFF
+    ny = (ay >> 1) & 0xFFFFFFFF
+    e.d32(0x04, nx)
+    e.d32(0x08, ny)
+    self.spawn(self._p4_q("ui49c"), 0x31000016, nx, ny, 0)
+    if e.node is not None:
+        e.node.dst = (nx - 0x10, ny - 0x10)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < 0x5A:
+        return True
+    if nx < -0x10 or nx > 0x290 or ny < -0x10 or ny > 0x1F0:
+        return False
+    return True
+
+
+def _beh_433820(self, e) -> bool:
+    """`0x433820`（0x3100001D）：隐形螺旋发射器，三种弹型分支。"""
+    bx = e.s32(0x24)
+    by = e.s32(0x28)
+    ang = self.p4_45a9a0(self.p4_player_x() - bx, self.p4_player_y() - by)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    spin = (page4_sin((225 * (t & 0xF)) & 0xFFFFFFFF) * min(t, 0x30))
+    x = (bx + ((page4_cos(ang) * t) >> 4)) & 0xFFFFFFFF
+    y = (by + ((page4_sin(ang) * t) >> 4)) & 0xFFFFFFFF
+    a2 = (ang + 0x384) & 0xFFFFFFFF
+    sx = (x + (((page4_cos(a2) * spin) >> 15))) & 0xFFFFFFFF
+    sy = (y + (((page4_sin(a2) * spin) >> 15))) & 0xFFFFFFFF
+    if e.s32(0x20) & 0x10:
+        self.spawn(self._p4_q("ui4fc"), 0x5A000003, sx, sy, 0)
+    else:
+        self.spawn(self._p4_q("ui4cc"), 0x4A000004, sx, sy, 0)
+    if e.g32(0x18) == 0 and e.s32(0x2C) != 0:
+        if self.p4_stat.get(0x56CCB8, 0) & 0x10:
+            self.spawn(self._p4_q("ui4fc"), 0x5A000004, sx, sy, 0)
+        else:
+            self.spawn(self._p4_q("ui4cc"), 0x4A000005, sx, sy, 0)
+    return t < 0x3C and e.g32(0x18) != 0
+
+
 P4_BEH: dict[int, object] = {
     0x432F20: _beh_432F20,
     0x433520: _beh_433520,
