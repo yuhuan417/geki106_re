@@ -1094,6 +1094,19 @@ class Flags:
 
 
 # ---------------------------------------------------------------------------- UI 实体
+# 0x4308A0 的 0x32 道具族各型源矩形（0x4317C4..0x431B2C 的四参 push，层 1 bm_cm32）
+P32_RECTS = {
+    0x32000002: (0x00, 0x60, 0x1F, 0x7F),
+    0x32000003: (0xA0, 0x60, 0xBF, 0x7F),
+    0x32000004: (0xA0, 0xA0, 0xBF, 0xBF),
+    0x32000005: (0xA0, 0x80, 0xBF, 0x9F),
+    0x32000006: (0x00, 0x20, 0x1F, 0x3F),
+    0x32000007: (0x00, 0x40, 0x1F, 0x5F),
+    0x32000008: (0xA0, 0x20, 0xBF, 0x3F),
+    0x32000009: (0x00, 0x00, 0x1F, 0x1F),
+}
+
+
 @dataclass
 class DisplayNode:
     """0x45A0E0 分配的 0x28B 显示节点（+0 源层、+4..+0x10 源矩形、+0x14/+0x18 目标、+0x1C 激活）。"""
@@ -2544,6 +2557,25 @@ class Pages(Page4Mixin):
             else:
                 e.beh = f"unimpl_5F_{idx}"
                 self.log(f"ui 0x5F idx {idx} 未实现（§16.7）")
+        elif hi == 0x32000000:
+            # 0x4308A0 的 **0x32 道具族 ctor**（0x4317C4..0x431B2C，跳表 0x431BAC）：
+            # 共通尾 = `[+0x40]=0x432390`、`[+0xC]=0x18`、`[+0x10]=1`、`[+0x18]=1`、
+            # `[+0x1C]=0`、`[+0x20]=x<<3`、`[+0x24]=(0x298-x)/10`（0x462D71 商），
+            # 节点层 1（bm_cm32）、rect 见下表、dst=(x-0x10,y-0x10)。
+            # 之前落 default ⇒ 道具不生成节点、不可见也不可吃。
+            e.beh = "p32"
+            e.d32(0x14, type_word)
+            e.d32(0x04, int(x) & 0xFFFFFFFF)   # 0x4308A0 基类：x
+            e.d32(0x08, int(y) & 0xFFFFFFFF)   # 0x4308A0 基类：y
+            e.d32(0x1C, 0)
+            e.d32(0x20, (int(x) << 3) & 0xFFFFFFFF)
+            e.d32(0x24, ((0x298 - int(x)) // 0xA) & 0xFFFFFFFF)  # C 截断除
+            e.d32(0x18, 1)
+            e.d32(0x0C, 0x18)
+            e.raw[0x10] = 1
+            _r = P32_RECTS.get(type_word, (0, 0x20, 0x1F, 0x3F))
+            e.disp = DisplayNode(layer=1, rect=list(_r),
+                                 dst=[int(x) - 0x10, int(y) - 0x10])
         elif hi == 0x31000000:
             # 0x4308A0 的 **0x31 弹族 ctor**（0x4AD49C 队列）的共通尾：
             # 速度取 rec[3]（a3=(vx,vy) 8.8）、[+0x24]/[+0x28]=x/y<<8、
@@ -2600,6 +2632,43 @@ class Pages(Page4Mixin):
                 continue
             if isinstance(e.beh, int):                # 页4：int 真址 → p4_call_behaviour
                 e.alive = bool(self.p4_call_behaviour(e))
+                continue
+            if e.beh == "p32":
+                # 0x432390 道具行为：闪烁切换 rect 行、水平漂移 [0x24] 递减至 -0x10、
+                # y 缓降/落出，x<-0x18 且漂移<0 时自灭（0x32000005 先记分）。
+                t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+                e.d32(0x1C, t)
+                if e.disp is not None and (t & 9) in (1, 9):
+                    d = 0x20 if (t & 9) == 1 else -0x20
+                    l, tp, r, b = e.disp.rect
+                    e.disp.rect = [l, tp + d, r, b + d]
+                acc = (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF
+                drift = e.s32(0x24) - 1
+                if drift <= -0x10:
+                    drift = -0x10
+                e.d32(0x20, acc)
+                e.d32(0x24, drift & 0xFFFFFFFF)
+                y = e.s32(0x08)
+                if y < 0x10:
+                    y += 1
+                    if y <= -0x10:
+                        y = -0x10
+                    e.d32(0x08, y & 0xFFFFFFFF)
+                elif y > 0x1D0:
+                    y -= 1
+                    if y < 0x1F0:
+                        y = 0x1F0
+                    e.d32(0x08, y & 0xFFFFFFFF)
+                nx = e.s32(0x20) >> 3
+                e.d32(0x04, nx & 0xFFFFFFFF)
+                if nx < -0x18 and drift < 0:
+                    if e.g32(0x14) == 0x32000005:
+                        self.p4_45f660()               # 0x432435 → 0x401FD2
+                    e.alive = False
+                    continue
+                if e.disp is not None:
+                    e.disp.dst = [nx - 0x10, e.s32(0x08) - 0x10]
+                e.alive = e.s32(0x18) != 0
                 continue
             if e.beh == "p31":
                 # 0x4321C0：8.8 加速度积分 → 屏内(±0x10) 且 [+0x18]!=0 才活
