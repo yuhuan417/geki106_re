@@ -7668,7 +7668,8 @@ def _beh_41D990(self, e) -> bool:
             if e.node is not None:
                 e.node.active = 1
         elif t == 0x50:
-            self.spawn(self._p4_q("ui49c"), 0x31000015, e.s32(0x04), e.s32(0x08), 0xC)
+            self.spawn(self._p4_q("ui49c"), 0x31000015, e.s32(0x04), e.s32(0x08),
+                       (0xC, 0, 1 if e.s32(0x08) < 0xF0 else 0))
         elif t == 0x70:
             if e.node is not None:
                 e.node.active = 0
