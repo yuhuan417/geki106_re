@@ -2544,6 +2544,24 @@ class Pages(Page4Mixin):
             else:
                 e.beh = f"unimpl_5F_{idx}"
                 self.log(f"ui 0x5F idx {idx} 未实现（§16.7）")
+        elif hi == 0x31000000:
+            # 0x4308A0 的 **0x31 弹族 ctor**（0x4AD49C 队列）的共通尾：
+            # 速度取 rec[3]（a3=(vx,vy) 8.8）、[+0x24]/[+0x28]=x/y<<8、
+            # [+0x18]=|vx|+|vy|、[+0xC]=半径、[+0x40]=行为 0x4321C0（直线移动）。
+            # 每种类型的 rect/层/额外行为在 0x431B30 的 31 项跳表里；这里先落
+            # **移动+出屏自灭**（门 0x61000002 需要队列清空），逐型 rect 见表 §15。
+            e.beh = "p31"
+            vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
+            e.d32(0x14, type_word)
+            e.d32(0x1C, int(vx) & 0xFFFFFFFF)
+            e.d32(0x20, int(vy) & 0xFFFFFFFF)
+            e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
+            e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
+            e.d32(0x18, (abs(int(vx)) + abs(int(vy))) & 0xFFFFFFFF)
+            e.d32(0x0C, 0x18)
+            e.raw[0x10] = 1
+            e.disp = DisplayNode(layer=0, rect=[0, 0, 0, 0],
+                                 dst=[int(x) - 0xC, int(y) - 0xC])
         else:
             e.beh = "default"                     # 0x43DA4F / 0x449AA7
         queue.append(e)
@@ -2582,6 +2600,19 @@ class Pages(Page4Mixin):
                 continue
             if isinstance(e.beh, int):                # 页4：int 真址 → p4_call_behaviour
                 e.alive = bool(self.p4_call_behaviour(e))
+                continue
+            if e.beh == "p31":
+                # 0x4321C0：8.8 加速度积分 → 屏内(±0x10) 且 [+0x18]!=0 才活
+                e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+                e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+                nx = e.s32(0x24) >> 8
+                ny = e.s32(0x28) >> 8
+                e.d32(0x04, nx & 0xFFFFFFFF)
+                e.d32(0x08, ny & 0xFFFFFFFF)
+                if e.disp is not None:
+                    e.disp.dst = [nx - 0xC, ny - 0xC]
+                e.alive = (e.s32(0x18) != 0
+                           and self.p4_4305f0(e, 0x10) == 1)
                 continue
             if e.beh == "open_timeline":
                 self._open_timeline(e)

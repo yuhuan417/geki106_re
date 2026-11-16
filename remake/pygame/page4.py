@@ -1707,8 +1707,8 @@ def _beh_23000005_06(self, e) -> bool:
     return True                                        # 0x40E6F6
 
 
-def _beh_23000009(self, e) -> bool:
-    """`0x401181` → `0x40EAF0`：正弦航迹 + 周期射击。
+def _beh_2300000A(self, e) -> bool:
+    """`0x401181` → `0x40EAF0`：**跳（0x2300000A）** 正弦航迹 + 周期射击。
 
     ```
     0x40EAF3  if (++[+0x20] == 0) { if ([+0x1C] > 0) 0x43B070(ent,0) }     ; 计数归零打一发
@@ -12320,7 +12320,7 @@ P4_BEH: dict[int, object] = {
     0x448230: _beh_448230,
     0x40E790: _beh_23000007,
     0x40E8C0: _beh_23000008,
-    0x40EAF0: _beh_23000009,
+    0x40EAF0: _beh_2300000A,
     0x40E520: _beh_23000005_06,
     0x4466F0: _beh_type1_follow,
     0x4467D0: _beh_type1_follow_b,
@@ -13692,6 +13692,9 @@ class Page4Mixin:
         self.ui46c = [x for x in self.ui46c if getattr(x, "alive", True)]
         self._p4_tick_ents()                      # 0x4AD43C → 0x43BC70
         self.tick_ui(self.p4_ui49c)               # 0x4AD49C → 0x4353A0
+        # 0x4353A0 的链表遍历在行为返回 0 时把节点摘链；复刻侧 tick_ui 只置 alive=False，
+        # 必须在这里过滤，否则 0x31 弹/死节点永久占住列表（0x61000002 门、0x430860 计数）。
+        self.p4_ui49c = [x for x in self.p4_ui49c if getattr(x, "alive", True)]
         self._tick_wipe4f()                       # 0x4AD4CC → 0x43A350（同队列的另一半工作）
         self._tick_spark4cc()                     # 0x4AD4CC → 0x43A350（同上，不是独立队列）
         self._p4_tick_4cc()                       # 0x4AD4CC → 0x43A350 的行为派发（0x42 家族）
@@ -17351,8 +17354,8 @@ class Page4Mixin:
             vy = ((inv * spd) * ebx) >> 8                 # 0x43B1FE
             if vx == 0 and vy == 0:                       # 0x43B215
                 continue
-                eb2 = self.spawn(self._p4_q("ui49c"), typ,
-                           e.s32(0x04), e.s32(0x08), (vx, vy))
+            eb2 = self.spawn(self._p4_q("ui49c"), typ,
+                             e.s32(0x04), e.s32(0x08), (vx, vy))
             if eb2 is not None:
                 eb2.raw[0x10] = 1
                 eb2.d32(0x14, typ & 0xFFFFFFFF)
@@ -18465,8 +18468,14 @@ class Page4Mixin:
             else:
                 self.spawn(self._p4_q("ui4cc"), c, a, b, d)
         elif op == 4:
-            # 0x460490：0x430400(&rec,…) 后 0x44B140(0x4AD4FC,&rec) ⇒ ui4fc
-            self.spawn(self._p4_q("ui4fc"), c, a, b, d)
+            # 0x460490：0x430400(&rec,…) 后 0x44B140(0x4AD4FC,&rec) ⇒ ui4fc。
+            # 0x51 族（0x5100000x）的 ctor 是 0x449150 → 0x422EF0 跳表 case，
+            # 必须走 p4_51_spawn；直接 spawn() 会落成 default 行为、整段关卡收尾
+            # （流75 的 0x51000002 param=1）不推进。
+            if (c & 0xFFFF0000) == 0x51000000:
+                self.p4_51_spawn(a, b, c, d)
+            else:
+                self.spawn(self._p4_q("ui4fc"), c, a, b, d)
         elif op == 5 and c == 0x61000005:
             # 0x61000005：init 0x42730B（`[+0x1C]=a` 当前、`[+0x20]=b` 目标、`[+0x24]=d` 步进）
             # 链路 0 的载荷是 (-255, 0, 0x61000005, 16) = 16 帧淡入，正是开场把画面点亮的那条
