@@ -1082,17 +1082,22 @@ class Ent:
                 self.d32(0x2C, 0)
                 self.d32(0x30, 0)
             else:                                       # rec0==0：Boss 入场体
+                # 0x41C1B9 分支：rec3 是**标量**（sar 8 = 入场态 1..7），不解引用。
+                # 脚本记录 (x=0, prm=0x330/0x260/0x590/0x6C0) 全走此支——§16.385 的
+                # "rec3 当指针"矛盾由此闭合（x≠0 的普通支对随附脚本为死码）。
                 self.d32(0x40, 0x4016C7)
                 self.beh = 0x41DD70
                 self.d32(0x04, 0x298)
                 self.d32(0x18, 0xB4)
-                if tgt is not None:
-                    self.d32(0x1C, (tgt.g32(0) >> 8) & 0xFFFFFFFF)
+                _d = d - 0x100000000 if d & 0x80000000 else d
+                self.d32(0x1C, (_d >> 8) & 0xFFFFFFFF)  # 0x41C1D7 sar ecx,8
                 self.d32(0x20, 0)
                 self.d32(0x24, -8 & 0xFFFFFFFF)
                 self.d32(0x28, 0)
                 if self.node is not None:
-                    self.node.dst = (0x298, b - 0x18)
+                    # 0x41C1E0/0x41C1EB push ([esi+8]-0x18, 0x280) → 0x41CB4B
+                    # 0x401753：arg1=后推的 0x280 → node[+0x14]、arg2=[esi+8]-0x18 → [+0x18]
+                    self.node.dst = (0x280, (b - 0x18) & 0xFFFFFFFF)
         if info.get("s2a05"):                          # 0x40A65F：0x2A000005 + rec3 改写
             pg = getattr(self, "_pages", None)
             px = pg.p4_player_x() if pg is not None else 0
