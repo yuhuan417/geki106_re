@@ -1119,6 +1119,9 @@ class Ent:
             self.d32(0x28, 0)
         if "z20" in info:
             self.d32(0x20, 0)
+        if info.get("active0"):                        # ctor 建节点但 active=0
+            if self.node is not None:
+                self.node.active = 0
         if info.get("node_off"):                       # ctor 只把 node.active 清 0
             if self.node is not None:
                 self.node.active = 0
@@ -2539,48 +2542,68 @@ ENT2A_INIT = {
 # 0x2C 族（最终关前半）ctor case 表（0x403AA0，跳表 0x4044D8，20 型）——2026-11-06 读定
 # case7/14/15 跳表项 0 = 无 ctor；多数有 d_to=[0x1C]
 ENT2C_INIT = {
-    0x2C000001: {"beh": 0x401B9F, "imm": {0x0C: 0x60, 0x18: 0x12C0}, "d_to": 0x1C},   # r=96、HP=4800
-    0x2C000002: {"beh": 0x401712, "imm": {0x0C: 0x60, 0x18: 0x12C0}, "d_to": 0x1C},
-    0x2C000003: {"beh": 0x401E33, "imm": {0x0C: 0x60, 0x18: 0x960}, "d_to": 0x1C},    # HP=2400
-    0x2C000004: {"beh": 0x401A55, "imm": {0x0C: 0x18, 0x18: 0x100, 0x20: -0x2F, 0x24: 0x11},
-                 "d_to": 0x28},
-    0x2C000005: {"beh": 0x40101E, "imm": {0x0C: 0x18}},
-    0x2C000006: {"beh": 0x401EE7, "imm": {0x0C: 0x18, 0x18: 0x20, 0x1C: -0x618}, "d_to": 0x20},
-    0x2C000008: {"beh": 0x40136B, "imm": {0x0C: 0x30, 0x18: 0xC80}, "d_to": 0x1C},    # HP=3200
+    0x2C000001: {"beh": 0x401B9F, "imm": {0x0C: 0x60, 0x18: 0x12C0},
+                 "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True},
+    0x2C000002: {"beh": 0x401712, "imm": {0x0C: 0x60, 0x18: 0x12C0}, "d_to": 0x1C,
+                 "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True},
+    0x2C000003: {"beh": 0x401E33, "imm": {0x0C: 0x60, 0x18: 0x960}, "d_to": 0x1C,
+                 "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True},
+    0x2C000004: {"beh": 0x401A55, "imm": {0x0C: 0x18, 0x18: 0x100, 0x20: -0x2F,
+                                          0x24: 0x11, 0x28: 0}, "d_to": 0x1C,
+                 "node": (2, 0xC0, 0x30, 0xEF, 0x5F), "dst": (0, 0), "b10_1": True},
+    0x2C000005: {"beh": 0x40101E, "imm": {0x0C: 0x18},
+                 "node": (2, 0xC0, 0x30, 0xEF, 0x5F), "dst": (0, 0), "b10_1": True},
+    0x2C000006: {"beh": 0x401EE7, "imm": {0x0C: 0x18, 0x18: 0x20, 0x1C: -0x618},
+                 "r1sh": (0x20, 8),
+                 "node": (2, 0xC0, 0, 0xEF, 0x2F), "dst": (0, 0), "b10_1": True},
+    0x2C000008: {"beh": 0x40136B, "imm": {0x0C: 0x30, 0x18: 0xC80},
+                 "node": (2, 0, 0, 0x5F, 0x5F), "dst": (-0x30, -0x30), "b10_1": True},
     0x2C000009: {"beh": 0x4015DC, "imm": {0x0C: 0x18, 0x18: 0x20}},
     0x2C00000A: {"beh": 0x401A14},
-    0x2C00000B: {"beh": 0x401AA0, "imm": {0x0C: 0x30, 0x20: 0x1C2}, "d_to": 0x1C},
-    0x2C00000C: {"beh": 0x4010C8, "imm": {0x0C: 0x30, 0x18: 0x2710}, "d_to": 0x1C},   # HP=10000
-    0x2C00000D: {"beh": 0x401D66, "imm": {0x18: 0xE, 0x30: 0x10}},
+    0x2C00000B: {"beh": 0x401AA0, "imm": {0x0C: 0x30, 0x20: 0x1C2}, "r0_1C": True,
+                 "d_to": 0x28, "dst": (-0x30, -0x30), "b10_1": True},
+    0x2C00000C: {"beh": 0x4010C8, "imm": {0x0C: 0x30, 0x18: 0x2710, 0x28: 0},
+                 "r0_1C": True, "d_to": 0x20, "dst": (-0x30, -0x30), "b10_1": True},
+    0x2C00000D: {"beh": 0x401D66, "imm": {0x18: 0xE, 0x30: 0x10},
+                 "node": (2, 0, 0x60, 0x5F, 0xBF), "dst": (-0x30, -0x30)},
     0x2C000010: {"beh": 0x40158C, "imm": {0x0C: 0x48, 0x18: 0x2580, 0x1C: -0x50, 0x20: -1},
-                 "d_to": 0x1C},                                                        # HP=9600
+                 "node": (2, 0, 0x90, 0x8F, 0x11F), "dst": (-0x48, -0x48), "b10_1": True},
     0x2C000011: {"beh": 0x40103C, "imm": {0x0C: 0x48, 0x18: 0x320, 0x28: 0x800},
-                 "d_to": 0x1C, "d_to2": 0x24},
-    0x2C000012: {"beh": 0x402167},
-    0x2C000013: {"beh": 0x402167, "imm": {0x0C: 0x18, 0x18: 0xC}},
-    0x2C000014: {"beh": 0x4015E6, "imm": {0x0C: 0x18}},
+                 "r0sh": (0x20, 8), "r1sh": (0x24, 8),
+                 "node": (2, 0, 0, 0x8F, 0x8F), "dst": (-0x48, -0x48), "b10_1": True},
+    0x2C000012: {"beh": 0x402167, "imm": {0x0C: 0x30, 0x18: 0x30},
+                 "node": (2, 0, 0x120, 0x5F, 0x17F), "dst": (-0x30, -0x30), "b10_1": True},
+    0x2C000013: {"beh": 0x402167, "imm": {0x0C: 0x18, 0x18: 0xC},
+                 "node": (2, 0x60, 0x120, 0x8F, 0x14F), "dst": (-0x18, -0x18),
+                 "b10_1": True, "active0": True},
+    0x2C000014: {"beh": 0x4015E6, "imm": {0x0C: 0x18},
+                 "node": (2, 0x60, 0x120, 0x8F, 0x14F), "dst": (-0x18, -0x18), "b10_1": True},
 }
 
 # 0x2D 族（最终关）ctor case 表（0x408150，跳表 0x40845C，5 型）——2026-11-06 读定
 ENT2D_INIT = {
-    0x2D000019: {"beh": 0x401EBF,
+    0x2D000018: {"beh": 0x401EBF,
                  "imm": {0x0C: 0x78, 0x18: 0x7080, 0x20: 0xF003200,
-                         0x24: 0x780014, 0x28: -0x708}, "d_to": 0x2C},                # r=120、HP=28800
-    0x2D00001A: {"beh": 0x4017DA},                                                   # 多部位（9 生成点）
+                         0x24: 0x780014, 0x28: -0x708},
+                 "node": (2, 0, 0, 0xEF, 0xEF), "dst": (0, 0), "b10_1": True},
+    0x2D000019: {"beh": 0x4017DA, "node": (2, 0, 0, 0, 0), "dst": (0, 0)},
     # 0x2D00001B（0x4082CE）：+0xC=0x10、+0x18=-1、+0x1C=p0(主)、+0x20=0、+0x24=0、
     #   +0x28=p1（主铺=0 待机；链生子=p1≠0 即散开）、+0x2C=p3、+0x30=(p1==0)?2:0
-    0x2D00001B: {"beh": 0x401690, "imm": {0x0C: 0x10, 0x18: -1, 0x20: 0, 0x24: 0},
-                 "r0_1C": True, "r1_28": True, "d_to": 0x2C, "s1z2_30": True},
+    0x2D00001A: {"beh": 0x401690, "imm": {0x0C: 0x10, 0x18: -1, 0x20: 0, 0x24: 0},
+                 "r0_1C": True, "r1_28": True, "d_to": 0x2C, "s1z2_30": True,
+                 "node": (2, 0, 0, 0, 0), "dst": (0, 0), "b10_1": True},
     # 0x2D00001C/1D（0x40832D/0x4083A1）：+0xC=8、+0x18=-1、+0x1C=p0(主)、+0x20=p1、
     #   +0x24=*(p0+0x20)（主打包位）、+0x28=p3*(p1?450:1)、+0x2C=(p1?p3:0)、+0x30=0、
     #   node.rect={0,0,0,0}、node.dst=(0,0)、node.active=1
+    0x2D00001B: {"beh": 0x4014AB, "imm": {0x0C: 8, 0x18: -1, 0x30: 0},
+                 "r0_1C": True, "r1_20": True, "deref0_24": True,
+                 "s3m450_28": True, "s3if_2C": True,
+                 "node": (2, 0, 0, 0, 0), "dst": (0, 0), "b10_1": True,
+                 "node_custom": {"rect": (0, 0, 0, 0), "dst": (0, 0), "active": 1}},
     0x2D00001C: {"beh": 0x4014AB, "imm": {0x0C: 8, 0x18: -1, 0x30: 0},
                  "r0_1C": True, "r1_20": True, "deref0_24": True,
                  "s3m450_28": True, "s3if_2C": True,
-                 "node_custom": {"rect": (0, 0, 0, 0), "dst": (0, 0), "active": 1}},
-    0x2D00001D: {"beh": 0x4014AB, "imm": {0x0C: 8, 0x18: -1, 0x30: 0},
-                 "r0_1C": True, "r1_20": True, "deref0_24": True,
-                 "s3m450_28": True, "s3if_2C": True,
+                 "node": (2, 0, 0, 0, 0), "dst": (0, 0), "b10_1": True,
                  "node_custom": {"rect": (0, 0, 0, 0), "dst": (0, 0), "active": 1}},
 }
 
