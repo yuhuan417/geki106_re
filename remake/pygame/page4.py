@@ -7271,8 +7271,9 @@ def _beh_41A480(self, e) -> bool:
                                (0x24, -0x24), (0x24, 0x24)):   # 0x41A9DA..0x41AB10 ×5
                     self.spawn(self._p4_q("ui4cc"), 0x41000001,
                                (x + sx) & 0xFFFFFFFF, (y + sy) & 0xFFFFFFFF, 0)
-                da = self.p4_45a9a0(self.p4_player_y() - y,
-                                    self.p4_player_x() - x) - 0x384   # 0x41AB5C
+                # exe 0x41AB5C 实参序 (Δy, Δx)=表行/列；复刻包装器形参 (dx, dy)
+                da = self.p4_45a9a0(self.p4_player_x() - x,
+                                    self.p4_player_y() - y) - 0x384
                 edi = 0
                 while edi <= 0xC00:                         # 13 发
                     self.p4_43B290(e, page4_cos(da), page4_sin(da),
