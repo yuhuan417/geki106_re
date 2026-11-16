@@ -827,6 +827,9 @@ def _idiv_trunc(a: int, b: int) -> int:
     return -((-a) // b) if a < 0 else a // b
 
 
+_P4_ACTIVE_PAGES = None
+
+
 class Ent:
     """0x5C 字节实体；`[+0x34]` 存活字节、`[+0x40]` 行为指针、`[+0x14]` 类型。"""
 
@@ -856,6 +859,7 @@ class Ent:
         self.m[off + 1] = (v >> 8) & 0xFF
 
     def __init__(self, a: int, b: int, typ: int, d: int):
+        self._pages = _P4_ACTIVE_PAGES      # ctor 内 _deref_link 需要它解析父指针
         self.m = bytearray(self.SZ)
         self.d32(0x00, 0x49874C)          # 0x43045E vtable（0x43A82C 再改成 0x49874c）
         self.d32(0x04, a)                 # 0x430475 payload[0]
@@ -1156,12 +1160,18 @@ class Ent:
             if tgt is not None:
                 self.d32(0x0C, tgt.g32(0x0C))
                 if tgt.node is not None and self.node is not None:
-                    self.node.rect = tuple(tgt.node.rect)
+                    w = tgt.g32(0x0C)                  # 0x4162BA：rect += (0, 2w, 0, 2w)
+                    r = tgt.node.rect
+                    self.node.rect = (r[0], r[1] + 2 * w, r[2], r[3] + 2 * w)
                     self.node.dst = tuple(tgt.node.dst)
-        if "d3mod3" in info:                           # 0x4161F3：rec3%3 → beh 三选一（0x4016F9/0x4013A7/0x4020E5）
+        if info.get("d3div3"):                         # 0x416240：[0x30]=rec3/3（截断）
+            self.d32(0x30, _idiv_trunc(d, 3) & 0xFFFFFFFF)
+        if "d3mod3" in info:                           # 0x41620D：rec3%3 → 0x4016F9/0x4020E5/0x4013A7
             v = d % 3
-            self.d32(0x40, (0x4016F9, 0x4013A7, 0x4020E5)[v])
-            self.beh = {0x4016F9: 0x4185C0, 0x4013A7: 0x4185C0, 0x4020E5: 0x4185C0}.get(self.d32(0x40, 0) or 0, 0)
+            th = (0x4016F9, 0x4020E5, 0x4013A7)[v]
+            self.d32(0x40, th)
+            self.beh = {0x4016F9: 0x417940, 0x4020E5: 0x417F30,
+                        0x4013A7: 0x4185C0}[th]
         if "r1_20" in info:                            # [0x20] = rec[1]（原值）
             self.d32(0x20, b & 0xFFFFFFFF)
         if "r0_1C" in info:
@@ -2378,8 +2388,9 @@ ENT27_INIT = {
     0x2700000F: {"beh": 0x4014F6, "r0sh": (0x1C, 4), "r1sh": (0x20, 4),
                  "cmpgate": (0x24, 0xFFFFFFF0, -0x20, "g"),
                  "cmpgate2": (0x28, 0x20, -0x20, "g")},   # y>F0: −0x20/−0x20; y≤F0: −0x30/0
-    0x27000010: {"beh": 0x4013A7, "z1c_20_24_28_2C": True, "d3mod3": True},
-    0x27000011: {"beh": 0x4021E4, "z1c_24_28": True, "d_to_ptr": True,  # [0xC]=rec3[0xC]；拷父节点；[0x20]=rec1<<5
+    0x27000010: {"beh": 0x4013A7, "z1c_20_24_28_2C": True, "d3mod3": True,
+                 "d3div3": True, "b10_0": True},
+    0x27000011: {"beh": 0x4021E4, "imm": {0x1C: 0, 0x24: 0, 0x28: 0}, "d_to_ptr": True,
                  "r1sh": (0x20, 5)},
 }
 
@@ -13197,6 +13208,8 @@ class Page4Mixin:
 
     # ---- 0x451110 -------------------------------------------------------
     def p4_step(self) -> bool:
+        global _P4_ACTIVE_PAGES
+        _P4_ACTIVE_PAGES = self
         if os.environ.get("P4_DIAG") and self.p4_frames % 120 == 0:
             print(f"[p4diag] f={self.p4_frames} n43c={getattr(self, 'p4_n43c', 0)}  lay={getattr(self.layers.tab.get(0),'bind_id',None)},{getattr(self.layers.tab.get(1),'bind_id',None)},{getattr(self.layers.tab.get(2),'bind_id',None)}"
                   f"beh_missing={dict(getattr(self, 'p4_beh_missing', {}))} "
@@ -19000,6 +19013,8 @@ class Page4Mixin:
         不能用 `spawn()`：那个返回 `UiEntity`（geki 侧的轻量类），没有 `d32/g32` 字节模型，
         而 ui43c 的行为函数全部按 `[ent+0xNN]` 直接读写内存。
         """
+        global _P4_ACTIVE_PAGES
+        _P4_ACTIVE_PAGES = self
         e = Ent(x, y, typ, a3)
         if typ == 0x2300000D:                      # ctor 0x40DB54..0x40DB66
             e.d32(0x1C, (y << 7) & 0xFFFFFFFF)     # [+0x1C] = rec[1]<<7
