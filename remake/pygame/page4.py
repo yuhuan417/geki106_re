@@ -10409,6 +10409,26 @@ def _p4_45ac70(self, tgt: list, cur: list, lim: int) -> bool:
     return True
 
 
+def _p4_ac70_raw(self, a1: list, a2: list, lim: int) -> bool:
+    """`0x45AC70`（thunk 0x40105A）**直译**（2026-11-17 环射段逐指令校定）。
+
+    0x45AC71 `mov ebx,[esp+0xC]`=arg2、0x45AC76 `mov edi,[esp+0xC]`=arg1；
+    0x45AC8C `push eax`([edi]=arg1[0]) → 0x45AC8F `push eax`([ebx]=arg2[0])
+    → 0x45A9A0 ⇒ **row=arg2[0]、col=arg1[0]**；0x45ACAD `mov [edi]`=cos·lim（arg1）、
+    0x45ACC2 `mov [ebx]`=sin·lim（arg2），均**覆盖**；arg1[0]==arg2[0]==0 → return 0。
+
+    旧 `_p4_45ac70` 的查表序是 (row=tgt, col=cur)——与 exe 相比**转置**（其注释
+    “push [ebx](cur)、push [edi](tgt)” 把两条 push 的先后读反了，字节序
+    `50 8B 03 50` = push arg1、mov eax,[arg2]、push arg2）。本函数按 exe 原序，
+    供 0x409C20 环射段使用；旧函数及其既有调用点保持原状（另行校定）。"""
+    if a1[0] == 0 and a2[0] == 0:
+        return False
+    ang = self.p4_45a9a0(a1[0], a2[0])               # mixin(dx,dy)：dx=a1[0]=col、dy=a2[0]=row
+    a2[0] = ((page4_sin(ang) * lim + 0x80) >> 8) & 0xFFFFFFFF   # 0x45ACB4..0x45ACC2 mov [ebx]
+    a1[0] = ((page4_cos(ang) * lim + 0x80) >> 8) & 0xFFFFFFFF   # 0x45ACA2..0x45ACAD mov [edi]
+    return True
+
+
 def _beh_4053A0(self, e) -> bool:
     """`0x4053A0`（0x2C000005，0x4047E0 三连铺出的光珠）：**追踪光珠**。
 
@@ -11846,27 +11866,37 @@ def _beh_4098E0(self, e) -> bool:
 
 
 def _beh_409C20(self, e) -> bool:
-    """`0x409C20`（0x2D00001B，0x408540 铺出的侧翼）：**主位缩放 + 环射**。
+    """`0x409C20`（0x2D00001B 环射弹 + 0x2D00001A 环射卫星，同一行为双用）。
 
-    主 = [0x1C] 句柄；主死 → return 0；[0x20]≠0 → 主.[0x30]=2（切入态 2）。
-    [0x28]==0（待机）：node dst=(x−0x10,y−0x10)；0x409760（缩放）；[0x30]−−<0 → 0。
-    [0x30]<0xCA：word[0x2C]/[0x2E] 追主（±0x12C 钳 / 0x40105A 0x30 步）；
-    word[0x24/0x26] += word[0x2C/0x2E]（|Δ|²>0x1000 → 0x40105A(0x30)；否则跳）；
-    x = 主.x + word[0x24]>>4、y = 主.y + word[0x26]>>4；0x409760。
-    [0x20]=0 → 铺 0x2D00001A @(主.x,主.y)（[主 0x20]=返回值）。
-    环射（esi=[0x20]=0x20 起 步 0x20 至 0x2A0）：word[0x24/0x26] 半径收缩门
-    （|Δ|²>0x90000 → 0x40105A(e) 0x1C0）；ang=[0x2C]：
-    cos/sin(ang)*esi 方向 0x2D00001A 卫星（[主 0x20]=返回值、[ebp 0x38].active=1）；
-    esi==0x2A0 时 0x33000022 @(打包位<<4) 入 0x4AD49C。
-    [0x30]≥0xCA：0x33000022 @(x,y, 0x100E0000|(打包位<<4)) 入 0x4AD49C。
+    主 = [0x1C] 句柄；主死 → return 0；[0x20]≠0 → [0x20]体.[0x30]=2（0x409C44，
+    链后继续命——弹体续 sat1、sat_n 续 sat_{n+1}，级联保链）。
+    [0x28]==0（卫星常态）：node dst=(x−0x10,y−0x10)；[0x30]−−<0 → 0。
+    [0x30]<0xCA：word[0x2C]/[0x2E] 追主（±0xC 钳）；word[0x24/0x26] += word[0x2C/0x2E]
+    （|Δ|²>0x1000 → 0x40105A(0x30)；否则 dword[0x24]=dword[0x28] 吸附目标）；
+    x = 主.x + word[0x24]>>4、y = 主.y + word[0x26]>>4。
+    环射（0x409D4A..0x409EB7，esi=0x20 起 步 0x20 至 0x2A0）：门
+    |x₁|²+|y₁|²<0x90000 → 出环（x₁/y₁=movsx word[0x24/0x26]，只存栈槽不回写）；
+    每轮：mc/ms=−cos/−sin(环角)（首轮=word[0x2C]，之后=上轮 trail 角）；
+    0x40105A(&x₁,&y₁,min(esi,0xC0))（极角=atan2(y₁,x₁)，cos/sin 覆盖槽）；
+    第二发 0x40105A(&(−cos−cos·lim₁),&(−sin−sin·lim₁),0x1C0) →
+    x₂=x₁+cos·0x1C0、y₂=y₁+sin·0x1C0；
+    [ebp+0x20]==0 → 0x401FA5(0x4AD43C, request={主,0,0x2D00001A,0}) 铺卫星挂链；
+    ebp=[ebp+0x20]（帧2起整链重铺位）；卫星.[4/8]=主.[4/8]+(x₂,y₂)>>4
+    （基址 ecx=[esp+0x2C]=主，0x409C2D 入帧写）、卫星 node[0x1C]=1；
+    trail 角=0x401091(−sin·0x1C0,−cos·0x1C0) 供下轮。
+    出环（0x409EBD..0x409ED6）：自当前链节点沿 [0x20] 清 node[0x1C]=0
+    （≤0x14，有后继者才清，链尾保留）。
+    [0x30]≥0xCA：0x33000022 @(x,y, 0x100E0000|w2e, 打包位<<4) 入 0x4AD49C。
     [0x30]++ < 0xFD → 存活。"""
     links = getattr(self, "p4_links", {})
     main = links.get(e.s32(0x1C) & 0x7FFFFFFF)
     if main is None or main.m[0x34] == 0:
         return False
     v20 = e.s32(0x20)
-    if v20 != 0:
-        main.d32(0x30, 2)
+    if v20 != 0:                                   # 0x409C40/0x409C44：[eax+0x30]=2，
+        nxt20 = links.get(v20 & 0x7FFFFFFF)        #   eax=[自体+0x20]=链后继（非主！）——
+        if nxt20 is not None:                      #   弹体续命 sat1、sat_n 续命 sat_{n+1} 级联
+            nxt20.d32(0x30, 2)
     v28 = e.s32(0x28)
     x = e.s32(0x04)
     y = e.s32(0x08)
@@ -11874,73 +11904,120 @@ def _beh_409C20(self, e) -> bool:
     if v28 == 0:
         if e.node is not None:
             e.node.dst = (x - 0x10, y - 0x10)
+        self.p4_409760(e)                          # 0x409C71/0x409C73 mov ecx,ebx; call 0x402478
         v30 = (v30 - 1) & 0xFFFFFFFF
         e.d32(0x30, v30)
-        return 1 if v30 >= 0 else 0
+        # 0x409C78..0x409C88：mov eax,0; setns al —— dec 后 32 位结果的**符号位**判存
+        # （原实现拿掩码后的无符号数比 >=0，[0x30] 一旦走到 −1 即 0xFFFFFFFF 恒"存活"）
+        return 0 if v30 & 0x80000000 else 1
     if v30 < 0xCA:
         w2c = e.g16(0x2C)
         w2e = e.g16(0x2E)
         da = (w2e - 0x10000 if w2e & 0x8000 else w2e) - (w2c - 0x10000 if w2c & 0x8000 else w2c)
         da = max(-0xC, min(0xC, da))
         w2c = (w2c + da) & 0xFFFF
-        e.d16(0x2C, w2c)
+        e.d16(0x2C, w2c)                           # 0x409CC4/0x409CCE
         w2cs = w2c - 0x10000 if w2c & 0x8000 else w2c
-        w2es = w2e - 0x10000 if w2e & 0x8000 else w2e
-        dx = w2cs - (e.g16(0x24) - 0x10000 if e.g16(0x24) & 0x8000 else e.g16(0x24))
-        dy = w2es - (e.g16(0x26) - 0x10000 if e.g16(0x26) & 0x8000 else e.g16(0x26))
-        if dx * dx + dy * dy > 0x1000:
-            cur = [e.g16(0x24)]
-            tgt = [e.g16(0x26)]
-            self._p4_45ac70(tgt, cur, 0x30)
-            e.d16(0x24, cur[0] & 0xFFFF)
-            e.d16(0x26, tgt[0] & 0xFFFF)
+        # 0x409CC6/0x409CD8：Δ = 目标位 [0x28]/[0x2A] − 现位 [0x24]/[0x26]
+        dx = (e.g16(0x28) - 0x10000 if e.g16(0x28) & 0x8000 else e.g16(0x28)) \
+            - (e.g16(0x24) - 0x10000 if e.g16(0x24) & 0x8000 else e.g16(0x24))
+        dy = (e.g16(0x2A) - 0x10000 if e.g16(0x2A) & 0x8000 else e.g16(0x2A)) \
+            - (e.g16(0x26) - 0x10000 if e.g16(0x26) & 0x8000 else e.g16(0x26))
+        if dx * dx + dy * dy > 0x1000:             # 0x409CE8..0x409CF8
+            # 0x409CFA..0x409D06：0x40105A(arg1=&Δx→cos、arg2=&Δy→sin, 0x30)
+            a1 = [dx]
+            a2 = [dy]
+            self._p4_ac70_raw(a1, a2, 0x30)
+            # 0x409D0B/0x409D15：word[0x24] += cos·0x30（**加**，非赋值）
+            e.d16(0x24, (e.g16(0x24) + a1[0]) & 0xFFFF)
+            # 0x409D10/0x409D1C：word[0x26] += sin·0x30
+            e.d16(0x26, (e.g16(0x26) + a2[0]) & 0xFFFF)
         else:
-            e.d16(0x24, w2cs & 0xFFFF)
-            e.d16(0x26, w2es & 0xFFFF)
+            # 0x409D22 mov dword[0x24],edx（edx=[0x28] 自 0x409C4B）：
+            #   dword[0x24]=dword[0x28] ⇒ word[0x24/0x26] 吸附目标位 word[0x28/0x2A]
+            e.d16(0x24, e.g16(0x28))
+            e.d16(0x26, e.g16(0x2A))
         w24 = e.g16(0x24)
         w26 = e.g16(0x26)
         x = (main.s32(0x04) + ((w24 - 0x8000 if w24 & 0x8000 else w24) >> 4)) & 0xFFFFFFFF
         y = (main.s32(0x08) + ((w26 - 0x8000 if w26 & 0x8000 else w26) >> 4)) & 0xFFFFFFFF
         e.d32(0x04, x)
         e.d32(0x08, y)
-        if v20 == 0:
-            c = self._p4_ent43c(0x2D00001A, main.s32(0x04), main.s32(0x08))
-            c.d32(0x1C, id(main) & 0x7FFFFFFF)
-            main.d32(0x20, id(c) & 0x7FFFFFFF)
-            links[id(main) & 0x7FFFFFFF] = main
-        # 环射
-        esi = 0x20
-        while esi < 0x2A0:
-            w24s = w24 - 0x10000 if w24 & 0x8000 else w24
-            w26s = w26 - 0x10000 if w26 & 0x8000 else w26
-            if w24s * w24s + w26s * w26s > 0x90000:
-                cur3 = [w24s]
-                tgt3 = [w26s]
-                self._p4_45ac70(tgt3, cur3, 0x1C0)
-                w24s = cur3[0]
-                w26s = tgt3[0]
-            ang = w2cs
-            c3 = page4_cos(ang)
-            s3 = page4_sin(ang)
-            vx = -(c3 * esi)
-            vy = -(s3 * esi)
-            lim = min(esi, 0xC0)
-            cur4 = [vx]
-            tgt4 = [vy]
-            self._p4_45ac70(tgt4, cur4, lim)
-            vx = cur4[0]
-            vy = tgt4[0]
-            if v20 == 0:
-                c5 = self._p4_ent43c(0x2D00001A, main.s32(0x04), main.s32(0x08))
-                main.d32(0x20, id(c5) & 0x7FFFFFFF)
-            mx = main.s32(0x04) + (vx >> 4)
-            my = main.s32(0x08) + (vy >> 4)
-            self._p4_ent43c(0x2D00001A, mx, my)
-            esi += 0x20
-            if esi >= 0x2A0:
-                a = self.p4_45a9a0(-vx, -vy)
-                pack = ((mx & 0xFFF) | ((my & 0xFFFF) << 0x10)) << 4
-                self.spawn(self._p4_q("ui49c"), 0x33000022, x, y, pack & 0xFFFFFFFF)
+        self.p4_409760(e)                          # 0x409D43/0x409D45 mov ecx,ebx; call 0x402478
+        # 环射（0x409D4A..0x409EB7）：esi=0x20 起、步 0x20、上限 0x2A0；
+        # 门：|x₁|²+|y₁|² < 0x90000 → 出环（x₁/y₁=movsx word[0x24/0x26]，只存栈槽，
+        # word[0x24/0x26] 在环内**不回写**）。0x409D4A..0x409D69 预置。
+        x1 = w24 - 0x10000 if w24 & 0x8000 else w24   # 0x409D4A movsx word[0x24]
+        y1 = w26 - 0x10000 if w26 & 0x8000 else w26   # 0x409D4E movsx word[0x26]
+        ang_w = w2cs                                  # 0x409D52 movsx word[0x2C]（首轮环角）
+        esi = 0x20                                    # 0x409D56 esi=0x20（步进兼首 lim）
+        chain = e                                     # 0x409D5B mov ebp,ebx（链游标=弹体）
+        while True:
+            if x1 * x1 + y1 * y1 < 0x90000:           # 0x409D73..0x409D85 jl 0x409EBD
+                break
+            # 0x409D8B..0x409DA6：cos/sin(环角) 各取负存 [esp+0x18]/[esp+0x1C]
+            # （0x40159B=cos 0x45ABB0、0x401A50=sin 0x45AAF0；环角首轮=word[0x2C]，
+            #   之后=上轮 trail 角 edi——循环回边 0x409EB7 只到 0x409D6B）
+            mc = -page4_cos(ang_w)
+            ms = -page4_sin(ang_w)
+            lim1 = esi if esi < 0xC0 else 0xC0        # 0x409DB2..0x409DC0 min(esi,0xC0)
+            # 第一发 0x45AC70（thunk 0x40105A，0x409DC5..0x409DD0）：arg1=&x₁槽（←cos）、
+            #   arg2=&y₁槽（←sin）、lim=min(esi,0xC0)；ang₁=表[row=y₁][col=x₁] **覆盖**
+            a1 = [x1]
+            a2 = [y1]
+            self._p4_ac70_raw(a1, a2, lim1)
+            # 0x409DD5..0x409DE9（读槽 esp=-12：[esp+0x30]=sin·lim₁、[esp+0x28]=−sin、
+            #   [esp+0x2C]=cos·lim₁、[esp+0x24]=−cos）：新向量 X=−cos−a1、Y=−sin−a2，
+            #   存回 [esp+0x18](X)/[esp+0x1C](Y)（0x409DFC mov [esp+0x30],edi 把 X 落槽）
+            xc = mc - _p4_s32(a1[0])                  # sub edi,eax：−cos−cos·lim₁
+            yc = ms - _p4_s32(a2[0])                  # sub edx,ecx：−sin−sin·lim₁
+            # 第二发 0x45AC70（0x409DED..0x409E00）：arg1=&X 槽（←cos）、arg2=&Y 槽（←sin）、
+            #   lim=0x1C0；ang₂=表[row=Y][col=X] **覆盖**
+            a1 = [xc]
+            a2 = [yc]
+            self._p4_ac70_raw(a1, a2, 0x1C0)
+            # 0x409E05..0x409E1D（esp=-24）：x₂=x₁+a1(cos·0x1C0)、y₂=y₁+a2(sin·0x1C0)
+            #   存回 [esp+0x10]/[esp+0x14]（下轮 x₁/y₁，含 movsx 初值累积）
+            x1 = x1 + _p4_s32(a1[0])
+            y1 = y1 + _p4_s32(a2[0])
+            # 卫星链 0x409E21..0x409E88：[ebp+0x20]==0 → request={主,0,0x2D00001A,0}
+            #   （0x4023C4=memcpy5 → 0x401FA5(0x4AD43C)）铺 0x2D00001A 并挂 [ebp+0x20]；
+            #   ebp=[ebp+0x20]；卫星.[4/8]=主.[4/8]+(x₂,y₂)>>4（基址 ecx=[esp+0x2C]=主，
+            #   0x409C2D 入帧时写入）；node[0x1C]=1（0x409E9E/0x409EAF）
+            if chain.s32(0x20) == 0:
+                c5 = self._p4_ent43c(0x2D00001A, e.s32(0x1C), 0)
+                h5 = id(c5) & 0x7FFFFFFF
+                chain.d32(0x20, h5)
+                links[h5] = c5
+            nxt = links.get(chain.s32(0x20) & 0x7FFFFFFF)
+            if nxt is not None:
+                nxt.d32(0x04, (main.s32(0x04) + (_p4_s32(x1) >> 4)) & 0xFFFFFFFF)
+                nxt.d32(0x08, (main.s32(0x08) + (_p4_s32(y1) >> 4)) & 0xFFFFFFFF)
+                if nxt.node is not None:
+                    nxt.node.active = 1
+                chain = nxt                           # 0x409E70 mov ebp,[ebp+0x20]
+            # trail 角（0x409E8B..0x409E99）：0x45A9A0(row=−sin₂·0x1C0=−Y、
+            #   col=−cos₂·0x1C0=−X) → edi = 下轮环角（与位移方向相反 = 环角随轨迹回卷）
+            ang_w = self.p4_45a9a0(-_p4_s32(a1[0]), -_p4_s32(a2[0]))
+            esi += 0x20                               # 0x409EA1
+            if esi >= 0x2A0:                          # 0x409EA7/0x409EB7 jl 0x409D6B
+                break
+        # 出环清旗（0x409EBD..0x409ED6）：自当前链节点沿 [0x20] 链清 node[0x1C]=0，
+        # 最多 0x14 个、**有后继者才清**（链尾旗保留，靠 [0x30] 到期自灭）
+        cnt = 0
+        while True:
+            nxt_h = chain.s32(0x20)
+            if nxt_h == 0:                            # 0x409EBF/0x409EC4 je 0x409F2D
+                break
+            if chain.node is not None:
+                chain.node.active = 0                 # 0x409EC6/0x409ECD
+            cnt += 1
+            if cnt >= 0x14:                           # 0x409ECA/0x409ED4
+                break
+            nxt = links.get(nxt_h & 0x7FFFFFFF)       # 0x409ED1 mov ebp,[ebp+0x20]
+            if nxt is None:
+                break
+            chain = nxt
     else:
         pack = ((x & 0xFFF) | ((y & 0xFFFF) << 0x10)) << 4
         self.spawn(self._p4_q("ui49c"), 0x33000022, x, y,
