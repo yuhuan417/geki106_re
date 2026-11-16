@@ -994,6 +994,8 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("r1_2C_1"):                         # [0x2C]=rec1&1
+            self.d32(0x2C, b & 1)
         if info.get("s2c0c"):                          # 0x404059：0x2C00000C
             self.d32(0x1C, a & 0xFFFFFFFF)
             self.d32(0x20, d & 0xFFFFFFFF)
@@ -2694,7 +2696,8 @@ ENT2C_INIT = {
     0x2C000010: {"beh": 0x40158C, "imm": {0x0C: 0x48, 0x18: 0x2580, 0x1C: -0x50, 0x20: -1},
                  "node": (2, 0, 0x90, 0x8F, 0x11F), "dst": (-0x48, -0x48), "b10_1": True},
     0x2C000011: {"beh": 0x40103C, "imm": {0x0C: 0x48, 0x18: 0x320, 0x28: 0x800},
-                 "r0sh": (0x20, 8), "r1sh": (0x24, 8),
+                 "d_to": 0x1C, "r0sh": (0x20, 8), "r1sh": (0x24, 8),
+                 "r1_2C_1": True,
                  "node": (2, 0, 0, 0x8F, 0x8F), "dst": (-0x48, -0x48), "b10_1": True},
     0x2C000012: {"beh": 0x402167, "imm": {0x0C: 0x30, 0x18: 0x30},
                  "node": (2, 0, 0x120, 0x5F, 0x17F), "dst": (-0x30, -0x30), "b10_1": True},
