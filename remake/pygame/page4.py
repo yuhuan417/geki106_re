@@ -180,6 +180,12 @@ class ScriptVM:
     # 0x4602D0(this, chain)
     def load_chain(self, chain: int) -> None:
         self.flags = 0                       # 0x4602D4 0x401064
+        # 0x460280 的 reset：queue/frame/cur/buf/term 全清（旧实现只 append，二次装链会残留）
+        self.queue = []
+        self.frame = 0
+        self.cur = 0
+        self.buf = b""
+        self.term = 0
         chain &= 0xFFFF
         c = chain - 0x10000 if chain & 0x8000 else chain
         self.chain = c & 0xFFFF              # 0x4602E2 word[+0x2A]
@@ -206,6 +212,19 @@ class ScriptVM:
         self.cur = 0
         self.frame = 0                        # +04 清 0
         self.term = 0 if self.buf else 1
+        # 0x46011E..0x4601B3：进度位（0x4AB5B0）
+        # 表 {0x2E,0x2F,0x30,0x31,0x32,0x33,0x34,0x3C}，k=1..8；cur_id==表[k-1] 且
+        # 当前 0xF00000 < k → 写 k（单调取大）；cur_id==0x46 → bit31（二周目解锁）。
+        if self.owner is not None:
+            keys = getattr(self.owner, "keys", None)
+            if keys is not None:
+                tbl = (0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x3C)
+                if self.cur_id in tbl:
+                    k = tbl.index(self.cur_id) + 1
+                    if keys.field(0xF00000) < k:
+                        keys.set_field(0xF00000, k)
+                if self.cur_id == 0x46:
+                    keys.set_field(0x80000000, keys.field(0x80000000) | 0x80000000)
         return bool(self.buf)
 
     # 0x460350：一帧；返回 1 = 本流/链已耗尽，0 = 运行中
@@ -223,8 +242,9 @@ class ScriptVM:
                 self.frame += 1               # 0x46069C
                 return 0
             op = int.from_bytes(self.buf[self.cur:self.cur + 2], "little")
-            if op > 0xE:                      # 0x4603A2 非法 op
-                edi = 0
+            if op > 0xE:                      # 0x4603A2 非法 op（exe 为未初始化 edi，UB）
+                self.term = 1                 # 复刻侧明确终止，避免 cur 不前进死循环
+                return 1
             elif op == 0x9:
                 n = int.from_bytes(self.buf[self.cur + 0xC:self.cur + 0x10], "little")
                 edi = 0x10 + n * 4
@@ -236,6 +256,8 @@ class ScriptVM:
                     return 1
                 continue                      # 游标已重置，不叠加 edi
             self.exec_op(op, self.buf[self.cur + 4:self.cur + edi])
+            if self.term:                     # 0x4606C2：op0B 装层失败 → 当帧 return 1，不推进
+                return 1
             self.cur += edi                   # 0x4603EE
             if not self.buf:                  # 0x460404
                 return 1
@@ -268,7 +290,10 @@ class ScriptVM:
             if self.owner is not None:
                 self.owner.p4_bg_record(7, *rec)                 # 0x457C40
         elif op == 0x8:                                          # 0x4605C6 停通道
-            self.out[8].append(int.from_bytes(body[0:4], "little"))
+            ch = int.from_bytes(body[0:4], "little")
+            self.out[8].append(ch)
+            if self.owner is not None:
+                self.owner.p4_bg_stop(ch)                        # 0x457C80 → 0x457260
         elif op == 0x9:                                          # 0x460512 变长表
             n = int.from_bytes(body[8:0xC], "little")
             vals = [int.from_bytes(body[0xC + 4 * i:0x10 + 4 * i], "little") for i in range(n)]
@@ -304,10 +329,11 @@ class ScriptVM:
             if self.owner is not None:
                 self.owner.p4_load_layers(res)
         elif op == 0xC:                                          # 0x46064A 播 BGM
-            v = int.from_bytes(body[0:4], "little") & 0xFFFF
+            dword = int.from_bytes(body[0:4], "little")
+            v = dword & 0xFFFF
             self.out[0xC].append(v)
             if self.owner is not None:
-                self.owner.p4_play_bgm(v)
+                self.owner.p4_play_bgm(v, skip=(dword != 3))    # 0x460652 setne → arg1
         elif op == 0xD:                                          # 0x46066D 关卡号
             v = int.from_bytes(body[0:4], "little") & 0xFFFF
             self.out[0xD].append(v)
@@ -16216,6 +16242,24 @@ class Page4Mixin:
         return q
 
     # ---- 背景槽 0x4AD55C -------------------------------------------------
+    def p4_bg_stop(self, ch: int) -> None:
+        """`0x457C80`→`0x457260`：停一个背景槽（ch>=12 广播 12 槽）。
+
+        复位 +0x30/+0x80 参数块、+0xD0 网格、+0x2A88..+0x2A94 与带/显示链。
+        """
+        for i in (range(12) if ch >= 12 else [ch]):
+            if not (0 <= i < 12):
+                continue
+            sl = self.p4_bg[i]
+            sl.params = [0] * 20
+            sl.rates = [0] * 20
+            sl.grid = []
+            sl.bands = []
+            sl.rem = 0
+            sl.flags = 0
+            sl.active = 0
+            sl.acc = 0
+
     def p4_bg_record(self, op: int, ch: int, block: bytes, flags: int, rep: int = 0) -> None:
         """op06 `0x457C00`（立即触发）/ op07 `0x457C40`（只改参数）。
         `ch >= 0xC` ⇒ 对 12 个槽广播；block 是记录的 20 个 dword（记录 +8 起）。"""
@@ -16225,7 +16269,7 @@ class Page4Mixin:
             self.p4_trace_bg = True
         if getattr(self, "p4_trace_bg", False):
             print(f"[bgrec] op{op} ch={ch} count={vals[10]} flags=0x{flags:X} rep={rep}", flush=True)
-        targets = range(12) if ch >= 12 else [ch]
+        targets = range(12) if (op == 7 and ch >= 12) else [ch]   # 只有 op7/op8 广播
         for i in targets:
             slot = self.p4_bg[i]
             if op == 6:                                  # 0x4572E0
@@ -18656,12 +18700,17 @@ class Page4Mixin:
                 if os.environ.get("P4_DIAG"):
                     print(f"[p4layers] bind FAIL layer={i} id={v} res={res}")
                 self.flags.set(2)                 # 0x4606B3
-                self.vm.flags |= 1                # 0x4606BD
+                self.sysf.set(1)                  # 0x4606BD：冻结门 0x56CC84 |= 1
+                self.vm.term = 1                  # 0x4606C2：当帧 return 1
                 break
             self.layers.color_key(i, 0)           # 0x460635 0x44CE60(i,0)
 
-    def p4_play_bgm(self, track: int) -> None:
-        """op 0x0C → `0x44F600(0x4AB514, arg1=(param!=3), arg2=param)`（资源 1..20 = 20 首 MIDI）。"""
+    def p4_play_bgm(self, track: int, skip: bool = False) -> None:
+        """op 0x0C → `0x44F600(0x4AB514, arg1=(param!=3), arg2=param)`（资源 1..20 = 20 首 MIDI）。
+
+        `skip=False`（param==3）时 exe 跳过 tempo/主音量设置（0x44F7CB je 0x44F7FF）；
+        复刻侧音频层不建模 tempo/音量，仅保留参数语义（见矩阵）。
+        """
         if self.audio is not None:
             self.audio.bgm(track)
 
