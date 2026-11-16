@@ -994,6 +994,16 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("s2c14"):                          # 0x40438B：0x2C000014
+            self.d32(0x1C, (((a & 0x7FF) | ((b << 16) & 0xFFFF0000)) << 5) & 0xFFFFFFFF)
+            self.d32(0x18, 1)
+            self.d32(0x24, 0)
+            tgt = self._deref_link(d) if d else None
+            if tgt is not None:
+                w1 = tgt.g16(0x0C)
+                w2 = tgt.g16(0x0E)
+                self.d32(0x20, (w1 - 0x10000 if w1 & 0x8000 else w1) & 0xFFFFFFFF)
+                self.d32(0x28, (w2 - 0x10000 if w2 & 0x8000 else w2) & 0xFFFFFFFF)
         if info.get("s2c12"):                          # 0x404245/0x4042D4：rec3 双字 + 8.8 位置
             tgt = self._deref_link(d) if d else None
             if tgt is not None:
@@ -2719,7 +2729,7 @@ ENT2C_INIT = {
     0x2C000013: {"beh": 0x402167, "imm": {0x0C: 0x18, 0x18: 0xC}, "s2c12": True,
                  "node": (2, 0x60, 0x120, 0x8F, 0x14F), "dst": (-0x18, -0x18),
                  "b10_1": True, "active0": True},
-    0x2C000014: {"beh": 0x4015E6, "imm": {0x0C: 0x18},
+    0x2C000014: {"beh": 0x4015E6, "imm": {0x0C: 0x18}, "s2c14": True,
                  "node": (2, 0x60, 0x120, 0x8F, 0x14F), "dst": (-0x18, -0x18), "b10_1": True},
 }
 
