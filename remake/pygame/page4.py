@@ -12607,7 +12607,32 @@ def _beh_433340(self, e) -> bool:
     return t != 5
 
 
+def _beh_433520(self, e) -> bool:
+    """`0x433520`（0x3100001C）：两段 rect 动画（按 rect.l/rect.t 选方向）+ [0x20] 计时；
+    存活 = [0x20] < 0x61；[0x10] = (旧 t > 0xF)。"""
+    t = e.s32(0x1C)
+    e.raw[0x10] = 1 if t > 0xF else 0
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t != 0:
+        c = (e.s32(0x20) + 1) & 0xFFFFFFFF
+        e.d32(0x20, c)
+        if c < 0x5A and e.disp is not None:
+            l, tp, r, b = e.disp.rect
+            if l != 0x108:
+                e.disp.rect = [l + 0x18, tp, r + 0x18, b]
+            elif tp == 0:
+                e.disp.rect = [l - 0x48, tp + 0x18, r - 0x48, b + 0x18]
+    if e.disp is not None:
+        l, tp, r, b = e.disp.rect
+        if l != 0xC0:                             # 0x433584 压栈 (0,-0x18,0,-0x18) → out[0]/out[2]
+            e.disp.rect = [l - 0x18, tp, r - 0x18, b]
+        elif tp == 0x18:
+            e.disp.rect = [l + 0x48, tp - 0x18, r + 0x48, b - 0x18]
+    return e.s32(0x20) < 0x61
+
+
 P4_BEH: dict[int, object] = {
+    0x433520: _beh_433520,
     0x432DC0: _beh_432DC0, 0x432FE0: _beh_432FE0, 0x433340: _beh_433340,
     0x4327A0: _beh_4327A0, 0x432C80: _beh_432C80,
     0x4324B0: _beh_4324B0, 0x432670: _beh_432670,

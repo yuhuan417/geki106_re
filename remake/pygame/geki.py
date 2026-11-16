@@ -1112,6 +1112,9 @@ P31_CTOR = {
     0x31000014: (0x432FE0, 0x0C, 2, (0x000, 0x148, 0x17, 0x15F)),
     0x31000018: (0x433340, 0x0C, 2, (0x1B0, 0x150, 0x1DF, 0x167)),
     0x31000019: (0x433390, 0x0A, 2, (0xF0, 0x1C8, 0x107, 0x1DF)),
+    # 0x431419：1×1 粒子发射器；8.4 积分，velocity=inv·v·5>>6
+    0x3100001B: (0x433480, 0x0A, 0, (0, 0, 1, 1)),
+    0x3100001C: (0x433520, 0x0A, 3, (0xC0, 0, 0xD7, 0x17)),
     # 0x4315CD：与 01 同 ctor 形状（rad=1、层0、rect D8/168/EF/17F），代码里 21 处使用
     0x3100001E: (0x4321C0, 0x01, 0, (0xD8, 0x168, 0xEF, 0x17F)),
 }
@@ -2637,6 +2640,24 @@ class Pages(Page4Mixin):
                     e.d32(0x18, 1)
                     if type_word == 0x31000018:
                         e.raw[0x10] = 0                 # ctor 0x4313D1 byte[0x10]=0
+                elif type_word == 0x3100001B:        # ctor 0x431419：8.4 累加器/朝向速度
+                    ax, by = a3 if isinstance(a3, tuple) else (0, 0)
+                    if not isinstance(a3, tuple):
+                        ax = self.p4_player_x() - int(x)
+                        by = self.p4_player_y() - int(y)
+                    inv = self.p4_45aa80(int(ax), int(by))
+                    e.d32(0x1C, (inv * int(ax) * 5 >> 6) & 0xFFFFFFFF)
+                    e.d32(0x20, (inv * int(by) * 5 >> 6) & 0xFFFFFFFF)
+                    e.d32(0x24, (int(x) << 4) & 0xFFFFFFFF)
+                    e.d32(0x28, (int(y) << 4) & 0xFFFFFFFF)
+                    e.d32(0x2C, 0)
+                    e.d32(0x18, 1)
+                    e.raw[0x10] = 0
+                elif type_word == 0x3100001C:        # ctor 0x431502：[0x1C]=0、[0x20]=rec3
+                    e.d32(0x1C, 0)
+                    e.d32(0x20, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                    e.d32(0x18, 1)
+                    e.raw[0x10] = 0
                 elif type_word == 0x3100000D:        # ctor 0x430EE1：8.4 累加器 [0x28]/[0x2C]，[0x20]=−0x100
                     e.d32(0x20, 0xFFFFFF00)
                     e.d32(0x24, 0)
@@ -2645,6 +2666,8 @@ class Pages(Page4Mixin):
                 e.raw[0x10] = 1
                 e.disp = DisplayNode(layer=layer, rect=list(rect),
                                      dst=[int(x) - 0xC, int(y) - 0xC])
+                if type_word in (0x31000018, 0x3100001B, 0x3100001C):
+                    e.raw[0x10] = 0           # ctor 里 byte[0x10]=0，覆盖共通 1
             else:
                 e.beh = "p31"
                 vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
