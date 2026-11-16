@@ -10863,7 +10863,11 @@ def p4_446600(self, e) -> bool:
             self.p4_ccc2 = 0
         elif t > 0x78 and e.node is not None:
             e.node.active = t & 1          # 0x44667B 闪烁
-    e.d32(0x20, (t + 1) & 0xFFFFFFFF)
+    # 0x44667E `inc dword [esi+0x20]`：**读改写内存**。旧实现用循环开头读的局部 t
+    # （t 可能被上面的 -1 分支改成 0x12D）⇒ 末尾又写成 t+1=0，把 0x12D 覆盖回 0
+    # ⇒ 入场计时从 0 重跑、t==0x78 再调一次 0x446540（type 5/8 伴随体重复生成，
+    # 漢的狙击光标因此出现两个），且漢的 +0x20==0 首帧发射条件被再次满足。
+    e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
     e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
     if e.g32(0x30):
         e.d32(0x30, (e.s32(0x30) - 1) & 0xFFFFFFFF)
@@ -16663,17 +16667,39 @@ class Page4Mixin:
             return not self._p4_lock_rect(e, False)         # 0x42E793 → 0x4012E4(e,0)
         sx, sy = self.p4_stat.get(0x56CC8C, 0), self.p4_stat.get(0x56CC90, 0)
         off = e.s32(0x1C)
-        e.d32(4, sx & 0xFFFFFFFF)
-        e.d32(8, (sy + off) & 0xFFFFFFFF)
+        # 0x42E671..0x42E6AC：瞄准点 x = px + min(px,0xC8) + 8（px>=0xC8 时取 0xC8），
+        # 上限 0x280；y = py + [+0x1C]。旧实现直接写 px ⇒ 狙字贴在自机上、瞄点错位。
+        cx = sx + (0xC8 if sx >= 0xC8 else sx) + 8
+        if cx >= 0x280:
+            cx = 0x280
+        cy = sy + off
+        e.d32(4, cx & 0xFFFFFFFF)
+        e.d32(8, cy & 0xFFFFFFFF)
+        # 0x42E6C0..0x42E6D2 → 0x43BD50：以瞄准点为原点找**最近的可锁定敌**
+        # （0x43AD60 门：byte[+0x10]、0x4305F0(敌,0x30) 屏内、0x43AE60 可锁；
+        #   距离 L1；初值 (0x2710,0)，严格更近才换）。旧实现取"第一个在 0x48 框内的"。
+        bx, by = 0x2710, 0
+        found = False
+        for t in self.p4_q43c:                              # 0x4AD43C
+            if not t.alive:                                 # 0x43AD66 byte[+0x10]
+                continue
+            tx, ty = t.s32(4), t.s32(8)
+            if (tx - 0x30 > 0x27F or tx + 0x30 <= 0 or
+                    ty - 0x30 > 0x1DF or ty + 0x30 <= 0):
+                continue                                    # 0x4021E9→0x4305F0
+            if self.p4_43ae60(t) == 0:                      # 0x40123A→0x43AE60
+                continue
+            found = True
+            if abs(tx - cx) + abs(ty - cy) < abs(bx - cx) + abs(by - cy):
+                bx, by = tx, ty                             # 0x43ADCA jge
         hit = False
-        for t in self.p4_q43c:                              # 0x401280(0x43BD50) 同族点测
-            if t.alive and abs(t.s32(4) - e.s32(4)) < 0x48 and abs(t.s32(8) - e.s32(8)) < 0x48:
-                hit = True
-                if e.s32(8) >= t.s32(8):
-                    off = -0x30 if off - 2 < -0x30 else off - 2
-                else:
-                    off = 0x30 if off + 2 > 0x30 else off + 2
-                break
+        if found and abs(bx - cx) < 0x48 and abs(by - cy) < 0x48:
+            hit = True
+            # 0x42E708 cmp 敌y,描y ; jge ⇒ off += 2（向下追）；否则 off -= 2
+            if by >= cy:
+                off = 0x30 if off + 2 > 0x30 else off + 2
+            else:
+                off = -0x30 if off - 2 < -0x30 else off - 2
         if not hit and off != 0:
             off += -2 if off >= 0 else 2                    # 0x42E730 衰减
         e.d32(0x1C, off & 0xFFFFFFFF)
