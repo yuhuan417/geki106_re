@@ -994,6 +994,12 @@ class Ent:
             self.node.dst = (a + dx, b + dy)
         for off, val in info.get("imm", {}).items():
             self.d32(off, val & 0xFFFFFFFF)
+        if info.get("spawn_5c"):                       # ctor 尾：0x5C000002 @(0,0) prm=自身
+            _pg = getattr(self, "_pages", None)
+            if _pg is not None:
+                _h = id(self) & 0x7FFFFFFF
+                _pg.p4_links[_h] = self
+                _pg.spawn(_pg._p4_q("ui4fc"), 0x5C000002, 0, 0, _h)
         if info.get("r1_2C_1"):                         # [0x2C]=rec1&1
             self.d32(0x2C, b & 1)
         if info.get("s2c0c"):                          # 0x404059：0x2C00000C
@@ -2683,7 +2689,7 @@ ENT2C_INIT = {
     0x2C000006: {"beh": 0x401EE7, "imm": {0x0C: 0x18, 0x18: 0x20, 0x1C: -0x618},
                  "r1sh": (0x20, 8),
                  "node": (2, 0xC0, 0, 0xEF, 0x2F), "dst": (0, 0), "b10_1": True},
-    0x2C000008: {"beh": 0x40136B, "imm": {0x0C: 0x30, 0x18: 0xC80},
+    0x2C000008: {"beh": 0x40136B, "imm": {0x0C: 0x30, 0x18: 0xC80}, "spawn_5c": True,
                  "node": (2, 0, 0, 0x5F, 0x5F), "dst": (-0x30, -0x30), "b10_1": True},
     0x2C000009: {"beh": 0x4015DC, "imm": {0x0C: 0x18, 0x18: 0x20}},
     0x2C00000A: {"beh": 0x401A14},
