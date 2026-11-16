@@ -1021,6 +1021,27 @@ class Ent:
                 _pg.spawn(_pg._p4_q("ui4fc"), 0x5C000002, 0, 0, _h)
         if info.get("r1_2C_1"):                         # [0x2C]=rec1&1
             self.d32(0x2C, b & 1)
+        if info.get("s2c09"):                          # 0x403DDA：0x2C000009
+            x16 = a & 0xFFFF
+            y16 = (a >> 16) & 0xFFFF
+            sx = x16 - 0x8000 if x16 & 0x8000 else x16
+            sy = y16 - 0x8000 if y16 & 0x8000 else y16
+            self.d32(0x04, sx & 0xFFFFFFFF)
+            self.d32(0x08, sy & 0xFFFFFFFF)
+            self.d32(0x1C, (((x16 & 0x7FF) | ((y16 << 16) & 0xFFFF0000)) << 5) & 0xFFFFFFFF)
+            self.d32(0x18, 0x20)
+            self.d32(0x20, b & 0xFFFFFFFF)
+            self.d32(0x24, 0)
+            self.d32(0x28, 0)
+            if self.node is not None:
+                if d:
+                    t = ((b + 1) * 3) << 4
+                    bb = ((b * 3) << 4) + 0x5F
+                else:
+                    t = 0
+                    bb = 0x2F
+                self.node.rect = (0x60, t & 0xFFFFFFFF, 0x8F, bb & 0xFFFFFFFF)
+                self.node.dst = (0, 0)
         if info.get("s2c0c"):                          # 0x404059：0x2C00000C
             self.d32(0x1C, a & 0xFFFFFFFF)
             self.d32(0x20, d & 0xFFFFFFFF)
@@ -2710,7 +2731,8 @@ ENT2C_INIT = {
                  "node": (2, 0xC0, 0, 0xEF, 0x2F), "dst": (0, 0), "b10_1": True},
     0x2C000008: {"beh": 0x40136B, "imm": {0x0C: 0x30, 0x18: 0xC80}, "spawn_5c": True,
                  "node": (2, 0, 0, 0x5F, 0x5F), "dst": (-0x30, -0x30), "b10_1": True},
-    0x2C000009: {"beh": 0x4015DC, "imm": {0x0C: 0x18, 0x18: 0x20}},
+    0x2C000009: {"beh": 0x4015DC, "imm": {0x0C: 0x18}, "s2c09": True,
+                 "node": (2, 0x60, 0, 0x8F, 0x8F)},
     0x2C00000A: {"beh": 0x401A14},
     0x2C00000B: {"beh": 0x401AA0, "imm": {0x0C: 0x30, 0x20: 0x1C2}, "r0_1C": True,
                  "d_to": 0x28, "dst": (-0x30, -0x30), "b10_1": True},
