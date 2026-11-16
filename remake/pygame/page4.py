@@ -5218,7 +5218,7 @@ def _beh_422A90(self, e) -> bool:
         p4_41fff0(self, e, px, py, -sp)               # 0x422BEC 朝自机负速
         p4_41fff0(self, e, px + dy, py - dx, sp)      # 0x422C05 player+rot-90(d)
         p4_41fff0(self, e, px - dy, py + dx, sp)      # 0x422C1F player+rot+90(d)
-        p4_41fff0(self, e, px + 2 * dy, py - 2 * dx, sp)   # 0x422C46 player+2rot-90(d)
+        p4_41fff0(self, e, px + dx + dy, py + dy - dx, sp)  # 0x422C46 player+(dx+dy, dy-dx)
         p4_41fff0(self, e, px + dx - dy, py + dx + dy, sp)  # 0x422C66 player+2rot+45(d)
         k += 1
     return False                                      # 0x422C92 射完自灭
@@ -7520,7 +7520,8 @@ _P4_41F3A0_SEL = (
     0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
     0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
     3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-    3, 3, 3, 3, 1, 2, 2, 2, 2)
+    1, 2, 2, 2, 2, 0, 0, 2, 2,
+)
 
 
 def _beh_41F3A0(self, e) -> bool:
