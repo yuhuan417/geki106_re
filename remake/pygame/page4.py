@@ -15130,6 +15130,50 @@ def _beh_438840(self, e) -> bool:
     return e.s32(0x24) == 1 and t < 0x258
 
 
+def _beh_438F10(self, e) -> bool:
+    """`0x438F10`（0x49000006，thunk 0x401BBC）：闪烁壳——前 0x18 帧（且 [+0x20]∈{0,1}）
+    把 rect 底边 +2 并点亮节点；寿命 `[+0x1C] <= 0x30`。
+
+    ```
+    0x438F18 v=[+0x20]；v==1 && [+0x1C]<0x18 → 更新；v==0 && [+0x1C]<0x18 → 更新
+    0x438F31 0x45A790(node+4, 0,0,0,2) → rect.b += 2
+    0x438F48 byte[node+0x1C]=1
+    0x438F4F t=++[+0x1C]；cmp t,0x30 ; setle
+    ```
+    """
+    t = e.s32(0x1C)
+    v = e.s32(0x20)
+    if v in (0, 1) and t < 0x18:
+        if e.node is not None:
+            r = e.node.rect
+            e.node.rect = (r[0], r[1], r[2], r[3] + 2)
+            e.node.active = 1
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    return t <= 0x30
+
+
+def _beh_438F80(self, e) -> bool:
+    """`0x438F80`（0x49000007，thunk 0x401A5C）：同条件，rect 顶边 +2 且 dst += (0,2)。
+
+    ```
+    0x438FA1 0x45A790(node+4, 0,2,0,0) → rect.t += 2
+    0x438FB5 0x45A6B0(node+0x14, 0, 2) → dst.y += 2
+    0x438FCA t=++[+0x1C]；cmp t,0x30 ; setle
+    ```
+    """
+    t = e.s32(0x1C)
+    v = e.s32(0x20)
+    if v in (0, 1) and t < 0x18:
+        if e.node is not None:
+            r = e.node.rect
+            e.node.rect = (r[0], r[1] + 2, r[2], r[3])
+            e.node.dst = (e.node.dst[0], e.node.dst[1] + 2)
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    return t <= 0x30
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15147,6 +15191,8 @@ P4_BEH: dict[int, object] = {
     0x438750: _beh_438750,                          # 0x48000006 跟随碎片（0xAA）
     0x4387D0: _beh_4387D0,                          # 0x48000007 直线漂移
     0x438840: _beh_438840,                          # 0x48000008 四角拖尾
+    0x438F10: _beh_438F10,                          # 0x49000006 闪烁壳
+    0x438F80: _beh_438F80,                          # 0x49000007 闪烁壳（dst 下移）
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
