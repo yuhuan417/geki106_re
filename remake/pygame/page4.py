@@ -15305,6 +15305,64 @@ def _beh_439250(self, e) -> bool:
     return c < 0x12C
 
 
+def _beh_439D30(self, e) -> bool:
+    """`0x439D30`（0x4F00000A，thunk 0x4011E1）：三段式螺旋/漂移，bit4 决定加速相位。
+
+    ```
+    0x439D33 t=[+0x20]
+    t==0：k=[+0x1C]&3 → 0: [2C]=-0x10C,[30]=0；1: [2C]=+0x10C,[30]=-0xC9；
+          2: [2C]=0,[30]=+0xC9（k==3 不设）
+    0x439D76 bit4==0 时：非零的 [2C] 收敛到 ±8、[30] 收敛到 ±6（按当前符号）
+    0x439DAB [+0x24] += [+0x2C]；[+0x28] += [+0x30]
+    0x439DC5 bit4!=0 时：
+        t<=0x15 → [2C] 向 0 收 0xC、[30] 向 0 收 9
+        t>=0x96 → [2C]/[30] 远离 0 各 0xC/9
+    0x439E36 dst = (x + (sar [+0x24],2), y + (sar [+0x28],2))；t++；存活 t<0xAC
+    ```
+    """
+    t = e.s32(0x20)
+    c = e.s32(0x1C)
+    if t == 0:
+        k = c & 3
+        if k == 0:
+            e.d32(0x2C, 0xFFFFFEF4)
+            e.d32(0x30, 0)
+        elif k == 1:
+            e.d32(0x2C, 0x10C)
+            e.d32(0x30, 0xFFFFFF37)
+        elif k == 2:
+            e.d32(0x2C, 0)
+            e.d32(0x30, 0xC9)
+    if (c & 0x10) == 0:
+        vx = e.s32(0x2C)
+        if vx != 0:
+            e.d32(0x2C, (-8 if vx >= 0 else 8) & 0xFFFFFFFF)
+        vy = e.s32(0x30)
+        if vy != 0:
+            e.d32(0x30, (-6 if vy >= 0 else 6) & 0xFFFFFFFF)
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x30)) & 0xFFFFFFFF)
+    if c & 0x10:
+        vx = e.s32(0x2C)
+        vy = e.s32(0x30)
+        if t <= 0x15:
+            if vx != 0:                                  # 0x439DD0 je 跳过
+                e.d32(0x2C, (vx + (-0xC if vx >= 0 else 0xC)) & 0xFFFFFFFF)
+            if vy != 0:                                  # 0x439DE7 je 跳过
+                e.d32(0x30, (vy + (-9 if vy >= 0 else 9)) & 0xFFFFFFFF)
+        elif t >= 0x96:
+            if vx != 0:                                  # 0x439E03 je 跳过
+                e.d32(0x2C, (vx + (0xC if vx >= 0 else -0xC)) & 0xFFFFFFFF)
+            if vy != 0:                                  # 0x439E1A je 跳过
+                e.d32(0x30, (vy + (9 if vy >= 0 else -9)) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) + (e.s32(0x24) >> 2),
+                      e.s32(0x08) + (e.s32(0x28) >> 2))
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)
+    return t < 0xAC
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15329,6 +15387,7 @@ P4_BEH: dict[int, object] = {
     0x439000: _beh_439000,                          # 0x49000008 大爆炸
     0x4394B0: _beh_4394B0,                          # 0x4A000006 爆风环
     0x439250: _beh_439250,                          # 0x4A000002 拖尾碎片
+    0x439D30: _beh_439D30,                          # 0x4F00000A 螺旋漂移
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
