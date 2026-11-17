@@ -13297,8 +13297,11 @@ P4_41_BEH_THUNK = {
     0x40200E: 0x429D40,   # 碰撞火花（0x41000004）
     0x401019: 0x429DE0,   # 锁定碎片（0x41000005）——2026-11-14 直读 thunk 勘误（旧 0x42BA40）
     0x402275: 0x429E60,   # 锁定圈（0x41000006）——2026-11-14 直读 thunk 勘误（旧 0x42C4D0）
-    0x401447: 0x42BEE0,   # 数字板（0x4100000C）
-    0x401172: 0x42C7B0,   # 放大窗（0x4100000D/0E）
+    # 2026-11-17 直读 thunk 勘误：0x401447 jmp 0x42A370、0x401172 jmp 0x42A400
+    # （旧值 0x42BEE0/0x42C7B0 在 exe 里没有任何引用，属早期误读）
+    0x401447: 0x42A370,   # 数字板/渐扩动画（0x4100000C）
+    0x401172: 0x42A400,   # 螺旋追踪（0x4100000E）
+    0x4022F7: 0x430520,   # 放大窗（0x4100000D）——与 0x51000005/06 同一行为
 }
 
 P4_SPAWN_SLOTS = {
@@ -15933,6 +15936,66 @@ def _beh_42A370(self, e) -> bool:
     return False
 
 
+def _beh_42A400(self, e) -> bool:
+    """`0x42A400`（0x4100000D/0E 的螺旋+追踪特效）。
+
+    ```
+    0x42A409 t = [0x1C] + 1
+    t < 0x3C：k = 0x3C − t
+              [0x20] += (cos([0x28]) * k + 0x7F) >> 8
+              [0x24] += (sin([0x28]) * k + 0x7F) >> 8
+              [4] = [0x20] >> 3；[8] = [0x24] >> 3
+              (t & 7)==0 → 0x41000004 @([0x2C]+x, [0x30]+y) prm=(0,0) 入 4CC
+    t == 0x3C：若 [0x4CD590]==0 → 5 次 0x41000004 @([0x2C]+x, [0x30]+y)，
+              prm=(rand&0x1F−0xF, rand&0x1F−0xF)
+    0x3C < t < 0x78：x += (玩家x − x) / (0x78 − t)；y 同构（0x462D71 的商）
+    t ≥ 0x78：返回 0（自灭）
+    尾部：node.dst = (rect.l + x − 0x18, rect.t + y − 选机*0x30 − 0x18)
+          （0x45A690 取 rect.l/t → 0x45A6B0 累加，选机由 0x45AFC0(0x4AB5B0,0xC000)*3*16 得）
+    ```
+    """
+    t = (e.g32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t < 0x3C:
+        k = 0x3C - t
+        ang = e.s32(0x28)
+        ax = (e.s32(0x20) + ((page4_cos(ang) * k + 0x7F) >> 8)) & 0xFFFFFFFF
+        ay = (e.s32(0x24) + ((page4_sin(ang) * k + 0x7F) >> 8)) & 0xFFFFFFFF
+        e.d32(0x20, ax)
+        e.d32(0x24, ay)
+        sx = e.s32(0x20) >> 3
+        sy = e.s32(0x24) >> 3
+        e.d32(0x04, sx & 0xFFFFFFFF)
+        e.d32(0x08, sy & 0xFFFFFFFF)
+        if (t & 7) == 0:
+            self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                       e.s32(0x2C) + sx, e.s32(0x30) + sy, (0, 0))
+    elif t == 0x3C:
+        if not self.p4_stat.get(0x4CD590, 0):
+            for _ in range(5):
+                dx = (self.p4_rand() & 0x1F) - 0xF
+                dy = (self.p4_rand() & 0x1F) - 0xF
+                self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                           e.s32(0x2C) + e.s32(0x04), e.s32(0x30) + e.s32(0x08),
+                           (dx, dy))
+    elif t < 0x78:
+        k = 0x78 - t
+        dx = self.p4_player_x() - e.s32(0x04)
+        dy = self.p4_player_y() - e.s32(0x08)
+        e.d32(0x04, (e.s32(0x04) + int(dx / k)) & 0xFFFFFFFF)   # 0x42A58F 商
+        e.d32(0x08, (e.s32(0x08) + int(dy / k)) & 0xFFFFFFFF)
+    else:
+        return False
+    nd = e.node
+    if nd is not None:
+        lvl = 0
+        if getattr(self, "keys", None) is not None:
+            lvl = self.keys.field(0xC000) & 3          # 0x45AFC0(0x4AB5B0,0xC000)
+        nd.dst = [nd.rect[0] + e.s32(0x04) - 0x18,
+                  nd.rect[1] + e.s32(0x08) - lvl * 0x30 - 0x18]
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15970,6 +16033,7 @@ P4_BEH: dict[int, object] = {
     0x438B20: _beh_438B20,                          # 0x49000005 大爆炸
     0x42F570: _beh_42F570,                          # 0x10008431 捕获弹
     0x42A370: _beh_42A370,                          # 0x4100000C 渐扩动画
+    0x42A400: _beh_42A400,                          # 0x4100000D/0E 螺旋追踪
     0x439F80: _beh_439F80,                          # 0x4D000002 砖墙环
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
@@ -17602,7 +17666,9 @@ class Page4Mixin:
         0x41000008: (0, 0xA0, 0x40, 0xBF, 0x5F, 0x10, 5, 0, 0, 0x401B95),  # 捕獲波纹
         0x4100000B: (0, 0xA0, 0x40, 0xBF, 0x5F, 0x10, 1, 5, 0, 0x401B95),  # 粒子1
         0x4100000C: (1, 0x174, 0x173, 0x17 + (0x18*0x30), 0x173 + (0x18*0x30), 0xC, 0, 0, 0, 0x401447),  # 数字板
-        0x4100000D: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x401172),                 # 放大窗（dst/rect 动态）
+        # 0x4100000D 的 ctor case 是 0x4293F8：[0x40]=0x4022F7 → 0x430520、[0x1C]=-1，
+        # 节点层/rect 取自 rec0 指向的静态块。旧表把它与 0x0E 并成同一 thunk，属误读。
+        0x4100000D: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4022F7),                 # 放大窗（dst/rect 动态）
         0x4100000E: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x401172),                 # 放大窗（同上）
         0x4100000F: (0, 0xD0, 0xD0, 0xDF, 0xDF, 8, 2, 3, 0, 0x401B95),     # 粒子2
         0x41000015: (1, 0x100, 0xD0, 0x10F, 0xDF, 8, 1, 4, 0, 0x401B95),   # trail 撃
