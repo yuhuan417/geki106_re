@@ -2023,3 +2023,11 @@ rect.l 撞到 0x180/0x1C8 时 `[+0x24] = −w`。`node.dst.y -= 2`。
 - `0x425B20`（0x5F00000A ON/OFF 框，thunk 0x401B20）：`ofs = 0x45AFF0(0x4AB5B0,[+0x1C]) ? 0x100 : 0x20`；
   `node.rect.t = [+0x20]+ofs`、`node.rect.b = [+0x20]+ofs+0x1F`，`node.active=1`。
   实测 `[0x20]=0x40`、位清 → rect.t/b = 0x60/0x7F。
+### 16.426 0x5F00000B/0C 键位数字（2026-11-17）
+
+`0x425B70`（个位，thunk 0x4017A3）/`0x425C10`（十位，thunk 0x401B38）：
+- 取值：`[+0x20]` 非 0 时解引用（活值指针），否则 `0x45AFC0(0x4AB5B8, [+0x1C])` 取配置字段
+  （复刻侧 `self.disp_cfg.field`）；
+- 个位 = `value % 10`、十位 = `value / 10`（有符号截断）；
+- `rect = (d<<5, 0x120, (d<<5)+0x1F, 0x13F)`，`node.active=1`，返回 1。
+实测 `bits=0x57、mask=0xFF`：个位 7 → x=224，十位 8 → x=256，与反汇编一致。

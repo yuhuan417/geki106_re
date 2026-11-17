@@ -15585,6 +15585,38 @@ def _beh_425B20(self, e) -> bool:
     return True
 
 
+def _p4_digit_src(self, e) -> int:
+    """0x425B70/0x425C10 的取值：`[+0x20]` 是活值指针（非 0）时解引用，否则
+    `0x45AFC0(0x4AB5B8, [+0x1C])` 取配置字段。"""
+    p = e.s32(0x20)
+    if p:
+        tgt = self.p4_links.get(p & 0x7FFFFFFF)
+        return tgt.s32(0) if tgt is not None else 0
+    return self.disp_cfg.field(e.s32(0x1C))
+
+
+def _p4_digit_rect(self, e, digit: int) -> None:
+    if e.node is not None:
+        x = (digit << 5) & 0xFFFFFFFF
+        e.node.rect = (x, 0x120, x + 0x1F, 0x13F)
+        e.node.active = 1
+
+
+def _beh_425B70(self, e) -> bool:
+    """`0x425B70`（0x5F00000B 键位个位，thunk 0x4017A3）：digit = value % 10，
+    rect=(d<<5, 0x120, (d<<5)+0x1F, 0x13F)，点亮。"""
+    v = _p4_digit_src(self, e)
+    _p4_digit_rect(self, e, v % 10)
+    return True
+
+
+def _beh_425C10(self, e) -> bool:
+    """`0x425C10`（0x5F00000C 键位十位，thunk 0x401B38）：digit = value / 10，rect 同上。"""
+    v = _p4_digit_src(self, e)
+    _p4_digit_rect(self, e, v // 10 if v >= 0 else -((-v) // 10))
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15615,6 +15647,8 @@ P4_BEH: dict[int, object] = {
     0x438110: _beh_438110,                          # 0x4F000001 摆动砖
     0x425AD0: _beh_425AD0,                          # 0x61 悬停条
     0x425B20: _beh_425B20,                          # 0x61 高亮框
+    0x425B70: _beh_425B70,                          # 0x5F 键位个位
+    0x425C10: _beh_425C10,                          # 0x5F 键位十位
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
