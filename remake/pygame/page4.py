@@ -15363,6 +15363,35 @@ def _beh_439D30(self, e) -> bool:
     return t < 0xAC
 
 
+def _beh_44AE50(self, e) -> bool:
+    """`0x44AE50`（0x5A000004，thunk 0x4018xx）：与 `0x439420` **逐字节相同**的扩散环
+    （rect.l/r 每帧 +0x10、dst=(x−8,y−8)、左界到 0xF0 消失）。直接复用。"""
+    return _beh_439420(self, e)
+
+
+def _beh_44AEE0(self, e) -> bool:
+    """`0x44AEE0`（0x5A000004 另一相位，thunk 0x401B2E）：8.8 位置 + 二次加速漂移。
+
+    ```
+    0x44AEE3 [+0x28] += 0x40
+    0x44AEEE [+0x1C] += [+0x24]
+    0x44AEFB [+0x20] += [+0x28]
+    0x44AF05 x = (sar [+0x1C],8)；y = (sar [+0x20],8)；dst=(x-0x18,y-0x18)
+    0x44AF27 0x4021E9(e,0x18) → 0x4305F0 在屏判据（255 半径 0x18）
+    ```
+    """
+    e.d32(0x28, (e.s32(0x28) + 0x40) & 0xFFFFFFFF)
+    e.d32(0x1C, (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF)
+    e.d32(0x20, (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF)
+    x = e.s32(0x1C) >> 8
+    y = e.s32(0x20) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x18, y - 0x18)
+    return self.p4_4305f0(e, 0x18) != 0
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15388,6 +15417,8 @@ P4_BEH: dict[int, object] = {
     0x4394B0: _beh_4394B0,                          # 0x4A000006 爆风环
     0x439250: _beh_439250,                          # 0x4A000002 拖尾碎片
     0x439D30: _beh_439D30,                          # 0x4F00000A 螺旋漂移
+    0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
+    0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
