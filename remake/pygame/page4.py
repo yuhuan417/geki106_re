@@ -12397,8 +12397,11 @@ def _beh_447410(self, e) -> bool:
     sub = e.p.get("sub")                              # 0x44741F ebx = [ebp+0x1C]
     if sub is None:
         return False
-    b0e = self.p4_btn0_edge()                         # 0x4AB596
-    b1e = self.p4_btn1_edge()                         # 0x4AB597
+    # ★ 2026-11-17 校定：0x4AB596 是“**任意攻击键按住**”的布尔（0x44E7CF `[edi+0xA]=al`，
+    # al = 三个动作键的 OR），0x4AB597 是“**当前按键码**”（0x44E9F6..0x44EA08
+    # `[edi+0xB]=eax+0x20`，按键码 0x20..0x2F，未按=0）。二者都**不是**按下沿。
+    b0e = bool(getattr(self.inp.rec, "b0", 0) or getattr(self.inp.rec, "b1", 0))
+    b1e = bool(getattr(self.inp.rec, "key", 0))
     if b0e:                                           # 0x447422
         e.d32(0x20, 0)
     if b1e:                                           # 0x44742D
