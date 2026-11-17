@@ -4,7 +4,7 @@
 [ANALYSIS.md](../ANALYSIS.md)；实现进度以当前源码与 Git 提交为准。历史推导不作为现行结论，
 地址结论须回到原始 `geki106.exe` 核对。
 
-## 当前状态（2026-11-11）
+## 当前状态（2026-11-17）
 
 | 范围 | 当前状态 | 依据 |
 |---|---|---|
@@ -12,7 +12,8 @@
 | 页4/11 | 游戏与回放共用逻辑；页4行为和流程已大幅落地，完整关卡覆盖仍需持续验证 | `remake/pygame/page4.py`、`remake/audit_p4.py` |
 | 页5 | 页流程和回放入口已接入；排行文字格与选中行详情尚未完整复刻 | [p5_rank_notes.md](p5_rank_notes.md) |
 | 页6 | enter/step/finish、设置行表和网格动画已实现；设置保存的跨进程持久化仍未闭合 | [p5_rank_notes.md](p5_rank_notes.md)、`ANALYSIS.md` §15.4 |
-| 页12/15 | 鍛錬流程已贯通验证；页15全链路测试通过 | 最新提交 `f33c8e0` |
+| 页12/15 | 鍛錬流程已贯通验证；页15全链路测试通过 | 源码与 `ANALYSIS.md` §14 |
+| 过关流程 | **未闭合**：Boss 击破后应经页8（关卡过场）再入下一关，复刻尚未实现页8 | `ANALYSIS.md` §15.1 |
 
 “实现”不自动代表已与原作逐像素或全流程验证。未闭合问题以 `ANALYSIS.md` §15 为准。
 
@@ -33,11 +34,16 @@
 | [p4_beh_29high_notes.md](p4_beh_29high_notes.md) | 0x29 高段与关联实体行为的地址级规格 |
 | [p5_rank_notes.md](p5_rank_notes.md) | 页5 排行规格与实现状态 |
 | [p6_settings.md](p6_settings.md) | 页6 设置页流程、交互与验证状态 |
+| [p4_enemy_matrix.md](p4_enemy_matrix.md) | 敌机/弹体全量矩阵（12 族）、审计方法与状态汇总 |
 
 运行当前 pygame 无头检查：
 
 ```bash
 python3 remake/pygame/run.py --frames 300 --headless --fixed
-python3 remake/regress_pages.py
-python3 remake/audit_p4.py
+python3 remake/regress_pages.py     # 16 张冻结金标
+python3 remake/audit_p4.py          # exe 不变量
+python3 remake/audit_ctor.py        # 180 个 ctor case 字段
+python3 remake/audit_beh.py         # 行为覆盖 + 入口合法性
+python3 remake/longrun_p4.py 3000   # 随机输入长跑
+python3 remake/replay_scripts.py    # 26 条脚本链回放
 ```
