@@ -2604,3 +2604,16 @@ byte[node+0x1C] = 1
 复刻侧结论：**0x4100000D 在战斗流程里不可达**，`p4_spawn41` 仍以最小 rect 占位；
 thunk 映射已按真值改为 `0x4022F7 → 0x430520`（§16.461）。若将来接入过场路径，需补
 rec0/rec4 的指针解引用。
+### 17.4 最终六项验证（2026-11-17，本轮实跑）
+
+| # | 命令 | 结果 |
+|---|---|---|
+| 1 | `python3 remake/regress_pages.py` | 16/16 哈希一致 |
+| 2 | `python3 remake/audit_p4.py` | 全部通过（rc=0） |
+| 3 | `python3 remake/audit_ctor.py` | 10 族 180 case / 0 差异 |
+| 4 | `python3 remake/check_behaviors.py` | 34 beh 全登记、0 待实现；ENT 154 型×20 帧、0x31 26 型×30 帧 |
+| 5 | `python3 remake/longrun_p4.py 3000` | 无异常、无未实现、队列有界 |
+| 6 | `python3 remake/replay_scripts.py` | 26 链、异常 0、op 覆盖 1..0xD |
+
+**结论**：机器可验证的部分全部通过；文档（矩阵 301 行 + 8 个 §16 子章 + §15 三态表）
+与代码一致。仍属“待实机”的只有视觉/手感对照与 Windows 补丁效果（§15 第 5、7 项）。
