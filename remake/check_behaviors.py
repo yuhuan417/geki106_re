@@ -29,11 +29,18 @@ import geki  # noqa: E402
 import page4  # noqa: E402
 
 
+def _has_beh(a: int) -> bool:
+    """行为是否可实现分派：P4_BEH、模块级 _beh_XXXX、或 Page4Mixin 方法。"""
+    return (page4.P4_BEH.get(a) is not None
+            or hasattr(page4, f"_beh_{a:X}")
+            or hasattr(page4.Page4Mixin, f"_beh_{a:X}"))
+
+
 # op5 0x6x 控制器子实体：ctor 已落地，行为尚未逐条实现（2026-11-17 核出）。
 KNOWN_MISSING_BEH = {
     0x425960, 0x425AD0, 0x425B20, 0x425B70, 0x425C10, 0x425CD0,
-    0x430550, 0x438070, 0x438110, 0x438240,
-    0x4385E0, 0x438660, 0x438750, 0x4387D0, 0x438840, 0x438B20,
+    0x438070, 0x438110, 0x438240,
+    0x438750, 0x4387D0, 0x438840, 0x438B20,
     0x438F10, 0x438F80, 0x439000, 0x439250, 0x439420, 0x4394B0,
     0x439D30, 0x439F80, 0x4415F0, 0x44AE00, 0x44AE50, 0x44AEE0,
     0x44AF60,
@@ -48,9 +55,7 @@ def geki_beh_assignments() -> tuple[set[int], set[int]]:
     all_addr = {int(m, 16) for m in re.findall(r"e\.beh\s*=\s*(0x[0-9A-Fa-f]+)", src)}
     miss = set()
     for a in all_addr:
-        ok = (page4.P4_BEH.get(a) is not None
-              or hasattr(page4, f"_beh_{a:X}"))
-        if not ok and a not in KNOWN_MISSING_BEH:
+        if not _has_beh(a) and a not in KNOWN_MISSING_BEH:
             miss.add(a)
     return all_addr, miss
 
@@ -66,13 +71,11 @@ def missing_behaviours() -> list[tuple[str, str, str]]:
             if th is None:
                 continue
             real = page4.ENT23_BEH_THUNK.get(th, th)
-            if (page4.P4_BEH.get(real) is None
-                    and not hasattr(page4, f"_beh_{real:X}")):
+            if not _has_beh(real):
                 miss.append((hex(ty), name, hex(real)))
     for ty, spec in geki.P31_CTOR.items():
         real = page4.ENT23_BEH_THUNK.get(spec[0], spec[0])
-        if (page4.P4_BEH.get(real) is None
-                and not hasattr(page4, f"_beh_{real:X}")):
+        if not _has_beh(real):
             miss.append((hex(ty), "P31_CTOR", hex(real)))
     return miss
 
@@ -160,6 +163,7 @@ def main() -> int:
         for b in bad:
             print("  ", b)
     beh_all, beh_miss = geki_beh_assignments()
+    pending = sorted(a for a in KNOWN_MISSING_BEH if not _has_beh(a))
     if beh_miss:
         print("geki.py 新引用但未实现的行为：")
         for a in sorted(beh_miss):
@@ -171,7 +175,7 @@ def main() -> int:
             print("  ", u)
     if not miss and not bad and not undef and not beh_miss:
         print(f"OK：行为全登记（geki 内 {len(beh_all)} 个 beh 引用，"
-              f"{len(KNOWN_MISSING_BEH)} 个待实现）、无未定义 self 调用，"
+              f"{len(pending)} 个待实现）、无未定义 self 调用，"
               f"ENT 表 {tested} 型各 20 帧、0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
         return 0
     return 1

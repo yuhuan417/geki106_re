@@ -14972,6 +14972,77 @@ def _beh_437F80(self, e) -> bool:
     return y < 0x1F0
 
 
+def _beh_4385E0(self, e) -> bool:
+    """`0x4385E0`（0x48000003，thunk 0x401A91）：跟随父实体的速度积分。
+
+    ```
+    0x4385E3 p = [+0x28]（父指针）
+    0x4385E9 [+0x20] += p[+0x28]；0x4385F1 [+0x24] += p[+0x2C]
+    0x438602 x = (sar [+0x20],4)；y = (sar [+0x24],4)
+    0x43860E dst = (x-0x78, y-0x78)
+    0x438629 t = ++[+0x1C]；0x438632 cmp t,0x190 ; setl
+    ```
+    """
+    p = self.p4_links.get(e.s32(0x28) & 0x7FFFFFFF)
+    vx = e.s32(0x20)
+    vy = e.s32(0x24)
+    if p is not None:
+        vx += p.s32(0x28)
+        vy += p.s32(0x2C)
+        e.d32(0x20, vx & 0xFFFFFFFF)
+        e.d32(0x24, vy & 0xFFFFFFFF)
+    x = vx >> 4
+    y = vy >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x78, y - 0x78)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    return t < 0x190
+
+
+def _beh_438660(self, e) -> bool:
+    """`0x438660`（0x48000004/05，thunk 0x40150F）：父速度 + 双正交摆动的碎片。
+
+    ```
+    0x438664 p = [+0x28]；[+0x20] += p[+0x28]；[+0x24] += p[+0x2C]
+    0x438680 ang = [+0x1C]*5*4；cos → edi = 11*cos（lea 5x 再 lea +10x）
+    0x438695 ang2 = ([+0x1C]+0x96)*20；sin → eax = 3*sin
+    0x4386AF x = (edi + [+0x20]) >> 4；y = (eax + [+0x24]) >> 4
+    0x4386C1 if [+0x2C]==0: node.active = (([+0x1C] % 0xB4) >= 0x5A) ? 0 : 1
+                             else node.active = 1
+    0x4386EE dst = (x-0x30, y-0x30)；t=++[+0x1C]；存活 = t < 0x190
+    ```
+    """
+    p = self.p4_links.get(e.s32(0x28) & 0x7FFFFFFF)
+    vx = e.s32(0x20)
+    vy = e.s32(0x24)
+    if p is not None:
+        vx += p.s32(0x28)
+        vy += p.s32(0x2C)
+        e.d32(0x20, vx & 0xFFFFFFFF)
+        e.d32(0x24, vy & 0xFFFFFFFF)
+    t = e.s32(0x1C)
+    ang = (t * 0x14) & 0xFFFFFFFF                       # t*5*4
+    edi = page4_cos(ang) * 0xB                          # 11*cos
+    ang2 = ((t + 0x96) * 0x14) & 0xFFFFFFFF
+    sin3 = page4_sin(ang2) * 3
+    x = (edi + vx) >> 4
+    y = (sin3 + vy) >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        if e.s32(0x2C) == 0:
+            e.node.active = 0 if (t % 0xB4) >= 0x5A else 1
+        else:
+            e.node.active = 1
+        e.node.dst = (x - 0x30, y - 0x30)
+    t = (t + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    return t < 0x190
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -14984,6 +15055,8 @@ P4_BEH: dict[int, object] = {
     0x443210: _beh_443210, 0x4457F0: _beh_4457F0,
     0x44A000: _beh_44A000, 0x44A070: _beh_44A070,   # 0x54 族板条（op5 控制器子体）
     0x437F30: _beh_437F30, 0x437F80: _beh_437F80,   # 0x44000001/02 碎片
+    0x4385E0: _beh_4385E0,                          # 0x48000003 跟随碎片
+    0x438660: _beh_438660,                          # 0x48000004/05 摆动碎片
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
