@@ -3607,7 +3607,7 @@ P4_4170E4_STATES = (0, 3, 3, 3, 3, 3, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3,
 def _beh_416FA0(self, e) -> bool:
     """`0x416FA0`（0x2700000B ×14）：t=byte[0x4170E4+t] 跳表（0x4170D4）：
     态0（t=0）= 计数 [0x2C]++，<16 时 [0x20]=0x45A9A0(dy,dx) 角度、否则 [0x20]=0；
-    态1（t=8/16）= node 外扩 +0x30；态2（t=0x18）= node 收 −0x60 + 0x43B070(e,0) 开火；
+    态1（t=8/16）= node 横向外扩 l/r +0x30；态2（t=0x18）= l/r 收 −0x60 + 0x43B070(e,0) 开火；
     态3 = 无操作。公共尾：[0x1C]++，t>0x18 → [0x24]+=(cos([0x20])*3)>>4、
     [0x28]+=(sin([0x20])*3)>>4（**4.4 定点**：[+4]=[0x24]>>4、[+8]=[0x28]>>4），
     t==0x48 → [0x1C]=0 循环。存亡：HP=0 灭；( [0x2C]&0xFFF0!=0 且 x>0x298 ) 灭。"""
@@ -3625,12 +3625,12 @@ def _beh_416FA0(self, e) -> bool:
                 e.d32(0x20, page4_45a9a0(dy, dx) & 0xFFFFFFFF)   # 0x416FEC 0x401091→0x45A9A0
         elif st == 1:                                # 0x416FF9
             if e.node is not None:
-                r = e.node.rect                     # 0x45A790：y ±0x30
-                e.node.rect = (r[0], r[1] + 0x30, r[2], r[3] + 0x30)
+                r = e.node.rect                     # 0x45A790(rect, 0x30,0,0x30,0) ⇒ l/r +0x30
+                e.node.rect = (r[0] + 0x30, r[1], r[2] + 0x30, r[3])
         elif st == 2:                                # 0x417012
             if e.node is not None:
-                r = e.node.rect                     # 0x45A790：y ±0x60
-                e.node.rect = (r[0], r[1] - 0x60, r[2], r[3] - 0x60)
+                r = e.node.rect                     # 0x45A790(rect, -0x60,0,-0x60,0) ⇒ l/r -0x60
+                e.node.rect = (r[0] - 0x60, r[1], r[2] - 0x60, r[3])
             self.p4_43B070(e, 0)                     # 0x41702D 0x40213F→0x43B070
     t = (t + 1) & 0xFFFFFFFF                         # 0x417035
     e.d32(0x1C, t)
