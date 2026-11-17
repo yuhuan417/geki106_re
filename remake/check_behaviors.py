@@ -38,7 +38,7 @@ def _has_beh(a: int) -> bool:
 
 # op5 0x6x 控制器子实体：ctor 已落地，行为尚未逐条实现（2026-11-17 核出）。
 KNOWN_MISSING_BEH = {
-    0x439f80, 0x4415f0
+    0x4415f0
 }
 
 

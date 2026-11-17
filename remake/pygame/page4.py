@@ -15746,6 +15746,106 @@ def _beh_438B20(self, e) -> bool:
     return True
 
 
+def _s16w(v: int) -> int:
+    v &= 0xFFFF
+    return v - 0x10000 if v & 0x8000 else v
+
+
+def _beh_439F80(self, e) -> bool:
+    """`0x439F80`（0x4D000002 砖墙环，thunk 0x40171C）：控制器铺墙 + 子体环轨/跟随。
+
+    ```
+    0x439F87 [+0x30] += 4（所有实体都加）
+    0x439F95 [+0x1C]!=0 → 跟随父体（分支 A）
+    0x439FA0 [+0x20]!=0 → 环轨（分支 B）
+    否则（控制器，只跑一帧）：
+      off=0x50、sign=1
+      0x439FB9 step = 0x8CA0 / off（有符号 idiv）
+      0x439FD4 x = off*sign
+      内层：0x4023C4 rec=(x,angle,type,0) → 生成主块；
+            3 次 rec=(2/1/0, 0, type, prm=主块) → 生成 3 个“角块”
+            angle += step，≤0x384 继续
+      off += 0x50；sign = −sign；off ≤ 0x2D0 继续，否则 return 0（自灭）
+    环轨 B：0x439F?? 用 word[0x20]=半径、word[0x22]=角度、word[0x28]=步进：
+      off.x = (cos(ang)*r)>>8；off.y = (sin(ang)*r & ~0xFF)>>8；
+      ang += step（±0xE10 回绕）；
+      center = ((sin([+0x30])+0xD0)<<16) | ((cos([+0x30])+0x120)&0xFFFF)
+      dst = (word[0x24]+word[0x2C], word[0x26]+word[0x2E])
+    跟随 A：0x43A135 按 [+0x20] 低字 0/1/2 复制父 [0x2C] 的低/高字（带符号翻转），
+      [+0x24] = 父 [+0x24]；dst 同式；存活 = 0x45AFF0(0x56CCB8,0x800)≠0。
+    ```
+    """
+    e.d32(0x30, (e.s32(0x30) + 4) & 0xFFFFFFFF)
+    if e.s32(0x1C) != 0:
+        p = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+        if p is None:
+            return False
+        pv = p.s32(0x2C) & 0xFFFFFFFF
+        lo = pv & 0xFFFF
+        hi = (pv >> 16) & 0xFFFF
+        e.d32(0x24, p.g32(0x24) & 0xFFFFFFFF)
+        k = e.s32(0x20) & 0xFFFF
+        if k == 0:
+            e.d16(0x2C, hi)
+            e.d16(0x2E, lo)
+        elif k == 1:
+            e.d16(0x2C, (-lo) & 0xFFFF)
+            e.d16(0x2E, (-hi) & 0xFFFF)
+        elif k == 2:
+            e.d16(0x2C, (-hi) & 0xFFFF)
+            e.d16(0x2E, lo)
+        cx = _s16w(e.g16(0x24))
+        cy = _s16w(e.g16(0x26))
+        dx = cx + _s16w(e.g16(0x2C))
+        dy = cy + _s16w(e.g16(0x2E))
+        if e.node is not None:
+            e.node.dst = (dx & 0xFFFF, dy & 0xFFFF)
+        return self.p4_bit_any(0x800)
+    if e.s32(0x20) != 0:
+        r = _s16w(e.g16(0x20))
+        ang = _s16w(e.g16(0x22))
+        step = _s16w(e.g16(0x28))
+        s = page4_sin(ang) * r
+        c = page4_cos(ang) * r
+        off = ((((s & ~0xFF) >> 8) & 0xFFFF) << 16) | ((c >> 8) & 0xFFFF)
+        e.d32(0x2C, off & 0xFFFFFFFF)
+        ang = (ang + step) & 0xFFFF
+        if ang >= 0xE10:
+            ang -= 0xE10
+        elif ang < 0:
+            ang += 0xE10
+        e.d16(0x22, ang & 0xFFFF)
+        ctr = ((((page4_sin(e.s32(0x30)) + 0xD0) & 0xFFFF) << 16)
+               | ((page4_cos(e.s32(0x30)) + 0x120) & 0xFFFF))
+        e.d32(0x24, ctr & 0xFFFFFFFF)
+        dx = _s16w(e.g16(0x24)) + _s16w(e.g16(0x2C))
+        dy = _s16w(e.g16(0x26)) + _s16w(e.g16(0x2E))
+        if e.node is not None:
+            e.node.dst = (dx & 0xFFFF, dy & 0xFFFF)
+        return self.p4_bit_any(0x800)
+    # 控制器：铺一整面墙后自灭
+    off = 0x50
+    sign = 1
+    q = self._p4_q("ui4cc")
+    while off <= 0x2D0:
+        step = 0x8CA0 // off
+        angle = step
+        xpos = off * sign
+        while True:
+            main = self.spawn(q, 0x4D000002, xpos & 0xFFFFFFFF, angle & 0xFFFFFFFF, 0)
+            if main is not None:
+                h = id(main) & 0x7FFFFFFF
+                self.p4_links[h] = main
+                for k in (2, 1, 0):
+                    self.spawn(q, 0x4D000002, k, 0, h)
+            angle += step
+            if angle > 0x384:
+                break
+        off += 0x50
+        sign = -sign
+    return False
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15781,6 +15881,7 @@ P4_BEH: dict[int, object] = {
     0x425960: _beh_425960,                          # 0x5F 说明行
     0x425CD0: _beh_425CD0,                          # 0x5F 3 值窗
     0x438B20: _beh_438B20,                          # 0x49000005 大爆炸
+    0x439F80: _beh_439F80,                          # 0x4D000002 砖墙环
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
