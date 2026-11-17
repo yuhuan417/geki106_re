@@ -15617,6 +15617,58 @@ def _beh_425C10(self, e) -> bool:
     return True
 
 
+_P4_425960_TAB = [0] * 0x15
+_P4_425960_TAB[7:21] = [0x84, 0x86, 0x88, 0x8A, 0x00, 0x0D, 0x0E, 0x0F,
+                        0x10, 0x91, 0x93, 0x95, 0x97, 0x19]
+
+
+def _beh_425960(self, e) -> bool:
+    """`0x425960`（0x5F000008 说明行，thunk 0x4014A6）：按“指针 Y 段号 + [+0x1C]”查字节表，
+    把说明行切成 24px 高的行矩形。
+
+    ```
+    0x42597C seg = (signed)[0x4AB5A0] * 0x4BDA12F7 >> 36
+    0x42599A edi = seg + [+0x1C]
+    0x4259E9 0x45AFF0(0x4AB5B0,0x80) 且 edi==0x10 → edi=7
+    0x425A1B b = byte[esp+8+edi]（表 idx 7..0x14 = 84,86,88,8A,00,0D,0E,0F,10,91,93,95,97,19）
+    0x425A2A k = (b & 0x7F) * 24
+    rect = (0, k, 0x17F, k + 0x17 + ((b & 0x80) ? 0x18 : 0))；点亮并返回 1
+    ```
+    """
+    seg = _p4_div54(self.p4_ptr()[1])
+    idx = (seg + e.s32(0x1C)) & 0xFFFFFFFF
+    if idx > 0x7FFFFFFF:
+        idx -= 0x100000000
+    if idx == 0x10 and self.p4_45aff0(0x80):
+        idx = 7
+    b = _P4_425960_TAB[idx] if 0 <= idx < len(_P4_425960_TAB) else 0
+    k = (b & 0x7F) * 24
+    bottom = k + 0x17 + (0x18 if b & 0x80 else 0)
+    if e.node is not None:
+        e.node.rect = (0, k, 0x17F, bottom)
+        e.node.active = 1
+    return True
+
+
+def _beh_425CD0(self, e) -> bool:
+    """`0x425CD0`（0x5F00000D 3 值窗，thunk 0x401B48）：`0x45AFC0(0x4AB5B0,[+0x1C])&3`
+    选窗口左沿表 `{0, 0x60, 0, 0xC0}`，rect=(l, 原 t, l+0x5F, 原 b)，点亮。
+
+    ```
+    0x425CE5 table = {0, 0x60, 0, 0xC0}
+    0x425CF1 0x45AFC0(0x4AB5B0,[+0x1C]) & 3 → eax = table[idx]
+    node[+4] = eax；node[+0xC] = eax + 0x5F；node[+0x1C]=1；return 1
+    ```
+    """
+    v = self.keys.field(e.s32(0x1C)) & 3
+    left = (0, 0x60, 0, 0xC0)[v]
+    if e.node is not None:
+        r = e.node.rect
+        e.node.rect = (left, r[1], left + 0x5F, r[3])
+        e.node.active = 1
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15649,6 +15701,8 @@ P4_BEH: dict[int, object] = {
     0x425B20: _beh_425B20,                          # 0x61 高亮框
     0x425B70: _beh_425B70,                          # 0x5F 键位个位
     0x425C10: _beh_425C10,                          # 0x5F 键位十位
+    0x425960: _beh_425960,                          # 0x5F 说明行
+    0x425CD0: _beh_425CD0,                          # 0x5F 3 值窗
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
