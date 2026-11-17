@@ -33,13 +33,12 @@ def _has_beh(a: int) -> bool:
     """行为是否可实现分派：P4_BEH、模块级 _beh_XXXX、或 Page4Mixin 方法。"""
     return (page4.P4_BEH.get(a) is not None
             or hasattr(page4, f"_beh_{a:X}")
-            or hasattr(page4.Page4Mixin, f"_beh_{a:X}"))
+            or hasattr(page4.Page4Mixin, f"_beh_{a:X}")
+            or hasattr(geki.Pages, f"_beh_{a:X}"))
 
 
 # op5 0x6x 控制器子实体：ctor 已落地，行为尚未逐条实现（2026-11-17 核出）。
-KNOWN_MISSING_BEH = {
-    0x4415f0
-}
+KNOWN_MISSING_BEH: set[int] = set()
 
 
 def geki_beh_assignments() -> tuple[set[int], set[int]]:

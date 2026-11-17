@@ -2113,3 +2113,15 @@ rect.l 撞到 0x180/0x1C8 时 `[+0x24] = −w`。`node.dst.y -= 2`。
   `[+0x24]=父[+0x24]`，dst 同式；存活 = `0x45AFF0(0x56CCB8,0x800)`。
   实测父 `[0x2C]=0x000A0005、[0x24]=0x00640032`：k=0→(60,105)、k=1→(45,90)、
   k=2→(40,105)、k=7→(50,100)（不改偏移），与手算一致。
+### 16.434 行为覆盖清单归零（2026-11-17）
+
+核查 `check_behaviors.py` 的 1 个“待实现”项 `0x4415F0`：
+- 它属于 **0x6F000005**（EDG2 结局控制器），实现一直在 [geki.py](remake/pygame/geki.py) 的
+  `Pages._beh_4415F0`（UiEntity 派发），而自检只扫 `page4` 的模块级/`Page4Mixin` 方法 ⇒ **盲区误报**。
+- 复核 exe 后确认 geki 版是对的：`t==0xB4 → 0x44CDF0(mgr, 3, ct, br, −255)`、
+  `t==0x1884 → 0x44CDF0(mgr, 1, ct, br, 0)`（0x441718 的 `push 1` 是 ident，
+  0x4416E8 的 `push 0` 是 fade 参数）、`t==0x33AE` 时按选机绑资源层 3（0x53..0x56 / 周目 +0x57）。
+- `0x42000004` 是 **HUD 色块条**（`bar_block` 0x437DB0），与 0x4415F0 无关；
+  本回合曾误加 page4 版 `_beh_4415F0`，已删除。
+- 自检的 `_has_beh` 现在同时检查 `geki.Pages._beh_XXXX`；`KNOWN_MISSING_BEH` 清空。
+  结果：**33 个 beh 引用 0 待实现**。
