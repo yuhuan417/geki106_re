@@ -15540,6 +15540,51 @@ def _beh_44AE00(self, e) -> bool:
     return True
 
 
+def _p4_div54(v: int) -> int:
+    """`(v * 0x4BDA12F7) >> 36`（有符号 64 位乘、算术右移）：段高 ≈ 54.05px。"""
+    v &= 0xFFFFFFFF
+    if v & 0x80000000:
+        v -= 0x100000000
+    return (v * 0x4BDA12F7) >> 36
+
+
+def _beh_425AD0(self, e) -> bool:
+    """`0x425AD0`（0x61 系悬停条，thunk 0x401A8B）：指针 Y 落在 [0x1C] 段且 blink 半周期时灭灯。
+
+    ```
+    0x425AD0 edx = (signed)[0x4AB5A0] * 0x4BDA12F7 >> 36   ; 指针 Y /54.05 的段号
+    0x425AE7 t=++[+0x20]
+    0x425AEB (t & 0x10)==0 且 edx==[+0x1C] → node.active=0；否则 =1；return 1
+    ```
+    """
+    seg = _p4_div54(self.p4_ptr()[1])
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)
+    hot = (t & 0x10) == 0 and seg == e.s32(0x1C)
+    if e.node is not None:
+        e.node.active = 0 if hot else 1
+    return True
+
+
+def _beh_425B20(self, e) -> bool:
+    """`0x425B20`（0x61 系高亮框，thunk 0x401B20）：按 `0x45AFF0(0x4AB5B0, [0x1C])`
+    把 rect 上/下边贴到 `[0x20] + (bit ? 0x100 : 0x20)`。
+
+    ```
+    0x425B28 0x45AFF0(0x4AB5B0, [+0x1C])；neg/sbb/and 0xE0/add 0x20 → ofs ∈ {0x20,0x100}
+    node[+0x1C]=1；node[+8] = [+0x20] + ofs；node[+0x10] = [+0x20] + ofs + 0x1F
+    ```
+    """
+    bit = self.p4_45aff0(e.s32(0x1C))
+    ofs = 0x100 if bit else 0x20
+    base = e.s32(0x20)
+    if e.node is not None:
+        e.node.active = 1
+        r = e.node.rect
+        e.node.rect = (r[0], base + ofs, r[2], base + ofs + 0x1F)
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15568,6 +15613,8 @@ P4_BEH: dict[int, object] = {
     0x438070: _beh_438070,                          # 0x47000001 摆动壳
     0x438240: _beh_438240,                          # 0x48000001 受击壳
     0x438110: _beh_438110,                          # 0x4F000001 摆动砖
+    0x425AD0: _beh_425AD0,                          # 0x61 悬停条
+    0x425B20: _beh_425B20,                          # 0x61 高亮框
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
