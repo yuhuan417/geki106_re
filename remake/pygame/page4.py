@@ -829,6 +829,49 @@ class DNode:
         self.dst = (0, 0)             # [+0x14]/[+0x18]
         self.active = 1               # [+0x1C]
 
+    # ---- 字节模型视图（0x44785A 等行为按 node+4/+8 dword 读写）-------------
+    #  exe 节点布局：[+0]=层、[+4..+0x10]=rect 四 dword、[+0x14]/[+0x18]=dst、[+0x1C]=active
+    _OFF = {0x04: ("rect", 0), 0x08: ("rect", 1), 0x0C: ("rect", 2), 0x10: ("rect", 3),
+            0x14: ("dst", 0), 0x18: ("dst", 1)}
+
+    def g32(self, off: int) -> int:
+        if off in self._OFF:
+            a, i = self._OFF[off]
+            return int(getattr(self, a)[i]) & 0xFFFFFFFF
+        if off == 0:
+            return self.layer & 0xFFFFFFFF
+        if off == 0x1C:
+            return 1 if self.active else 0
+        return 0
+
+    def d32(self, off: int, v: int) -> None:
+        if off in self._OFF:
+            a, i = self._OFF[off]
+            cur = list(getattr(self, a))
+            cur[i] = int(v) & 0xFFFFFFFF
+            setattr(self, a, tuple(cur) if a == "dst" else cur)
+            return
+        if off == 0:
+            self.layer = int(v) & 0xFFFFFFFF
+        elif off == 0x1C:
+            self.active = 1 if v else 0
+
+    def g16(self, off: int) -> int:
+        if off & 1:                                     # exe 无奇地址 word 访问
+            return 0
+        return self.g32(off) & 0xFFFF
+
+    def d16(self, off: int, v: int) -> None:
+        if off not in self._OFF:
+            return
+        a, i = self._OFF[off]
+        cur = list(getattr(self, a))
+        if off & 2:
+            cur[i] = (cur[i] & 0xFFFF) | ((int(v) & 0xFFFF) << 16)
+        else:
+            cur[i] = (cur[i] & 0xFFFF0000) | (int(v) & 0xFFFF)
+        setattr(self, a, tuple(cur) if a == "dst" else cur)
+
 
 def _idiv_trunc(a: int, b: int) -> int:
     """C `idiv` 的截断商（Python // 向下取整，负数差 1）。"""
@@ -19433,6 +19476,30 @@ class Page4Mixin:
             self.p4_445e47(e, rec)
             return "handled:5"
         if typ == 6:
+            # 0x445CE7（type 6 = 捕获僚机）：[0x40]=0x4020BD → 行为 0x447640；
+            # [e+4/8/0xC] = rec[0] 指向的敌机 {x,y,r}（调用点传的已是坐标值）；
+            # [0x10]=1；[0x1C] = rec[3] = 0x45FAD0 武器种；[0x28] = rec[1]（同值）；
+            # [0x18] = −1（不可击破）；[0x20/24/2C] = 0；节点**整份拷贝敌机节点**
+            # （rect/dst/layer/flags，0x445D2C..0x445D6D）＝僚机沿用被捕敌人的字块外观。
+            rec0 = rec if isinstance(rec, tuple) else (0, 0, 6, 0)
+            e.d32(0x40, 0x4020BD)
+            e.beh = P4_445C00_THUNK.get(0x4020BD, 0x447640)
+            e.d32(0x04, rec0[0] & 0xFFFFFFFF)
+            e.d32(0x08, rec0[1] & 0xFFFFFFFF)
+            e.d32(0x0C, rec0[4] & 0xFFFFFFFF if len(rec0) > 4 else 0)
+            e.m[0x10] = 1
+            e.d32(0x1C, rec0[3] & 0xFFFFFFFF)
+            e.d32(0x28, rec0[5] & 0xFFFFFFFF if len(rec0) > 5 else 0)
+            e.d32(0x20, 0)
+            e.d32(0x24, 0)
+            e.d32(0x2C, 0)
+            e.d32(0x18, 0xFFFFFFFF)
+            _src = getattr(e.p.get("capture_src"), "node", None)
+            if _src is not None:
+                e.node = DNode(_src.layer, _src.rect[0], _src.rect[1])
+                e.node.rect = tuple(_src.rect)
+                e.node.dst = tuple(_src.dst)
+                e.node.active = 1
             self.p4_stat["445c00_type6"] = self.p4_stat.get("445c00_type6", 0) + 1
             return "handled:6"
         if typ == 8:                                           # 0x44601E
@@ -19619,8 +19686,20 @@ class Page4Mixin:
         parent = self.p4_links.get(target) if target else None
         if parent is not None:
             parent.d32(0x28, r & 0xFFFFFFFF)
-        self.spawn(self._p4_q("ui40c"), 6,
-                   a.s32(0x04), a.s32(0x08), hit, p.g32(0x1C))  # 0x43C5F7 / 0x43C594
+        # 0x43C5F7 / 0x448FF0：type 6 捕获僚机 —— rec = {敌x, 敌y, 6,
+        #   **[p+0x1C]=父(玩家)指针**, 敌r, fad0 武器种}（0x43C594 的四 dword：
+        #   rec0=&a[4]、rec1=0x45FAD0 第二次、rec2=6、rec3=[p+0x1C]）；
+        # ctor 0x445CE7：[0x1C]=rec3（父）、[0x28]=rec1（武器种）、节点整份拷贝敌机。
+        _parent = self.p4_links.get(p.g32(0x1C)) if p.g32(0x1C) else None
+        _e6 = Ent(a.s32(0x04), a.s32(0x08), 6, 0)
+        _e6.p["capture_src"] = a
+        if _parent is not None:
+            _e6.p["sub"] = _parent                     # 0x447640 行为的 sub = [0x1C] 父
+        self.p4_445c00(_e6, (a.s32(0x04) & 0xFFFFFFFF, a.s32(0x08) & 0xFFFFFFFF, 6,
+                             p.g32(0x1C) & 0xFFFFFFFF, a.g32(0x0C) & 0xFFFFFFFF,
+                             hit & 0xFFFFFFFF))
+        _e6.node = _e6.node or DNode(2, 0, 0)
+        self._p4_q("ui40c").append(_e6)                           # 0x4AD40C
         self.p4_45eff0(ta, 0x10008431, a.s32(0x04), a.s32(0x08))   # 0x43C61D
         a.d32(0x18, 0)                                          # 0x43C612
         a.d32(0x10, 0)                                          # 0x43C619
@@ -19960,8 +20039,15 @@ class Page4Mixin:
         return (self.p4_stat.get(0x4CD4A0 + 0x26, 0) & 0xFFFF) >= 0xA0
 
     def p4_fire_8431(self, sub) -> None:
-        """`0x4474AE`/`0x44754E`：造 `0x10008431`（位置 = 子对象，第 5 字段 = 子对象指针）入 `0x4AD46C`。"""
-        self.spawn(self._p4_q("ui46c"), 0x10008431, sub.s32(0x04), sub.s32(0x08), sub)
+        """`0x4474AE`/`0x44754E`：造 `0x10008431`（位置 = 子对象，第 5 字段 = 子对象指针）入 `0x4AD46C`。
+
+        第 5 字段（param）= **父指针**（0x42DA47 `[esi+0x1C] = rec[3]`）——束消亡时
+        经它解锁父的 [+0x28] 冷却（0x42F689）。复刻侧父指针走 p4_links 句柄；
+        直接把 Ent 对象传给 spawn 会因 `int(a3)` 失败落 0 ⇒ 链接断 ⇒
+        **冷却永不解锁、捕获只能发一发**（2026-11-18 修）。"""
+        h = id(sub) & 0x7FFFFFFF
+        self.p4_links[h] = sub
+        self.spawn(self._p4_q("ui46c"), 0x10008431, sub.s32(0x04), sub.s32(0x08), h)
 
     def p4_se_pan(self, se: int, pan: int) -> None:
         """`0x4013A2(0x4AB4B0, se, pan)`：带声像的音效（见 §11）。"""
