@@ -23,7 +23,9 @@ FAMS = [
     (0x23000000, 0x40DE98, page4.ENT23_INIT),
     (0x24000000, 0x410CF4, page4.ENT24_INIT),
     (0x25000000, 0x4120C8, page4.ENT25_INIT),
-    (0x26000000, None, page4.ENT26_INIT),
+    (0x26000000, 0x413E64, page4.ENT26_INIT),
+    (0x27000000, 0x4162E4, page4.ENT27_INIT),
+    (0x28000000, 0x419208, page4.ENT28_INIT),
     (0x29000000, 0x41CBDC, page4.ENT29_INIT),
     (0x2A000000, 0x40A7F8, page4.ENT2A_INIT),
     (0x2C000000, 0x4044D8, page4.ENT2C_INIT),
@@ -41,8 +43,24 @@ CUSTOM_WRITTEN = {
     (0x2C00000D, 0x18), (0x2C00000D, 0x30),      # s2c0d：0xE / 0x10
     (0x2C000005, 0x18),                          # s2c05：1
     (0x2C000001, 0x20),                          # s20_seed
-    (0x23000016, 0x18),                          # s2316：p[2]==0 → -1
+    (0x23000016, 0x18), (0x23000016, 0x20),      # s2316：p[2]==0 → -1；[0x20]=0x30
+    (0x26000009, 0x28),                          # rnd_retarget：[0x28]=8
+    (0x28000003, 0x08),                          # rand_spawn：y 固定在 0x114
 }
+
+
+def resolve(R, addr):
+    """把 thunk（jmp 链）解析到真址。"""
+    for _ in range(4):
+        try:
+            i = R.dec(addr)
+        except Exception:
+            return addr
+        if i.mnemonic == "jmp" and i.op_str.startswith("0x"):
+            addr = int(i.op_str, 16)
+        else:
+            return addr
+    return addr
 
 
 def case_info(R, md, addr, limit=None):
@@ -96,13 +114,22 @@ def main() -> int:
                     break
             imm, rect = case_info(R, md, addr, nxt)
             checked += 1
-            for off in (0x0C, 0x18):
-                if off not in imm:
+            for off in sorted(imm):
+                if off > 0x40:      # 只看实体字段区，跳过后面的栈/局部
                     continue
                 ex = imm[off] - 0x100000000 if imm[off] >= 0x80000000 else imm[off]
+                if off == 0x40:     # 行为：表里存 thunk 或已解析真址，两种都接受
+                    mine_beh = info.get("beh", 0)
+                    if mine_beh != ex and resolve(R, mine_beh) != resolve(R, ex):
+                        diffs.append((typ, "beh", hex(ex), hex(mine_beh)))
+                    continue
                 got = info.get("imm", {}).get(off)
+                if got is not None and got >= 0x80000000:
+                    got -= 0x100000000       # 有符号归一，避免 -0x40 vs 0xFFFFFFC0
                 if got is None:
                     if (typ, off) in CUSTOM_WRITTEN:
+                        continue
+                    if ex == 0:     # 显式写 0 与默认 0 等价
                         continue
                     diffs.append((typ, hex(off), hex(ex), "表未列（可能由自定义段写）"))
                 elif got != ex:
