@@ -1421,7 +1421,9 @@ class Pages(Page4Mixin):
         if self.page == 14:
             return self.page14_step()             # 0x453EA0
         if self.page in (8, 9, 10):
-            return self.page_results_step()       # 0x453300
+            # 0x4594FD：`enter(); if (al) do { step() } while (al); finish()`
+            # —— 进场返回假（旗标非空）时整个帧循环被跳过
+            return getattr(self, "page_results_ok", True) and self.page_results_step()
         if self.page == 11:
             # 0x4593C2：与页4 共用 enter/step/finish
             return self.p4_enter_ok and self.p4_step()
@@ -2043,33 +2045,122 @@ class Pages(Page4Mixin):
 
     # ---- 页8/9/10：游戏结束/结算（0x453050/0x453300/0x4535A0）--------------------
     def page_results_enter(self) -> None:
-        """`0x453050`：装调色板 2 → SetCursorPos(320,240) → SetPeriod(0) → 场景重置。"""
+        """`0x453050`（页8/9/10 共用进场）：清 7 队列 → 按页号装结局链
+        （8→0x5A=流61 Edg1、9→0x5C=流62 Edg2、10→0x62=流76 ExtrEnding）
+        → 页10 额外载暗调色板 → 清 VM 冻结门 → VM 走一步 → [0x56CCA8]=0
+        → 页9 解锁档提升 → 速度=1 → 计时器。"""
         self.flags.clear()
         self.screen_fill = -1
-        self.pal = self._load_pal(2)
-        self.pal_now = self.pal
-        self.inp.set_pos(320, 240)
-        self.inp.set_preset4(0, (320, 240))
-        self.scene_reset()
-        self.timer.set_period(0)
+        # 0x453053..0x453094：清 0x4AD40C/43C/46C/49C/4CC/4FC/52C 七队列
+        for q in (self.actorq, self.p4_q43c, self.ui46c, self.p4_ui49c,
+                  self._p4_q("ui4cc"), self.ui4fc, self.ui52c):
+            q.clear()
+        self.spark4cc.clear()
+        self.wipe4f.clear()
+        pg = self.page
+        chain = {8: 0x5A, 9: 0x5C, 0x0A: 0x62}.get(pg)
+        if chain is not None:
+            self.vm_restart(chain)                    # 0x4530A4/0x4530B7/0x4530CA
+        if pg == 0x0A:
+            # 0x4530D6..0x453117：页10 载调色板 2（暗），失败 → flags |= 2
+            _w = self.p4_cfg_word()
+            _br, _ct = self.p4_451630_adjust(_w) if _w else (0, 0)
+            if not self.p4_load_palette(2, _ct, _br):
+                self.flags.set(2)
+        self.sysf.clear()                             # 0x453125 0x45AF10(0x56CC84,0)
+        self.vm_step_frame()                          # 0x453131 0x402149 → 0x460350
+        self.p4_frames = 0                            # 0x45313B [0x56CCA8]=0
+        if pg == 9:
+            # 0x453154：0x4AB5B0 |= 0x80；0x45316C..0x45320C 解锁档：
+            #   继续数(+0x40)==0 → 0x70000 ≥1；分数 > 0x1C9C380(3000万) → ≥2；
+            #   0x56CCB8 bit14(0x4000) → ≥3（单调取大）
+            self.keys.bits |= 0x80
+            if not self.sequence_started():
+                if self.keys.field(0x70000) < 1:
+                    self.keys.set_field(0x70000, 1)
+            if self.p4_stat.get(0x4CD4A0 + 4, 0) > 0x1C9C380:
+                if self.keys.field(0x70000) < 2:
+                    self.keys.set_field(0x70000, 2)
+        if self.sysb8.test(0x4000):                   # 0x4531DE bit14
+            if self.keys.field(0x70000) < 3:
+                self.keys.set_field(0x70000, 3)
+        if self.sysb8.test(0x1000):                   # 0x453216 bit12（全镜像无写点，恒 0）
+            self.keys.bits |= 0x80000
+        self.p4_speed = 1                             # 0x45323F [App+0x2C4]=1
+        if not self.timer.set_period(0):              # 0x453249 0x45A490
+            self.flags.set(0x40)                      # 0x453253
+        # 0x45325F 0x45AFF0(0x4AB5C0,0)：返回值 = 旗标是否为空（页机据此决定进帧循环）
+        self.page_results_ok = self.flags.is_empty()
 
     def page_results_step(self) -> bool:
-        """`0x453300`：泵 → draw → 色带 → 输入 → SetCursorPos → key → 色带 → 旗标。"""
-        self.keys.update(self.inp.rec)
-        self.key_command(self.inp.rec.key)
-        self.begin_frame()
-        self.band_draw()
-        self.draw()
-        self.band_advance()
-        return self.flags.is_empty()
+        """`0x453300`（页8/9/10 每帧）：快进门 → 泵 → present → VM 一步 → 输入
+        （非回放页**录制**输入，0x453391 0x45D1D0，供 finish 的 rp_last 落盘）
+        → 键码 → 帧计 → 色带画 → 0x458E70 全队列行为 → 背景/4CC/4FC 显示表
+        → 页10 结局收尾。返回旗标是否为空。"""
+        skip = self.p4_speed != 0 and (self.p4_frames % self.p4_speed) != 0
+        bl = not skip
+        n = 1 if self.p4_speed != 0 else 4            # 0x45332D neg/sbb/and 0xFD/add 4
+        self.p4_pump(n)                               # 0x453342（含 0x56CCAC 计数）
+        if not skip:
+            self.begin_frame()                        # 0x45335B 0x458CB0
+        self.vm_step_frame()                          # 0x453360 0x460350
+        vm_done = self.vm.term != 0 or not self.vm.buf
+        if self.replay_mode:                          # 0x453377 byte[0x56CCB5]
+            self.replay_play()                        # 0x4533A5 0x45D2B0 路径
+        else:
+            # 0x45337B 0x44EB60（记录已由运行器/钩子建好）+ 0x453391 0x45D1D0 录制
+            self.replay_record()
+        self._p4_recenter_cursor()                    # 0x453429 SetCursorPos(0x140,0xF0)
+        key = self.inp.rec.key
+        if key == 5:                                  # 0x453439 快进键
+            self.p4_speed = 8 if self.p4_speed == 1 else 1
+        if key == 1:                                  # 0x453458 ESC
+            self.flags.set(0x200)                     # 0x453461
+        self.p4_frames += 1                           # 0x453470 [0x56CCA8]++
+        if bl:
+            self.band_draw()                          # 0x453481 0x4562A0
+            self.p4_dispatch()                        # 0x45348D 0x458E70 全队列
+            self.draw()                               # 渲染遍（页≠4 分支 = bg 需下述门）
+            # 0x45349B 0x457CB0 背景 12 槽 + 0x4534A5/0x4534AF 0x430840(4CC/4FC) 显示表
+            # —— 复刻侧集中在 draw()（bg 走 p4_bg_draw，门扩到 8/9/10）
+        if self.page == 0x0A and vm_done:             # 0x4534C1 页10 且流耗尽
+            self.p4_45e020()                          # 0x4534C9 0x45EED0 HUD 链
+            self.p4_460a90_stub()                     # 0x4534D3 0x460A90 命数字
+            self.flags.set(0x10000)                   # 0x4534F0
+        return self.flags.is_empty()                  # 0x4534FF 0x45AFF0(0x4AB5C0,0)
+
+    def p4_460a90_stub(self) -> None:
+        """`0x460A90(0x4CD590)`：命数字形矩形重写（页10 收尾用；复刻侧暂记日志）。"""
+        self.log("page10: 0x460A90（命数字形）—— 未逐字节落地")
 
     def page_results_finish(self) -> None:
-        """`0x4535A0`：KillTimer → 0xB4 fill+present ×2 → 释放层 → 页3（菜单）。"""
-        self.timer.kill()
+        """`0x4535A0`：停 BGM → KillTimer → **非回放页把本局输入落盘 rp_last**
+        （0x4535D0 0x45FB60 取分 + 0x4535E4 0x45D460(0x4CD5D8,0x63,分)）→
+        0xB4 填充+present ×2 → 释放 14 层 → 出口映射
+        （0x100→页0、0x200→页3、0x10000→回放页5 / 普通写选机=3 回页3）。"""
+        if self.audio is not None:
+            self.audio.bgm_stop()                     # 0x4535A3 0x44FDD0
+        if not self.timer.kill():                     # 0x4535B2 0x45A510
+            self.flags.set(0x40)                      # 0x4535BB
+        if not self.replay_mode:                      # 0x4535C7 byte[0x56CCB5]
+            self.replay_save_score()                  # 0x45FB60 + 0x45D460(0x63)
+        self.canvas.fill(0xB4); self.present()        # 0x4535E9/0x4535FF
         self.canvas.fill(0xB4); self.present()
-        self.canvas.fill(0xB4); self.present()
-        self.layers.free_all()
-        self.page = 3                                 # 0x4535A0 无额外映射 → 默认回菜单
+        self.layers.free_all()                        # 0x45361A 0x44CEE0 ×14
+        low = self.flags.lowest()                     # 0x453624 0x45B070
+        if low == 0x100:
+            self.page = 0                             # 0x453688
+        elif low == 0x200:
+            self.page = 3                             # 0x45367C
+        elif low == 0x10000:
+            if self.replay_mode:
+                self.page = 5                         # 0x453653
+            else:
+                self.keys.set_field(0xC000, 3)        # 0x45365F 0x45B0E0(…,0xC000,3)
+                self.page = 3                         # 0x45366B
+        else:
+            self.page = 0xFF                          # 0x45363E
+        self.log(f"page_results.finish（0x4535A0）→ 页 {self.page}（最低旗标 {low:#x}）")
 
     # ---- 页15：第二关游戏画面（0x454950/0x454B30/0x454CB0）--------------------
     def page15_enter(self) -> None:
@@ -6276,10 +6367,11 @@ class Pages(Page4Mixin):
                 _h, _w = _b.shape[:2]
                 _nz = int((_b[::4, ::4] != 0).sum())
                 print(f"[layer] {_i} {_w}x{_h} nz/16={_nz} id={getattr(_l,'bind_id',None)}")
-        if getattr(self, "p4_bg", None) and self.page == 4:
+        if getattr(self, "p4_bg", None) and self.page in (4, 8, 9, 0x0A):
             # 0x458EF5 → 0x457CB0（12 槽，最先绘制）。⚠ 页4 专属：共享 draw() 原本
             # 无条件执行，ESC 页4→页3 / 页3→页4 时页4 的地面字块/HUD 会画进别的页
             # （2026-10-31 修，页1-3 金标时这些路径本就是空操作，加门不改哈希）。
+            # 2026-11-18：页8/9/10 的 0x45349B 也调 0x457CB0（结局背景 129..138 层块）
             self.p4_bg_draw()
         # 0x458EF0 的六条队列顺序：ui4cc → ui43c → ui49c → 0x4AD40C → ui46c → ui4fc
         # ⚠ 页4 专属渲染遍（同 p4_bg_draw：加 page 门防跨页污染，2026-10-31）

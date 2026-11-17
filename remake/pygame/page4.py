@@ -22353,8 +22353,21 @@ class Page4Mixin:
         return
 
     def replay_save_score(self) -> None:
-        """0x451CAB/0x451CB2：`0x45FB60(0x4CD4A0)` 取分 + `0x45D460(0x4CD5D8,0x63,分)`。"""
-        return
+        """0x451CAB/0x451CB2（页4/页8 收尾）：`0x45FB60(0x4CD4A0)` 取分
+        （= [obj+4]，0x45FB60 逐字节核对）+ `0x45D460(0x4CD5D8, 0x63, 分)`。"""
+        score = self.p4_stat.get(0x4CD4A0 + 4, 0) & 0xFFFFFFFF     # 0x45FB60
+        self.p4_45d460(0x63, score, None)
+
+    def _beh_426200(self, e) -> bool:
+        """`0x426200`（0x5F000012 制作名单 / 0x5F00001B，thunk 0x401555）：
+        `node.dst.y` 每帧 −1，减到 −0x18 那次返回 0 自灭（0x42620F cmp −0x18 / setg）。"""
+        nd = e.node
+        if nd is None:
+            return False
+        x, y = nd.dst
+        y = (y - 1) if isinstance(y, int) else y
+        nd.dst = (x, y)
+        return y > -0x18                                        # 0x426213 setg
 
     def stream_reset(self) -> None:
         """0x458E15 → `0x459A80(0x56B95C)`：记录流复位。"""
@@ -22500,6 +22513,36 @@ class Page4Mixin:
             # （流75 的 0x51000002 param=1）不推进。
             if (c & 0xFFFF0000) == 0x51000000:
                 self.p4_51_spawn(a, b, c, d)
+            elif c == 0x5F000012:
+                # 0x424410 → case16 @ 0x424B48（0x5F 族二级 ctor，跳表 0x425114）：
+                # 制作名单行条——beh 0x401555 → 0x426200（node.dst.y 每帧 −1、
+                # 到 −0x18 自灭）；层 13；rect = (0, rec1, 0x21F, rec1+0x1F)
+                # （0x45A790 对池节点矩形清零基累加）；dst = 0x45A690(0x30, 0x1E0)。
+                _e = Ent(a, b, c, 0)
+                _e.d32(0x40, 0x401555)
+                _e.beh = 0x426200
+                _e.node = DNode(0xD, 0, b)
+                _e.node.rect = (0, b, 0x21F, b + 0x1F)
+                _e.node.dst = (0x30, 0x1E0)
+                _e.node.active = 1
+                self._p4_q("ui4fc").append(_e)
+            elif c == 0x5F000013:
+                # case17 @ 0x424BB3：居中卡片——beh 0x4022F7 → 0x430520（[+0x1C]=param
+                # 倒数自灭）；层 13；rec0=(l,t) 打包、rec1=(w&0xFFF, h) 打包 ⇒
+                # rect = (l, t, l+w, t+h)；dst = 0x45A690(0x140−w>>1, 0xF0−h>>1)。
+                _l, _t = (a >> 16) & 0xFFFF, a & 0xFFFF
+                _w, _h = b & 0xFFF, (b >> 16) & 0xFFFF
+                _e = Ent(a, b, c, d)
+                _e.d32(0x1C, d & 0xFFFFFFFF)      # 0x424BC4 [esi+0x1C] = rec[0xC]
+                _e.d32(0x40, 0x4022F7)
+                _e.beh = 0x430520
+                _e.node = DNode(0xD, _l, _t)
+                _e.node.rect = (_l, _t, _l + _w, _t + _h)
+                # 0x424C21/0x424C32：x = 0x140 − **h**>>1、y = 0xF0 − **w**>>1
+                # （exe 的居中把 w/h 交叉使用——逐字节核对，非笔误修正）
+                _e.node.dst = (0x140 - (_h >> 1), 0xF0 - (_w >> 1))
+                _e.node.active = 1
+                self._p4_q("ui4fc").append(_e)
             else:
                 self.spawn(self._p4_q("ui4fc"), c, a, b, d)
         elif op == 5 and c == 0x61000005:
