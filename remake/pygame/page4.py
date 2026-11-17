@@ -15392,6 +15392,35 @@ def _beh_44AEE0(self, e) -> bool:
     return self.p4_4305f0(e, 0x18) != 0
 
 
+def _beh_438070(self, e) -> bool:
+    """`0x438070`（0x47000001，thunk 0x4020F4）：横向摆动壳——每 `[+0x20]` 帧把 rect
+    左右各推 `[+0x24]`，撞到 0x180/0x1C8 就反向；dst.y 每帧 −2；存活 = 在屏且系统位 4。
+
+    ```
+    0x438073 t=++[+0x1C]；0x43807F t==[+0x20] → 0x45A790(node+4, [+0x24],0,[+0x24],0)
+             → rect.l/r += w；[+0x1C]=0；rect.l∈{0x180,0x1C8} → [+0x24] = -w
+    0x4380C3 node.dst.y += -2
+    0x4380C7 0x401D02 → 0x430640（在屏）；失败 → 0
+    0x4380D1 0x45AFF0(0x56CCB8,4) → 0/1
+    ```
+    """
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == e.s32(0x20):
+        w = e.s32(0x24)
+        if e.node is not None:
+            r = e.node.rect
+            e.node.rect = (r[0] + w, r[1], r[2] + w, r[3])
+        e.d32(0x1C, 0)
+        if e.node is not None and e.node.rect[0] in (0x180, 0x1C8):
+            e.d32(0x24, (-w) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0], e.node.dst[1] - 2)
+    if not self.p4_430640(e):
+        return False
+    return self.p4_bit_any(4)
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15417,6 +15446,7 @@ P4_BEH: dict[int, object] = {
     0x4394B0: _beh_4394B0,                          # 0x4A000006 爆风环
     0x439250: _beh_439250,                          # 0x4A000002 拖尾碎片
     0x439D30: _beh_439D30,                          # 0x4F00000A 螺旋漂移
+    0x438070: _beh_438070,                          # 0x47000001 摆动壳
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
