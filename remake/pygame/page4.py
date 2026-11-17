@@ -8588,13 +8588,14 @@ def _beh_40B040(self, e) -> bool:
             elif sub == 10:
                 if t == 0:
                     self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
-                    offs = (-5, 0xC, 0, 12, 12, 12, 12, 12, 12, 12, 0, 12, 0xC)
-                    for i in range(7):
-                        dx = offs[i]
-                        dy = offs[i + 1] if i + 1 < len(offs) else 0xC
-                        if y >= self.p4_player_y():
+                    # 0x40B447..0x40B487 写入的 7 组 (A,B) 原值（A=[esp+0x38+8i]、
+                    # B=[esp+0x3c+8i]）；0x40B494 起的镜像规则：
+                    #   main.y < 玩家y → B 取负；main.x < 玩家x → A 取负。
+                    pairs = ((0xC, -5), (5, 0), (0xC, 5), (5, 5), (5, 0xC), (0, 5), (-5, 0xC))
+                    for dx, dy in pairs:
+                        if y < self.p4_player_y():
                             dy = -dy
-                        if x >= self.p4_player_x():
+                        if x < self.p4_player_x():
                             dx = -dx
                         self.spawn(self._p4_q("ui49c"), 0x3100001B,
                                    x, y, (dx, dy))
