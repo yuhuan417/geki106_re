@@ -9569,9 +9569,9 @@ def _beh_40FD10(self, e) -> bool:
 
 
 def _beh_40FEA0(self, e) -> bool:
-    """`0x40FEA0`（thunk 0x401D48；0x23000016）：**挂主僚机（十二态）**。
+    """`0x40FEA0`（thunk 0x401D48；0x23000016）：**挂主僚機（十二态，按主状态分派）**。
 
-    主 = [0x1C] 句柄；t2=主.word[0x20]（主态机）；态 = 主.[0x1C]−1（>0xB 跳）：
+    主 = [0x1C] 句柄；t2=主.word[0x20]（主态机 wt）；态 = 主.[0x1C]−1（>0xB 跳）：
       0：t2≥0 且 (t2&0x1F)==0 → 0x43B360(e, 自机x, 自机y+([0x24]<0 ? +0x30 : −0x30)
          ⊕ ~(t2)>>5&1, 0x300)
       1：t2==0 且 [0x24]<0 → 0x23000017 @(x,y) 入 0x4AD43C（[0x28]=0）
@@ -9778,23 +9778,28 @@ def _beh_4108C0(self, e) -> bool:
 
 
 def _beh_40F880(self, e) -> bool:
-    """`0x40F880`（thunk 0x4017EE；0x23000015 王 **十三态**，2026-11-14 按跳表
-    0x40FBDC 重核：13 态只有 8 个 handler——0/1→0x40F8CA、2/10→0x40F98B、
-    3/6/11→0x40F99D、4/12→0x40F9B1、5→0x40FA6B、7→0x40FA82、8→0x40FAAA、
-    9→0x40FB09；共享体 `[0x1C]=ecx=态+1` 推进。
+    """`0x40F880`（thunk 0x4017EE；0x23000015 王 **十三态**，2026-11-18 按跳表
+    0x40FBDC 原始表逐项重核：表 = F8CA,F98B,F99D,F9B1,FA6B,F99D,FA82,FAAA,FB09,
+    F98B,F99D,F9B1,FB19（idx=态+1）⇒
+    态0→F8CA、1/9→F98B、2/5/10→F99D、3/11→F9B1、4→FA6B、6→FA82、7→FAAA、
+    8→FB09、12→FB19。
 
     头：x>0x188 → word[0x2C]-- 否则 ++；y>0xF0 → word[0x2E]-- 否则 ++（双向漂移）。
-    态 0/1（0x40F8CA）：word[0x2C]=−0x40（x 速 −4）；wt==0 → 従 0x23000016 ×2
-    @ (−0x18,0) prm rand&0x100 / sete(rand&0x100==0)；x==0x168 → [0x2C]=0xFFD00000
-    （x 速 0 / y 速 −0x30）、**[0x1C]=0xC**（neg/sbb/and 0xB/inc，eax=y≠0 ⇒ 恒 0xC）。
-    态 2/10：wt==0xF0 → 态+1。态 3/6/11：wt==0x16A → 态+1。
-    态 4/12：wt<0 跳过；wt==0 → 0x23000018 @(−0x18,−0x18) + [0x30]=[0x2C]；
-    wt<0x5A → [0x2C]=0xFFE00000；<0xB4 → 0x400020；<0x10E → 0xFFE0FFE0；
-    否则 [0x2C]=[0x30] 且 [0x1C]==3 → 4，否则 word[0x22]++ →（neg/sbb/and 0xFD/+0xC）
-    w22<6 → 0xC、≥6 → 0x109（跳表外 = 尾部怠速漂移）。
-    态 5：wt==0x50 → 态+1。态 7（死亡演出）：wt==0x78 → 0x23000019 @ 自机、return 0；
-    否则 0x23000019 ×2（wt/0x48）。
-    态 8：wt==0x5A → 态+1。态 9：wt==0x16A → return 0；wt>0x78 → word[0x2C]=0x78−wt。
+    态 0（0x40F8CA）：dword[0x2C]=0xFFC0（x 速 −4、**y 速清 0**）；wt==0 →
+      **從 0x23000016 ×2**（param={主,0x30,r} / {主,−0x24,r}，第二发 x=(r==0)；
+      r==0 → 從 ctor [0x18]=−1 无敌）；x==0x168 → dword[0x2C]=0xFFD00000、态 1
+      （neg/sbb 对 eax=旧态0 ⇒ 恒 1）。
+    态 1/9：wt==0xF0 → 态+1。态 2/5/10：wt==0x16A → 态+1。
+    态 3/11：wt<0 整段跳过；wt==0 → **0x23000018 @(−0x18,−0x18)（param=主指针）**
+      + [0x30]=[0x2C]；wt<0x5A → dword[0x2C]=0xFFE00000、<0xB4 → 0x400020、
+      <0x10E → 0xFFE0FFE0（三段速度，每帧只走一支）；wt≥0x10E → [0x2C]=[0x30]
+      且态 3→4、态 11 → w22++（w22−6==0 → 12，否则 9 —— neg/sbb 全 eax 截断）。
+    态 4：wt==0x50 → 5。态 6：wt==0xF0 → w22++（w22==3 → 8，否则**回态 1**）。
+    态 7（死亡演出，HP==0 尾部置入）：wt==0x78 → 0x43A700(x,y,0x40) 环形火花 +
+      return 0；否则 0x43A520(q,x,y,wt,0x48) ×2 波纹火花。
+    态 8：wt==0x5A → 9。态 12：wt==0x16A → return 0；wt>0x78 → word[0x2C]=0x78−wt。
+
+    ⇒ 攻击环 1→2→3→4→5→6→1→…（态 6 第 3 圈经 8→9 回 1），直到 HP==0 进态 7。
 
     尾 0x40FB3E：**wt 重置只在态变化时**（0x40FB46 cmp ebx,eax / je）——新态<7 →
     −(rand&0x3F)（0x40FB4E）、新态≥7 → 0（0x40FB5E）；态未变 → wt++（0x40FB66，
@@ -9824,14 +9829,20 @@ def _beh_40F880(self, e) -> bool:
         # ⇒ 态0→F8CA；1/9→F98B；2/5/10→F99D；3/11→F9B1；4→FA6B；6→FA82；
         #   7→FAAA；8→FB09；12→FB19（旧实现按 sub=st+1 分组，整体错位一格）。
         if st == 0:                                # 0x40F8CA
-            e.d16(0x2C, -0x40 & 0xFFFF)            # word[0x2C] = −0x40
+            e.d32(0x2C, 0xFFC0)                    # dword：word[0x2C]=0xFFC0(−0x40)、word[0x2E]=0
             if wt == 0:                            # 0x40F8D1
+                # 0x40F8DC..0x40F95D：记录 C 两连发（param 结构 A={主,±y,randbit}，
+                # A[1] 第一次 0x30、第二次 −0x24；第二发的 x 覆写为 (r==0)）。
+                # 從 [0x1C]=主指针 → 行为按主状态分派；r==0 → ctor [0x18]=−1（无敌）。
                 r = self.p4_rand() & 0x100
-                self._p4_ent43c(0x23000016, -0x18, 0)
-                self._p4_ent43c(0x23000016, -0x18, 0, (-1 if r else 1))
+                h = id(e) & 0x7FFFFFFF
+                self.p4_links[h] = e
+                self._p4_ent43c(0x23000016, -0x18, 0, (h, 0x30, r))
+                self._p4_ent43c(0x23000016, 1 if r == 0 else 0, 0, (h, -0x24, r))
             if x0 == 0x168:                        # 0x40F967
-                e.d32(0x2C, 0xFFD00000)
-                e.d32(0x1C, 1)                     # 0x40F97F：态0→1，其它→0xC
+                e.d32(0x2C, 0xFFD00000)            # word[0x2C]=0、word[0x2E]=0xFFD0(−0x30)
+                # 0x40F974 neg/sbb(eax=旧态0)=0 → and 0xB → 0 → inc → **恒态1**
+                e.d32(0x1C, 1)
         elif st in (1, 9):                         # 0x40F98B
             if wts == 0xF0:
                 e.d32(0x1C, st + 1)
@@ -9840,36 +9851,49 @@ def _beh_40F880(self, e) -> bool:
                 e.d32(0x1C, st + 1)
         elif st in (3, 11):                        # 0x40F9B1
             if wts < 0:
-                pass
-            elif wts == 0:
-                self._p4_ent43c(0x23000018, -0x18, -0x18)
-                e.d32(0x30, e.g32(0x2C) & 0xFFFFFFFF)
-            if wts < 0x5A:
-                e.d32(0x2C, 0xFFE00000)
-            elif wts < 0xB4:
-                e.d32(0x2C, 0x400020)
-            elif wts < 0x10E:
-                e.d32(0x2C, 0xFFE0FFE0)
-            if st == 3:
-                e.d32(0x1C, 4)
+                pass                               # 0x40F9B8 jl → 整段跳过
             else:
-                w22 = (e.g16(0x22) + 1) & 0xFFFF
-                e.d16(0x22, w22)
-                e.d32(0x1C, 0xC if (w22 - 6) == 0 else 0x109)  # 0x40FA51 neg/sbb/and 0xFD/add 0xC
+                if wts == 0:                       # 0x40F9BE jne 跳过
+                    # 0x40F9C0：param=主**指针**（0x40DDE4 [0x1C]=param）
+                    h = id(e) & 0x7FFFFFFF
+                    self.p4_links[h] = e
+                    self._p4_ent43c(0x23000018, -0x18, -0x18, h)
+                    e.d32(0x30, e.g32(0x2C) & 0xFFFFFFFF)
+                if wts < 0x5A:                     # 0x40F9FD 三段速度（每帧只走一支）
+                    e.d32(0x2C, 0xFFE00000)
+                elif wts < 0xB4:
+                    e.d32(0x2C, 0x400020)
+                elif wts < 0x10E:
+                    e.d32(0x2C, 0xFFE0FFE0)
+                else:                              # 0x40FA33 wt≥0x10E
+                    e.d32(0x2C, e.g32(0x30) & 0xFFFFFFFF)
+                    if st == 3:
+                        e.d32(0x1C, 4)             # 0x40FA41
+                    else:
+                        w22 = (e.g16(0x22) + 1) & 0xFFFF
+                        e.d16(0x22, w22)
+                        # 0x40FA51 neg/sbb **全 eax**：w22−6==0 → 0 → +0xC = 0xC；
+                        # 否则 eax=−1 → and al,0xFD=0xFFFFFFFD → +0xC 截断 = **9**（非 0x109）
+                        e.d32(0x1C, 0xC if (w22 - 6) == 0 else 9)
         elif st == 4:                              # 0x40FA6B
             if wts == 0x50:
                 e.d32(0x1C, 5)
-        elif st == 6:                              # 0x40FA82 死亡演出
+        elif st == 6:                              # 0x40FA82：wt==0xF0 → w22++ → 3?8:1（回环）
+            if wt == 0xF0:
+                w22 = (e.g16(0x22) + 1) & 0xFFFF
+                e.d16(0x22, w22)
+                # 0x40FA90 neg/sbb 全 eax：w22−3==0 → +8 = 8；否则 0xFFFFFFF9+8 = **1**
+                e.d32(0x1C, 8 if (w22 - 3) == 0 else 1)
+        elif st == 7:                              # 0x40FAAA 死亡演出（HP==0 尾部置态7）
             if wt == 0x78:
-                self.spawn(self._p4_q("ui4cc"), 0x23000019, x0, y0, 0x40)
-                return False
-            self.spawn(self._p4_q("ui4cc"), 0x23000019, x0, wt, 0x48)
-            self.spawn(self._p4_q("ui4cc"), 0x23000019, x0, wt, 0)
-        elif st == 7:                              # 0x40FAAA
-            if wts == 0x5A:
-                e.d32(0x1C, 8)
+                self.p4_43a700(x0, y0, 0x40, 0)    # 0x40FABC 0x4015BE → 0x43A700
+                return False                       # 0x40FACD
+            # 0x40FAD4/0x40FAEC：0x43A520(q, x, y, wt, 0x48[, flag]) ×2
+            q = self._p4_q("ui4cc")
+            self.p4_43a520(q, x0, y0, wts, 0x48, 0)
+            self.p4_43a520(q, x0, y0, wts, 0x48, 0)
         elif st == 8:                              # 0x40FB09
-            if e.g16(0x20) == 0x5A:
+            if wt == 0x5A:
                 e.d32(0x1C, 9)
         elif st == 12:                             # 0x40FB19
             if e.g16(0x20) == 0x16A:
