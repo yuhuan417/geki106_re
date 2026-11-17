@@ -18477,12 +18477,14 @@ class Page4Mixin:
             n = (self.p4_stat.get(m + 0x28, 0) + 1) & 0xFFFF    # 0x45F175
             self.p4_stat[m + 0x28] = n
             if n >= 0x32:                                       # 0x45F17D
-                self.spawn(self._p4_q("ui49c"), 0x32000004, arg2, arg3, 0)   # 0x45F194
+                # 0x45F183..0x45F1B3：rec=(edi=arg3, esi=arg4) ⇒ 用**第 3/4 参数**当坐标
+                self.spawn(self._p4_q("ui49c"), 0x32000004, arg3, arg4, 0)
                 self.p4_stat[m + 0x28] = 0                      # 0x45F1C6
             if self.p4_stat.get(m + 0x2A, 0) & 0xFF:            # 0x45F1CF
                 self.p4_stat[0x56CCB0] = (self.p4_stat.get(0x56CCB0, 0) + 1) & 0xFFFF   # 0x45F1D3
-                # 0x45F1DA..0x45F1FB 造 0x32000005 并入队；因该区间线性反汇编失步，
-                # 入队目标队列尚未确认，故暂不生成实体（§15）。
+                # 0x45F1DA..0x45F20C：rec=(arg3,arg4)、type=0x32000005、队列 0x4AD49C
+                self.spawn(self._p4_q("ui49c"), 0x32000005, arg3, arg4, 0)
+                self.p4_stat[m + 0x2A] = 0                      # 0x45F20C
         self.p4_stat[m + 0x04] = (self.p4_stat.get(m + 0x04, 0) + eb) & 0xFFFFFFFF   # 0x45F252
         self.p4_stat[m + 0x14] = (self.p4_stat.get(m + 0x14, 0) + eb) & 0xFFFFFFFF   # 0x45F25E
         # 0x45F25C：分数超过阈值 → 重建 HUD 缓冲并推进阈值档位
