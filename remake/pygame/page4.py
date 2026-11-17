@@ -15540,6 +15540,14 @@ def _beh_44AE00(self, e) -> bool:
     return True
 
 
+def _p4_mod_div(v: int) -> int:
+    """`idiv` 除数：按有符号解释，0 时返回 1（exe 此处会除零；原件靠 [0x20] 未到 0）。"""
+    v &= 0xFFFFFFFF
+    if v & 0x80000000:
+        v -= 0x100000000
+    return v if v else 1
+
+
 def _p4_div54(v: int) -> int:
     """`(v * 0x4BDA12F7) >> 36`（有符号 64 位乘、算术右移）：段高 ≈ 54.05px。"""
     v &= 0xFFFFFFFF
@@ -15669,6 +15677,75 @@ def _beh_425CD0(self, e) -> bool:
     return True
 
 
+def _beh_438B20(self, e) -> bool:
+    """`0x438B20`（0x49000005 大爆炸/狙击源，thunk 0x4023BF）：
+
+    ```
+    0x438B28 t=++[+0x1C]
+    0x438B31 t&1 → node.dst.x-=1、node.dst.y+=1（抖动）
+    0x438B48 t==0xEF → 0x61000005 @(0,0xFF) prm=0x10 入 ui52c
+    0x438B8A n=(t>>2)&7；t&0x1C≠0 时循环 n 次：
+             o1=rand%0x40-0x1F、o2 同；x=dst.x+rand%0xC0、y=dst.y+rand%[+0x20]
+             0x41000004 @(x,y) prm=(o1,o2)
+    0x438C48 (t&0xF)==0xF → 0x41000001 @(dst.x+rand%0xC0, dst.y+rand%[+0x20])
+    0x438CCD (t&0x1F)==0x1F：
+            rect.l==0xF0 → 0x45A790(node+4, 0xC0,0,0xC0,0)（l/r 各 +0xC0）
+            否则 rect=(l-0xC0, t+[+0x20], r-0xC0, b+[+0x20]-0x30)；
+                 dst.y+=0x30；[+0x20]-=0x30
+    0x438D62 (t&7)==7 → SE 4，pan=(rand&0x3FFF)-0x2000
+    0x438D88 [+0x24]≠0 且 (t&1)==0：
+            dx=rand%0x280-x、dy=rand%0x1E0-y；0x45AC70(&dx,&dy,0x400) 变速度对
+            两者为 0 → 跳过；否则 x-=1、y+=1、0x31000001 @旧(x,y) prm=速度对 入 ui49c
+    0x438E35 return 1
+    ```
+    """
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if e.node is not None and (t & 1):
+        e.node.dst = (e.node.dst[0] - 1, e.node.dst[1] + 1)
+    if t == 0xEF:
+        self.spawn(self._p4_q("ui52c"), 0x61000005, 0, 0xFF, 0x10)
+    rng = e.s32(0x20)
+    if (t & 0x1C) != 0:
+        for _ in range((t >> 2) & 7):
+            o1 = (self.p4_rand() & 0x3F) - 0x1F
+            o2 = (self.p4_rand() & 0x3F) - 0x1F
+            mx = self.p4_rand() % _p4_mod_div(rng)
+            my = self.p4_rand() % 0xC0
+            if e.node is not None:
+                self.spawn(self._p4_q("ui4cc"), 0x41000004,
+                           e.node.dst[0] + my, e.node.dst[1] + mx, (o1, o2))
+    if (t & 0xF) == 0xF:
+        mx = self.p4_rand() % _p4_mod_div(rng)
+        my = self.p4_rand() % 0xC0
+        if e.node is not None:
+            self.spawn(self._p4_q("ui4cc"), 0x41000001,
+                       e.node.dst[0] + my, e.node.dst[1] + mx)
+    if (t & 0x1F) == 0x1F:
+        if e.node is not None:
+            r = e.node.rect
+            if r[0] == 0xF0:
+                e.node.rect = (r[0] + 0xC0, r[1], r[2] + 0xC0, r[3])
+            else:
+                e.node.rect = (r[0] - 0xC0, r[1] + rng, r[2] - 0xC0, r[3] + rng - 0x30)
+                e.node.dst = (e.node.dst[0], e.node.dst[1] + 0x30)
+        e.d32(0x20, (rng - 0x30) & 0xFFFFFFFF)
+    if (t & 7) == 7:
+        self.p4_se_pan(4, (self.p4_rand() & 0x3FFF) - 0x2000)
+    if e.s32(0x24) != 0 and (t & 1) == 0:
+        x = e.s32(0x04)
+        y = e.s32(0x08)
+        dx = (self.p4_rand() % 0x280) - x
+        dy = (self.p4_rand() % 0x1E0) - y
+        a1 = [dx]                                    # arg1 = dx（列）
+        a2 = [dy]                                    # arg2 = dy（行）
+        if self._p4_ac70_raw(a1, a2, 0x400):         # 0x45AC70：方向定长 0x400
+            e.d32(0x04, (x - 1) & 0xFFFFFFFF)
+            e.d32(0x08, (y + 1) & 0xFFFFFFFF)
+            self.spawn(self._p4_q("ui49c"), 0x31000001, x, y, (a1[0], a2[0]))
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15703,6 +15780,7 @@ P4_BEH: dict[int, object] = {
     0x425C10: _beh_425C10,                          # 0x5F 键位十位
     0x425960: _beh_425960,                          # 0x5F 说明行
     0x425CD0: _beh_425CD0,                          # 0x5F 3 值窗
+    0x438B20: _beh_438B20,                          # 0x49000005 大爆炸
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
