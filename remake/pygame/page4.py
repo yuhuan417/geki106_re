@@ -1067,10 +1067,18 @@ class Ent:
         if info.get("s2c05"):                          # 0x403C31：0x2C000005
             self.d32(0x18, 1)
             self.m[0x10] = 1
+            # 0x403C51 movsx word[rec+0xC] → [+0x1C]；0x403C5A movsx word[rec+0xE] → [+0x20]
+            _dw = d & 0xFFFFFFFF
+            _lo = _dw & 0xFFFF
+            _hi = (_dw >> 16) & 0xFFFF
+            self.d32(0x1C, (_lo - 0x10000 if _lo & 0x8000 else _lo) & 0xFFFFFFFF)
+            self.d32(0x20, (_hi - 0x10000 if _hi & 0x8000 else _hi) & 0xFFFFFFFF)
             self.d32(0x24, (a << 8) & 0xFFFFFFFF)
             self.d32(0x28, (b << 8) & 0xFFFFFFFF)
             if self.node is not None:
                 self.node.dst = (a - 0x18, b - 0x18)
+        if info.get("s20_seed"):                       # 0x403AC4（0x2C000001）
+            self.d32(0x20, ((((a & 0xFFF) | 0xFFFA0000) << 4)) & 0xFFFFFFFF)
         if info.get("s2907"):                          # 0x41C16E：0x29000007..0B 共用
             tgt = self._deref_link(d) if d else None
             if a != 0:                                  # rec0 != 0：普通僚机
@@ -2721,15 +2729,18 @@ ENT2A_INIT = {
 # 0x2C 族（最终关前半）ctor case 表（0x403AA0，跳表 0x4044D8，20 型）——2026-11-06 读定
 # case7/14/15 跳表项 0 = 无 ctor；多数有 d_to=[0x1C]
 ENT2C_INIT = {
+    # 0x403AC4：[+0x20] = ((x & 0xFFF) | 0xFFFA0000) << 4（打包的入场位置种子）
     0x2C000001: {"beh": 0x401B9F, "imm": {0x0C: 0x60, 0x18: 0x12C0},
-                 "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True},
+                 "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True,
+                 "s20_seed": True},
     0x2C000002: {"beh": 0x401712, "imm": {0x0C: 0x60, 0x18: 0x12C0}, "d_to": 0x1C,
                  "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True},
     0x2C000003: {"beh": 0x401E33, "imm": {0x0C: 0x60, 0x18: 0x960}, "d_to": 0x1C,
                  "node": (2, 0, 0, 0xBF, 0xBF), "dst": (0, 0), "b10_1": True},
     0x2C000004: {"beh": 0x401A55, "imm": {0x0C: 0x18, 0x18: 0x100, 0x20: -0x2F,
                                           0x24: 0x11, 0x28: 0}, "d_to": 0x1C,
-                 "node": (2, 0xC0, 0x30, 0xEF, 0x5F), "dst": (0, 0), "b10_1": True},
+                 # 0x403BF3 压栈 0xEF,0xEF,0xC0,0xC0 ⇒ rect (0xC0,0xC0,0xEF,0xEF)
+                 "node": (2, 0xC0, 0xC0, 0xEF, 0xEF), "dst": (0, 0), "b10_1": True},
     0x2C000005: {"beh": 0x40101E, "imm": {0x0C: 0x18}, "s2c05": True,
                  "node": (2, 0xC0, 0x30, 0xEF, 0x5F), "dst": (0, 0), "b10_1": True},
     0x2C000006: {"beh": 0x401EE7, "imm": {0x0C: 0x18, 0x18: 0x20, 0x1C: -0x618},
