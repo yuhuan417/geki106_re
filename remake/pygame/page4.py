@@ -15174,6 +15174,32 @@ def _beh_438F80(self, e) -> bool:
     return t <= 0x30
 
 
+def _beh_439420(self, e) -> bool:
+    """`0x439420`（0x4A000005，thunk 0x401AB4）：扩散环——每帧 rect 左右各 +0x10、
+    自身按 [+0x20]/[+0x24] 漂移；左边界到 0xF0 即消失。
+
+    ```
+    0x439423 t=[+0x1C]；[+0x1C]=t+1；0x43942E t==0 → 跳过扩边
+    0x439433 0x45A790(node+4, 0x10,0,0x10,0) → rect.l/r += 0x10
+    0x43944A x += [+0x20]；0x439457 y += [+0x24]；dst=(x-8, y-8)
+    0x439480 cmp [node+4],0xF0 ; setne
+    ```
+    """
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t != 0 and e.node is not None:
+        r = e.node.rect
+        e.node.rect = (r[0] + 0x10, r[1], r[2] + 0x10, r[3])
+    x = (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF
+    y = (e.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 8, e.s32(0x08) - 8)
+        return e.node.rect[0] != 0xF0
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15193,6 +15219,7 @@ P4_BEH: dict[int, object] = {
     0x438840: _beh_438840,                          # 0x48000008 四角拖尾
     0x438F10: _beh_438F10,                          # 0x49000006 闪烁壳
     0x438F80: _beh_438F80,                          # 0x49000007 闪烁壳（dst 下移）
+    0x439420: _beh_439420,                          # 0x4A000005 扩散环
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
