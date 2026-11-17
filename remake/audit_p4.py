@@ -1325,7 +1325,26 @@ def main():
         def p4_se_pan(self, se, pan):
             self.calls.append(("SE", se, pan))
         def _p4_q(self, n):
-            return n
+            # 既能当队列名传给 spawn(*a)，也能承接直接 .append(实体) 的生成点；
+            # 后者记成 (队列名, 实体 type)，与下面的断言口径一致。
+            z = self
+
+            class _Q(str):
+                def __new__(cls, name):
+                    o = str.__new__(cls, name)
+                    o.name = name
+                    return o
+
+                def append(self, e):
+                    try:
+                        tw = e.s32(0x14)
+                    except Exception:
+                        tw = 0
+                    z.calls.append((self.name, tw,
+                                    e.s32(0x04), e.s32(0x08),
+                                    e.s32(0x20) if hasattr(e, "s32") else 0))
+
+            return _Q(n)
         def spawn(self, *a):
             self.calls.append(a)
         def spark_spawn(self, x, y, ax, ay):
@@ -1393,7 +1412,22 @@ def main():
             self.mirror = {"x": 0, "y": 0}      # p4_player_pos property 的真身
             self.inp = _IN2()
         def _p4_q(self, n):
-            return n
+            # 队列名（可直接传给 spawn）且支持直接 .append(e)，记成 (名, type)
+            z = self
+            class _Q(str):
+                def __new__(cls, name):
+                    o = str.__new__(cls, name)
+                    o.name = name
+                    return o
+                def append(self, e):
+                    try:
+                        tw = e.s32(0x14)
+                    except Exception:
+                        tw = 0
+                    z.calls.append((self.name, tw,
+                                    e.s32(0x04), e.s32(0x08),
+                                    e.s32(0x20) if hasattr(e, "s32") else 0))
+            return _Q(n)
         def spawn(self, *a):
             self.calls.append(a)
         def p4_se_pan(self, *a):
@@ -3159,7 +3193,22 @@ def main():
                                 0x4CD590 + 0x30: v}
                 self.calls = []
             def _p4_q(self, n):
-                return n
+                # 队列名（可直接传给 spawn）且支持直接 .append(e)，记成 (名, type)
+                z = self
+                class _Q(str):
+                    def __new__(cls, name):
+                        o = str.__new__(cls, name)
+                        o.name = name
+                        return o
+                    def append(self, e):
+                        try:
+                            tw = e.s32(0x14)
+                        except Exception:
+                            tw = 0
+                        z.calls.append((self.name, tw,
+                                    e.s32(0x04), e.s32(0x08),
+                                    e.s32(0x20) if hasattr(e, "s32") else 0))
+                return _Q(n)
             def spawn(self, *a):
                 self.calls.append(a)
         return _R()
@@ -3246,7 +3295,22 @@ def main():
         def __init__(self):
             self.calls = []
         def _p4_q(self, n):
-            return n
+            # 队列名（可直接传给 spawn）且支持直接 .append(e)，记成 (名, type)
+            z = self
+            class _Q(str):
+                def __new__(cls, name):
+                    o = str.__new__(cls, name)
+                    o.name = name
+                    return o
+                def append(self, e):
+                    try:
+                        tw = e.s32(0x14)
+                    except Exception:
+                        tw = 0
+                    z.calls.append((self.name, tw,
+                                    e.s32(0x04), e.s32(0x08),
+                                    e.s32(0x20) if hasattr(e, "s32") else 0))
+            return _Q(n)
         def spawn(self, q, t, x, y, extra=None):
             self.calls.append((t, x, y, extra))
     _st = _Stub()
