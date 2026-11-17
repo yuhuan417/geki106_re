@@ -12435,8 +12435,8 @@ def _beh_447410(self, e) -> bool:
     # ★ 2026-11-17 校定：0x4AB596 是“**任意攻击键按住**”的布尔（0x44E7CF `[edi+0xA]=al`，
     # al = 三个动作键的 OR），0x4AB597 是“**当前按键码**”（0x44E9F6..0x44EA08
     # `[edi+0xB]=eax+0x20`，按键码 0x20..0x2F，未按=0）。二者都**不是**按下沿。
-    b0e = bool(getattr(self.inp.rec, "b0", 0) or getattr(self.inp.rec, "b1", 0))
-    b1e = bool(getattr(self.inp.rec, "key", 0))
+    b0e = self.p4_btn0_edge()                          # 0x4AB596
+    b1e = self.p4_btn1_edge()                          # 0x4AB597
     if b0e:                                           # 0x447422
         e.d32(0x20, 0)
     if b1e:                                           # 0x44742D
@@ -12529,7 +12529,7 @@ def p4_laser(self, e, variant: str) -> bool:
         if e.g32(0x20) == 0:                                     # 0x446E40
             fire(0, 1)
             e.d32(0x20, 1)                                       # 0x446E8E
-        if self.p4_key_held() and self.p4_stat.get(0x56CCA0, 0):
+        if self.p4_btn1_edge() and self.p4_stat.get(0x56CCA0, 0):
             self.p4_stat[0x56CC94] = 1                           # 0x446EB0
             if self.p4_stat.get(0x56CC98, 0) == self.p4_stat.get(0x56CCA0, 0):
                 raise_floor(0x3C)                                # 0x446EBE
@@ -12540,7 +12540,7 @@ def p4_laser(self, e, variant: str) -> bool:
         if e.g32(0x20) == 0:                                      # 0x447220
             fire(0, 1)                                            # 0x447263
             e.d32(0x20, 1)                                        # 0x44726E
-        if self.p4_key_held() and self.p4_stat.get(0x56CCA0, 0):  # 0x44727C..0x447288
+        if self.p4_btn1_edge() and self.p4_stat.get(0x56CCA0, 0):  # 0x44727C..0x447288
             self.p4_stat[0x56CC94] = 1                            # 0x447290
             if self.p4_stat.get(0x56CC98, 0) == self.p4_stat.get(0x56CCA0, 0):
                 raise_floor(0x3C)                                 # 0x4472A7
@@ -12549,7 +12549,7 @@ def p4_laser(self, e, variant: str) -> bool:
         return bool(sub is not None and sub.g32(0x34))            # 0x4472D2
 
     if variant == "kb_c50":                                       # 0x447000（键盘撃）
-        if self.p4_key_held():                                   # 0x4AB597
+        if self.p4_btn1_edge():                                   # 0x4AB597
             fire(1, 1)                                            # 0x447052
             # 0x44705E 0x40164F→0x45F530(0x4CD4A0,0)：ax=0 ⇒ byte[+0x2A]=0 清连击
             self.p4_stat[0x4CD4A0 + 0x2A] = 0
@@ -12568,7 +12568,7 @@ def p4_laser(self, e, variant: str) -> bool:
     if variant in ("kb_d30", "kb_f10"):                           # 0x447110 / 0x447320
         if variant == "kb_f10":
             self.p4_stat[0x56CC94] = 1                            # 0x447331 入口置位
-        btn = self.p4_key_held()
+        btn = self.p4_btn1_edge()
         if self.p4_stat.get(0x56CC98, 0):                         # 0x44712A / 0x447341 屏蔽
             btn = False
         if btn:
@@ -12584,7 +12584,7 @@ def p4_laser(self, e, variant: str) -> bool:
                 e.d32(0x20, 0)                                    # 0x4471BA / 0x4473C5
         return bool(sub is not None and sub.g32(0x34))            # 0x4471C1 / 0x4473CC
 
-    btn = self.p4_key_held()                                    # 0x4AB597 按下沿
+    btn = self.p4_btn1_edge()                                    # 0x4AB597 按下沿
     if variant in ("d30", "f10") and s98:                        # 0x446D43 / 0x446F2A
         btn = False
     if variant == "f10":
@@ -19988,16 +19988,16 @@ class Page4Mixin:
         return bool(self.p4_in_bits() & 1)
 
     def p4_btn0_edge(self) -> bool:
-        """`byte[0x4AB596]`：**任意动作键按住**（不是按下沿）。
+        """`byte[0x4AB596]`：**按下沿**（输入记录 `rec.e0`）。
 
-        反汇编证据（2026-11-17）：`0x44E7CF mov [edi+0xA], al`，`al` 由 `0x44E7A5..0x44E7C8`
-        对三处 DIK 状态取 OR；记录基址 +0xA = `0x4AB596`。见 ANALYSIS §16.444。
+        ⚠ 2026-11-17 实机回归：把它改成“任意动作键按住”后，页4 的开场/结算状态机
+        （`0x443716` 的“按攻击开始”）与武器门都会**每帧**成立，狙击被每帧重造
+        ⇒ 只剩锁定框、不出束。实机确认“按下沿”才是可用语义，故回退。
         """
         import os as _o
         if _o.environ.get("P4_AUTOKEY") and getattr(self, "p4_frames", 0) >= 240:
             return True
-        r = self.inp.rec
-        return bool(getattr(r, "b0", 0) or getattr(r, "b1", 0))
+        return bool(getattr(self.inp.rec, "e0", 0))
 
     def p4_key_held(self) -> bool:
         """`byte[0x4AB597]`：**当前按键码非 0**（0x44E9F6..0x44EA08 写入 `eax+0x20`，
@@ -20005,8 +20005,8 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "key", 0))
 
     def p4_btn1_edge(self) -> bool:
-        """`byte[0x4AB597]`：**当前按键码非 0**（不是按下沿）；等价于 `p4_key_held()`。"""
-        return self.p4_key_held()
+        """`byte[0x4AB597]`：**按下沿**（`rec.e1`）。理由同 `p4_btn0_edge`（实机回归）。"""
+        return bool(getattr(self.inp.rec, "e1", 0))
 
     def p4_btn1_release(self) -> bool:
         """`byte[0x4AB599]`：btn1 **松开沿**（输入记录第 6 字节，`rec.r1`）。"""

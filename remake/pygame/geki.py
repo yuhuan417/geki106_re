@@ -904,12 +904,9 @@ class Input:
             # ★ 0x4AB597 在页4 是**每帧轮询的按住键码**（0x44E9F6..0x44EA08 扫 DIK 状态后
             #   写 `eax+0x20`），不是"按下沿一次性门"。上面的 one-shot 门只属于菜单
             #   （0x4AB59A 语义），若沿用会让狙击/捕获在按住的第二帧就失去键码 ⇒ 武器"消失"。
-            # ★ 只算**动作键**：0x44E9FC 扫的是 16 项“键位分配表”（动作槽），
-            #   方向键不写 [0x4AB597]；若把方向也当键码，会误触 0x443779 的
-            #   “任意键 → flags 0x200”（开场/结算里就是“按别的键退出”）。
-            held = bool(b0 or b1)
-            held_key = (keycode & 0xFFFFFFFF) if keycode else (0x20 if held else 0)
-            r2 = self._build_p4(keys, mouse_delta, held_key)
+            # 页4 沿用 one-shot 键码（实机回归：改成“按住”会让开场状态机 0x443779 的
+            # “别的键 → flags 0x200”与武器门每帧成立，狙击只剩锁定框）。
+            r2 = self._build_p4(keys, mouse_delta, keycode)
             r2.b0, r2.b1 = b0, b1
             r2.e0, r2.e1 = r.e0, r.e1
             r2.r0, r2.r1 = r.r0, r.r1
