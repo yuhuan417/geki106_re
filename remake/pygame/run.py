@@ -151,28 +151,15 @@ def main(argv: list[str] | None = None) -> int:
     aud = audio_mod.Audio(enabled=not args.mute)
     print(f"[audio] {aud.reason}", flush=True)
     pages = geki.Pages(data, palette, text, canvas, inp, timer, flags, aud)
-    pages.start(args.page)
 
-    out_dir = Path(args.out)
-    shot_frames: set[int] = set()
-    if args.shot >= 0:
-        shot_frames.add(args.shot)
-    for tok in args.shots.split(","):
-        tok = tok.strip()
-        if tok:
-            shot_frames.add(int(tok))
-    if shot_frames:
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-    frame = 0
-    running = True
-    pend_dx = pend_dy = 0          # 自上一"帧"以来累积的鼠标位移
-    pend_key = 0                   # 自上一帧以来最后一次映射到的键码
-    pend_shot = pend_lock = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
-    pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
-    _t_last = time.perf_counter()
-    while running and pages.page != 0 and not pages.quit:
-        # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
+    # ---- 输入泵（0x458B80 + 0x44EB60 的等价物）---------------------------
+    # 主循环每轮泵事件；只有到期帧才建记录（Input.build 会推进"上帧状态"，
+    # 非到期帧建记录会把按下沿吃掉）。0x451630 继续提示循环每次迭代都要
+    # "泵事件 + 建记录"（0x4516C1 → 0x44EB60），由 pages.frame_input 钩子驱动。
+    def _pump_events(full: bool) -> int:
+        """泵一轮事件。full=False（intro 循环内）跳过调试键，防止重入切页。"""
+        nonlocal pend_dx, pend_dy, pend_key, pend_shot, pend_lock, pend_dir
+        nonlocal running, _grab, _abs_mouse
         keycode = 0
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
@@ -191,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                     pend_dir["up"] += 1
                 elif ev.key == pygame.K_DOWN:
                     pend_dir["down"] += 1
+                if not full:
+                    continue
                 if ev.key == pygame.K_1:
                     pages.finish(); pages.page = 1; pages.enter()
                 elif ev.key == pygame.K_2:
@@ -217,7 +206,6 @@ def main(argv: list[str] | None = None) -> int:
                 if not _grab:
                     pend_dx += ev.rel[0]
                     pend_dy += ev.rel[1]
-
         if _grab:
             # 位移 = **本次位置 − 上次位置**（纯绝对坐标差分，符号天然正确，且不会因 warp 回弹抖动）。
             # 只在接近窗口边缘时才把光标弹回中心一次（原作 0x454759 的 SetCursorPos 作用等价），
@@ -230,10 +218,12 @@ def main(argv: list[str] | None = None) -> int:
                 pend_dx += _mx - _abs_mouse[0]
                 pend_dy += _my - _abs_mouse[1]
                 _abs_mouse[0], _abs_mouse[1] = _mx, _my
-
         if keycode:
             pend_key = keycode
+        return keycode
 
+    def _build_record() -> None:
+        nonlocal pend_dx, pend_dy, pend_key, pend_shot, pend_lock, pend_dir
         keys = pygame.key.get_pressed()
         state = {
             # 慢帧（Python 渲染 0.3~0.7s/帧）时按住状态可能在两帧之间被跳过，
@@ -246,6 +236,44 @@ def main(argv: list[str] | None = None) -> int:
             "up": keys[pygame.K_UP] or pend_dir["up"] > 0,
             "down": keys[pygame.K_DOWN] or pend_dir["down"] > 0,
         }
+        _dx = -pend_dx if (args.inv_x or _inv_auto) else pend_dx
+        _dy = -pend_dy if (args.inv_y or _inv_auto) else pend_dy
+        inp.build(state, pygame.mouse.get_pressed(), (_dx, _dy), pend_key)
+        pend_dx = pend_dy = 0
+        pend_key = 0
+        pend_shot = pend_lock = False
+        for _k in pend_dir:
+            pend_dir[_k] = 0
+
+    def _frame_input() -> None:
+        """页4 0x451630 循环的每迭代输入钩子：泵事件 + 建记录（0x4516C1 → 0x44EB60）。"""
+        _pump_events(full=False)
+        _build_record()
+
+    pages.frame_input = _frame_input
+    pages.start(args.page)
+
+    out_dir = Path(args.out)
+    shot_frames: set[int] = set()
+    if args.shot >= 0:
+        shot_frames.add(args.shot)
+    for tok in args.shots.split(","):
+        tok = tok.strip()
+        if tok:
+            shot_frames.add(int(tok))
+    if shot_frames:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    frame = 0
+    running = True
+    pend_dx = pend_dy = 0          # 自上一"帧"以来累积的鼠标位移
+    pend_key = 0                   # 自上一帧以来最后一次映射到的键码
+    pend_shot = pend_lock = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
+    pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
+    _t_last = time.perf_counter()
+    while running and pages.page != 0 and not pages.quit:
+        # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
+        _pump_events(full=True)
 
         # ---- 帧门 0x45A5A0：到期才走一帧
         if args.fixed or timer.due():
@@ -254,14 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             # 0x44EB60 + 0x44E660：**每帧**建一次记录（原件在 step 开头做）。
             # 注意：不能放在帧门之外 —— Input.build 会推进按键的"上帧状态"，
             # 非到期帧也调用会把按下沿（e0/e1）吃掉，导致"按 C 没反应"。
-            _dx = -pend_dx if (args.inv_x or _inv_auto) else pend_dx
-            _dy = -pend_dy if (args.inv_y or _inv_auto) else pend_dy
-            inp.build(state, pygame.mouse.get_pressed(), (_dx, _dy), pend_key)
-            pend_dx = pend_dy = 0
-            pend_key = 0
-            pend_shot = pend_lock = False
-            for _k in pend_dir:
-                pend_dir[_k] = 0
+            _build_record()
             pages.advance()
             frame += 1
             # 活体指示：窗口模式每秒报一次帧率（不是原作内容，只用于排查"看着像卡住"）

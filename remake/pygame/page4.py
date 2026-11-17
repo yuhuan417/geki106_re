@@ -16299,16 +16299,16 @@ class Page4Mixin:
         # 旧实现 test(1) 反向 ⇒ 普通周目命数不显示（2026-11-06 修正）。
         if not self.keys.test(1):
             literals("A_flag")
-            # 0x450651 `push ebx`(ebx=0)=0x45AFC0 的 mask 实参（ret 4 消费）⇒ 之后
-            # esp=S-0xE8：[esp+0x29]=B+0x19=0x64、[esp+0x2A]=B+0x1A=6、
-            # [esp+0x22/24/26]=B+0x12/14/16(word 0)——与实机 rp_last.dat 头 +0x19/+0x1A 吻合。
+            # 0x450651..0x450681（普通局路径，栈模拟逐条核对）：
+            #   0x450657/0x450673 `mov word [esp+0x24],bx` = B+0x10 = 0（push ebx 期间写）
+            #   0x45066C [esp+0x22] = B+0x12 = 0；0x45067C [esp+0x26] = B+0x14 = 0
+            #   0x450665 `mov byte [esp+0x2A],6`（call 之后 esp 回落 4）= B+0x1A = 6（残机）
+            #   0x450678 `mov byte [esp+0x29],al` = B+0x19 = 0x64（继续门）
+            # **B+0x10（链索引）保持 rep stosd 清零值 = 0** —— 链 0 = (45,46,…,52)
+            # 八关主链（0x499798 原始表核对），链 0 耗尽由 0x450FE0 装链 9（流60=第8关）。
+            # 旧实现写 `esi*4+0xB`（链 11=单关+75 收尾回菜单）是错的：si/bp 分支
+            # （0x450686 起）只在鍛錬路径（0x45B030 返回 0）可达。
             blk[0x19] = 0x64
-            # 组号：exe 普通周目在 A_flag 早退路径不写 +0x10，靠 p4_enter 同深度栈残留
-            # 等效携带 `esi*4+0xB`（链索引步长 4：关1=11、关2=15…与 0x499798 链表吻合；
-            # 32 位 lea 经 load_chain 的 &0xFFFF 取低半）。复刻无栈残留可依赖 ⇒ 显式写入
-            # （旧实现缺这条 ⇒ +0x10 恒 0 ⇒ VM 装链 0=八关连打 ⇒ 无 Boss/无幕间牌，
-            # 流 46 直接跳流 47 —— 2026-11-14 修）。
-            put(0x10, ((si32 * 4 + 0x0B) & 0xFFFF))
             return blk
 
         name = "A" if (si < 8 and bp <= 3) else ("B" if si < 8 else "C")
@@ -16547,7 +16547,10 @@ class Page4Mixin:
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
         self.band_advance()                       # 0x456270（0x458EF0 内尾调）
         self._p4_dbg()
-        if self.p4_intro_gate:                    # S23 0x4514C3
+        if self.p4_intro_gate or self.p4_stat.get(0x56CCB4, 0):   # S23 0x4514C3
+            # 0x4514C3 读的是 **byte[0x56CCB4]**（0x423B7B 由继续总控 t=30 置 1），
+            # 不是进场用的属性位 —— 两者缺一不可：属性位管页机进场臂，
+            # 0x56CCB4 管死亡继续提示的 0x451630 循环。
             while self.p4_intro_frame():
                 pass
         return self.flags.is_empty()              # S24 0x4514E9
@@ -16571,9 +16574,20 @@ class Page4Mixin:
 
     # ---- 0x451630 -------------------------------------------------------
     def p4_intro_frame(self) -> bool:
-        """阶段首帧（`[0x56CCB4]` 门控）。返回 1 = 继续停在进场循环，0 = 进正常帧。"""
-        if self.p4_intro_gate:
-            self.p4_intro_gate = False            # 0x4516A3
+        """阶段首帧/继续提示帧（`[0x56CCB4]` 门控）。返回 1 = 停在本循环，0 = 进正常帧。
+
+        exe 的 `0x451630` 每次调用都是**一整帧**：0x4516C1 `0x44EB60` 每次重建输入记录
+        ——继续提示的按下沿靠它采样。复刻侧输入记录由运行器在 advance() 外建一次，
+        循环内必须经 `frame_input` 钩子重建，否则按下沿不在当前记录时会**无限空转**。
+        """
+        pump = getattr(self, "frame_input", None)
+        if pump is not None:
+            pump()                                # 0x4516C1 0x44EB60（每迭代一帧输入）
+        if self.p4_intro_gate or self.p4_stat.get(0x56CCB4, 0):   # 0x451638 门置位 → 进场设置
+            self.p4_intro_gate = False            # 0x4516A3（进场臂属性）
+            # 0x4516A3：byte[0x56CCB4]=0 —— 0x423B7B 置的门在首次进入本函数时清掉
+            # （0x451630 只在门置位时被 0x4514C3 调用，故"首次调用即清"等价）
+            self.p4_stat[0x56CCB4] = 0
             self.inp.set_preset(5)                # 0x451652 0x44E620(0x4AB454,5,0x140,0xF0,0)
             self.inp.set_pos(320, 240)
             # 0x45168E 0x44CDF0(0x4AA7B0,2,f(0xFE000000),f(0x1FC0000),0)：RT_STRING 2 = bm_pald
