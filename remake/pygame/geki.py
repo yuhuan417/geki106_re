@@ -901,7 +901,15 @@ class Input:
         r.r1 = (not b1) and self._prev[1]
         self._prev = (b0, b1)
         if self.p4_cfg is not None:              # 页4 预设管线（按键/按钮边沿公用上面这段）
-            r2 = self._build_p4(keys, mouse_delta, keycode)
+            # ★ 0x4AB597 在页4 是**每帧轮询的按住键码**（0x44E9F6..0x44EA08 扫 DIK 状态后
+            #   写 `eax+0x20`），不是"按下沿一次性门"。上面的 one-shot 门只属于菜单
+            #   （0x4AB59A 语义），若沿用会让狙击/捕获在按住的第二帧就失去键码 ⇒ 武器"消失"。
+            held = bool(b0 or b1)
+            if not held:
+                held = any(bool(keys.get(k)) for k in
+                           ("left", "right", "up", "down", "shot", "lock"))
+            held_key = (keycode & 0xFFFFFFFF) if keycode else (0x20 if held else 0)
+            r2 = self._build_p4(keys, mouse_delta, held_key)
             r2.b0, r2.b1 = b0, b1
             r2.e0, r2.e1 = r.e0, r.e1
             r2.r0, r2.r1 = r.r0, r.r1
