@@ -17569,8 +17569,30 @@ class Page4Mixin:
             print(f"[0x44FCC0] tempo={max(int(tempo), 1)}")
 
     def p4_45fa30(self) -> bool:
-        """`0x45FA30(0x4CD4A0)`：演出状态机判定（thunk 0x401A6E 的目标）。"""
-        return True
+        """`0x45FA30(0x4CD4A0)`（thunk 0x401A6E）：**分数是否超过排行参照行**。
+
+        ```
+        0x45FA36 al = 0x45AFF0(0x4AB5B0, 1)          ; bit0 鍛錬
+        0x45FA46 鍛錬 → row = movsx word[0x4CD4A0+0x24] − 1；普通 → row = 7
+        0x45FA5D eax = 0x45C740(0x4AB5CC, row)       ; 排行表该行分数
+        0x45FA69 cmp [esi+4](总得分), eax ; ja → 1
+        0x45FA6E byte[0x56CCB5]（回放页）非 0 → 1
+        否则 0
+        ```
+        （2026-11-18 勘误：此前恒 True 桩 ⇒ 0 分也弹名字输入；排行表为零时
+        exe 语义 = 总得分 > 0 才出。）
+        """
+        if self.keys.test(1):                          # 0x45FA36 鍛錬
+            row = (self.p4_stat.get(0x4CD4A0 + 0x24, 0) & 0xFFFF) - 1
+        else:
+            row = 7                                    # 0x45FA4D
+        tbl = self.p4_45c740_score(row) if row >= 0 else 0
+        score = self.p4_stat.get(0x4CD4A0 + 4, 0) & 0xFFFFFFFF
+        if score > (tbl & 0xFFFFFFFF):                 # 0x45FA69 ja
+            return True
+        if self.p4_stat.get(0x56CCB5, 0):              # 0x45FA6E 回放页
+            return True
+        return False                                   # 0x45FA77
 
 
     def _p4_tick_4cc(self) -> None:
