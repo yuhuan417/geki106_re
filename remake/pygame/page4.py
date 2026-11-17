@@ -15200,6 +15200,26 @@ def _beh_439420(self, e) -> bool:
     return True
 
 
+def _beh_44AF60(self, e) -> bool:
+    """`0x44AF60`（0x5C000002，thunk 0x401B6D）：**节点镜像**——每帧把父实体的显示节点
+    rect/dst 原样拷给自己，存活 = 父 `byte[+0x34]`。
+
+    ```
+    0x44AF60 p = [+0x1C]（父指针）；0x44AF64 src = p[+0x38]+4；0x44AF67 dst = e[+0x38]+4
+    0x44AF70..0x44AF83 拷 rect 4 dword（+4..+0x10）
+    0x44AF8F..0x44AF99 拷 dst 2 dword（+0x14/+0x18）
+    0x44AF9F al = p[+0x34]（调用方只测 al）
+    ```
+    """
+    p = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    if p is None:
+        return False
+    if p.node is not None and e.node is not None:
+        e.node.rect = tuple(p.node.rect)
+        e.node.dst = tuple(p.node.dst)
+    return p.m[0x34] != 0
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15220,6 +15240,7 @@ P4_BEH: dict[int, object] = {
     0x438F10: _beh_438F10,                          # 0x49000006 闪烁壳
     0x438F80: _beh_438F80,                          # 0x49000007 闪烁壳（dst 下移）
     0x439420: _beh_439420,                          # 0x4A000005 扩散环
+    0x44AF60: _beh_44AF60,                          # 0x5C000002 节点镜像
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
