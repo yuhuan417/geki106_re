@@ -15490,6 +15490,56 @@ def _beh_438240(self, e) -> bool:
     return True
 
 
+def _beh_438110(self, e) -> bool:
+    """`0x438110`（0x4F000001 调整网格砖，thunk 0x401924）：矩形摆动（X 周期 0x78、Y 周期 0x50）。
+
+    ```
+    0x438113 [+0x1C] += [+0x24]；[+0x20] += [+0x28]
+    X 越界：>=0x3C → −0x78；< −0x3C → +0x78
+    Y 越界：>=0x28 → −0x50；< −0x28 → +0x50
+    0x438165 dst = (x + [+0x1C] - 0x3C, y + [+0x20] - 0x28)
+    0x45A690 只是把两个参数原样返回（不是减半尺寸）
+    ```
+    """
+    vx = (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF
+    vy = (e.s32(0x20) + e.s32(0x28)) & 0xFFFFFFFF
+    if vx & 0x80000000:
+        vx -= 0x100000000
+    if vy & 0x80000000:
+        vy -= 0x100000000
+    if vx >= 0x3C:
+        vx -= 0x78
+    elif vx < -0x3C:
+        vx += 0x78
+    if vy >= 0x28:
+        vy -= 0x50
+    elif vy < -0x28:
+        vy += 0x50
+    e.d32(0x1C, vx & 0xFFFFFFFF)
+    e.d32(0x20, vy & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) + vx - 0x3C, e.s32(0x08) + vy - 0x28)
+    return True
+
+
+def _beh_44AE00(self, e) -> bool:
+    """`0x44AE00`（0x5A000003，thunk 0x40141F）：扩散环（无位移，只有 rect.l/r 增长）。
+
+    ```
+    0x44AE03 t=[+0x1C]；[+0x1C]=t+1；t!=0 → 0x45A790(node+4, 0x10,0,0x10,0)
+    0x44AE2D return node[+4] != 0xF0
+    ```
+    """
+    t = e.s32(0x1C)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t != 0 and e.node is not None:
+        r = e.node.rect
+        e.node.rect = (r[0] + 0x10, r[1], r[2] + 0x10, r[3])
+    if e.node is not None:
+        return e.node.rect[0] != 0xF0
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15517,6 +15567,8 @@ P4_BEH: dict[int, object] = {
     0x439D30: _beh_439D30,                          # 0x4F00000A 螺旋漂移
     0x438070: _beh_438070,                          # 0x47000001 摆动壳
     0x438240: _beh_438240,                          # 0x48000001 受击壳
+    0x438110: _beh_438110,                          # 0x4F000001 摆动砖
+    0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
