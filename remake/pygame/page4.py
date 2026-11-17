@@ -12494,7 +12494,7 @@ def p4_laser(self, e, variant: str) -> bool:
         if e.g32(0x20) == 0:                                     # 0x446E40
             fire(0, 1)
             e.d32(0x20, 1)                                       # 0x446E8E
-        if self.p4_btn1_edge() and self.p4_stat.get(0x56CCA0, 0):
+        if self.p4_key_held() and self.p4_stat.get(0x56CCA0, 0):
             self.p4_stat[0x56CC94] = 1                           # 0x446EB0
             if self.p4_stat.get(0x56CC98, 0) == self.p4_stat.get(0x56CCA0, 0):
                 raise_floor(0x3C)                                # 0x446EBE
@@ -12505,7 +12505,7 @@ def p4_laser(self, e, variant: str) -> bool:
         if e.g32(0x20) == 0:                                      # 0x447220
             fire(0, 1)                                            # 0x447263
             e.d32(0x20, 1)                                        # 0x44726E
-        if self.p4_btn1_edge() and self.p4_stat.get(0x56CCA0, 0):  # 0x44727C..0x447288
+        if self.p4_key_held() and self.p4_stat.get(0x56CCA0, 0):  # 0x44727C..0x447288
             self.p4_stat[0x56CC94] = 1                            # 0x447290
             if self.p4_stat.get(0x56CC98, 0) == self.p4_stat.get(0x56CCA0, 0):
                 raise_floor(0x3C)                                 # 0x4472A7
@@ -12514,7 +12514,7 @@ def p4_laser(self, e, variant: str) -> bool:
         return bool(sub is not None and sub.g32(0x34))            # 0x4472D2
 
     if variant == "kb_c50":                                       # 0x447000（键盘撃）
-        if self.p4_btn1_edge():                                   # 0x4AB597
+        if self.p4_key_held():                                   # 0x4AB597
             fire(1, 1)                                            # 0x447052
             # 0x44705E 0x40164F→0x45F530(0x4CD4A0,0)：ax=0 ⇒ byte[+0x2A]=0 清连击
             self.p4_stat[0x4CD4A0 + 0x2A] = 0
@@ -12533,7 +12533,7 @@ def p4_laser(self, e, variant: str) -> bool:
     if variant in ("kb_d30", "kb_f10"):                           # 0x447110 / 0x447320
         if variant == "kb_f10":
             self.p4_stat[0x56CC94] = 1                            # 0x447331 入口置位
-        btn = self.p4_btn1_edge()
+        btn = self.p4_key_held()
         if self.p4_stat.get(0x56CC98, 0):                         # 0x44712A / 0x447341 屏蔽
             btn = False
         if btn:
@@ -12549,7 +12549,7 @@ def p4_laser(self, e, variant: str) -> bool:
                 e.d32(0x20, 0)                                    # 0x4471BA / 0x4473C5
         return bool(sub is not None and sub.g32(0x34))            # 0x4471C1 / 0x4473CC
 
-    btn = self.p4_btn1_edge()                                    # 0x4AB597 按下沿
+    btn = self.p4_key_held()                                    # 0x4AB597 按下沿
     if variant in ("d30", "f10") and s98:                        # 0x446D43 / 0x446F2A
         btn = False
     if variant == "f10":
@@ -19820,6 +19820,11 @@ class Page4Mixin:
             return True
         """`byte[0x4AB596]`：btn0 **按下沿**（输入记录第 3 字节，`rec.e0`）。"""
         return bool(getattr(self.inp.rec, "e0", 0))
+
+    def p4_key_held(self) -> bool:
+        """`byte[0x4AB597]`：**当前按键码非 0**（0x44E9F6..0x44EA08 写入 `eax+0x20`，
+        0x20..0x2F；未按键 = 0）。不是按下沿。"""
+        return bool(getattr(self.inp.rec, "key", 0))
 
     def p4_btn1_edge(self) -> bool:
         """`byte[0x4AB597]`：btn1 **按下沿**（输入记录第 4 字节，`rec.e1`）。"""
