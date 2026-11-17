@@ -16114,8 +16114,9 @@ class Page4Mixin:
         # 0x450A88..0x450AA1：0x458D60(App, a1..a4)（落点见 0x45EB7B/0x45EB95/0x460958/0x460961）
         #   a1=dword[blk+0x16] → 0x4CD4A0+0x2C（连击种子，取低字节）
         #   a2=word [blk+0x14] → 0x4CD4A0+0x30（倍率/本关帧数）
-        #   a3=sbyte[blk+0x1A] → 0x4CD590+0x30（关卡，0xFF=-1 ⇒ 关卡数字节点隐藏）
-        #   a4=sbyte[blk+0x19] → 0x4CD590+0x3C（倒数参数）
+        #   a3=sbyte[blk+0x1A] → 0x4CD590+0x30（**普通局 = 6 = 残机数**；A 分支写 0xFF ⇒ 隐藏）
+        #   a4=sbyte[blk+0x19] → 0x4CD590+0x3C（0x64 = 开场点击门）
+        #   ※ 关卡号不在这里：普通局的链号 = `si32*4+0xB`（关1=11、关2=15…，见 0x4506F1）
         self.p4_engine(self._p4_dword(b, 0x16), self._p4_sword(b, 0x14),
                        self._p4_sbyte(b, 0x1A), self._p4_sbyte(b, 0x19))
 
