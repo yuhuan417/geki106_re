@@ -15840,6 +15840,45 @@ def _beh_439F80(self, e) -> bool:
     return False
 
 
+def _beh_42F570(self, e) -> bool:
+    """`0x42F570`（0x10008431 捕获弹，thunk 0x401F28）：8.8 直线 + 尾迹 + 解锁捕获 pod。
+
+    ```
+    0x42F579 [+0x24] += [+0x2C]；[+0x28] += [+0x30]；x=[+0x24]>>8、y=[+0x28]>>8 → [+4]/[+8]
+    0x42F5A1 0x4305F0(e,0x20) 且 [+0x18]!=0 且 pod([+0x1C])[+0x34]!=0 → 存活分支
+    存活：0x430400(rec,x,0,0,0) → [+0x20] += 0xAC；循环 3 次：
+          y' = y + sin([+0x20])/10；cos([+0x20])<0 → 0x4100000F 入 4CC，否则 0x10000051 入 46C
+          [+0x20] += 0x4B0；return 1
+    否则：pod = [+0x1C]；pod[+0x28]==1 → pod[+0x28]=0（**解锁下一发**）；return 0
+    ```
+    """
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x2C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x30)) & 0xFFFFFFFF)
+    x = e.s32(0x24) >> 8
+    y = e.s32(0x28) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x, y)
+    pod = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
+    alive = (self.p4_4305f0(e, 0x20) and e.g32(0x18) != 0
+             and pod is not None and pod.g32(0x34) != 0)
+    if not alive:
+        if pod is not None and pod.g32(0x28) == 1:
+            pod.d32(0x28, 0)                      # 0x42F689 解锁
+        return False
+    e.d32(0x20, (e.g32(0x20) + 0xAC) & 0xFFFFFFFF)
+    ang = e.s32(0x20)
+    for _ in range(3):
+        yy = y + (page4_sin(ang) // 10)
+        if page4_cos(ang) < 0:
+            self.spawn(self._p4_q("ui4cc"), 0x4100000F, x, yy)
+        else:
+            self.spawn(self._p4_q("ui46c"), 0x10000051, x, yy)
+        ang = (ang + 0x4B0) & 0xFFFFFFFF
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15875,6 +15914,7 @@ P4_BEH: dict[int, object] = {
     0x425960: _beh_425960,                          # 0x5F 说明行
     0x425CD0: _beh_425CD0,                          # 0x5F 3 值窗
     0x438B20: _beh_438B20,                          # 0x49000005 大爆炸
+    0x42F570: _beh_42F570,                          # 0x10008431 捕获弹
     0x439F80: _beh_439F80,                          # 0x4D000002 砖墙环
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）

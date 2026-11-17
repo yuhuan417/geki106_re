@@ -3314,6 +3314,31 @@ class Pages(Page4Mixin):
                 e.disp.active = 1                          # 0x449AA3
             else:
                 e.beh = "default"
+        elif hi == 0x10000000:
+            # 0x42D780 的 0x10 族分支：0x10008431（捕获弹）ctor 0x42DA2B
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word == 0x10008431:
+                e.beh = 0x42F570
+                e.d32(0x0C, 0x18)                          # 0x42DA37 半径 24
+                e.raw[0x10] = 1                            # 0x42DA3E 参与碰撞
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)  # 0x42DA47 = rec[3]（pod）
+                e.d32(0x20, 0)                             # 0x42DA44
+                e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)    # 0x42DA4F
+                e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)    # 0x42DA62
+                if getattr(self, "keys", None) is not None and (self.keys.field(0xC000) & 3) == 3:
+                    import page4 as _p4m                      # 0x42DA7B..：选机 3 → 随机方向
+                    r = self.p4_rand()
+                    e.d32(0x2C, ((_p4m.page4_sin(r) * 20)) & 0xFFFFFFFF)
+                    e.d32(0x30, ((_p4m.page4_cos(r) * 20)) & 0xFFFFFFFF)
+                else:
+                    e.d32(0x2C, 0x1400)                    # 0x42DA6F
+                    e.d32(0x30, 0)                         # 0x42DA76
+                e.d32(0x18, 1)                             # 0x42DAB0 HP=1
+                e.disp = DisplayNode(0, [0, 0, 1, 1], [int(x), int(y)])
+            else:
+                e.beh = "default"
         else:
             e.beh = "default"                     # 0x43DA4F / 0x449AA7
         queue.append(e)
