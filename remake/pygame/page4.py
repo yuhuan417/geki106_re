@@ -19002,15 +19002,15 @@ class Page4Mixin:
         """`0x43AE60(e)`：**剩余血量层数**（0 = 无可扣）。
 
         ```
-        0x43AE60 if (word[0x56CCA8] <= [e+0x54]) → 0        ; 无敌/未到可伤时刻
+        0x43AE60 if (dword[0x56CCA8] <= [e+0x54]) → 0        ; 无敌/未到可伤时刻
         0x43AE6C if ([e+0x18] & 0xF0000000) → return 1 - [e+0x48]   ; 特化实体（负数/一次性）
         0x43AE84 H = ([e+0x18] + 0x3F) >> 6
         0x43AE8C if (H <= [e+0x48]) → 0
         0x43AE8E return H - [e+0x48]
         ```
         """
-        now = self.p4_frame_no() & 0xFFFF                    # word[0x56CCA8]（p4_frames 镜像）
-        if now <= (e.g32(0x54) & 0xFFFF):                    # 0x43AE68
+        now = self.p4_frame_no() & 0xFFFFFFFF                # 0x43AE60 `[0x56CCA8]` 是 **dword**
+        if now <= e.g32(0x54):                               # 0x43AE68 cmp/jbe（无符号 dword）
             return 0
         hp = e.g32(0x18)
         if hp & 0xF0000000:                                    # 0x43AE6F
@@ -21214,15 +21214,11 @@ class Page4Mixin:
         vy = ((inv * dy) * spd) >> 8                      # 0x43B0BD
         if vx == 0 and vy == 0:                           # 0x43B0C0
             return
-        eb = self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
-                        e.s32(0x04), e.s32(0x08), (vx, vy))     # 0x43B105 → 0x435440
-        if eb is not None:
-            eb.raw[0x10] = 1                           # 0x4306C0 碰撞参与位
-            eb.d32(0x14, self.p4_43B020(e) & 0xFFFFFFFF)  # 基础 ctor [+0x14]=类型
-            eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)         # [+0x04] = x
-            eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)         # [+0x08] = y
-            eb.d32(0x0C, 0x18)                             # [+0x0C] = 半径 24
-            self._p4_q("ui49c").append(eb)                 # 0x435440: 显式入队 0x4AD49C
+        # 0x43B0E6 0x430400(&rec, x, y, 0x43B020(e)) → 0x43B105 0x435440(0x4AD49C,&rec)：
+        # 0x435440 只做“节点分配 + 挂链”，实体字段由 ctor 决定（半径来自 P31_CTOR，
+        # 不是固定的 0x18）；队列追加由 spawn 完成，**不能再手动 append 一次**（否则同帧 tick 两遍）。
+        self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
+                   e.s32(0x04), e.s32(0x08), (vx, vy))       # 0x43B105 → 0x435440
 
     def _p4_43b_spawn(self, e, typ: int, tx: int, ty: int, arg: int) -> None:
         """`0x43B610`（0x401997）/`0x43B360`（0x401E56）共用体：**朝指定点**生成一枚
@@ -21239,14 +21235,8 @@ class Page4Mixin:
         vy = ((inv * dy) * spd) >> 8
         if vx == 0 and vy == 0:
             return
-        eb = self.spawn(self._p4_q("ui49c"), typ, e.s32(0x04), e.s32(0x08), (vx, vy))
-        if eb is not None:
-            eb.raw[0x10] = 1                              # 0x4306C0 碰撞参与位
-            eb.d32(0x14, typ & 0xFFFFFFFF)
-            eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
-            eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
-            eb.d32(0x0C, 0x18)                            # 半径 24
-            self._p4_q("ui49c").append(eb)
+        # 与 0x43B070 同一条 0x435440 挂链路径：字段由 ctor 定，队列只追加一次
+        self.spawn(self._p4_q("ui49c"), typ, e.s32(0x04), e.s32(0x08), (vx, vy))
 
     def p4_43B610(self, e, tx: int, ty: int, arg: int) -> None:
         """`0x43B610`（thunk 0x401997）：定点瞄准弹，弹型 0x43B5E0。"""
