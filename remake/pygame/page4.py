@@ -15095,6 +15095,41 @@ def _beh_4387D0(self, e) -> bool:
     return True
 
 
+def _beh_438840(self, e) -> bool:
+    """`0x438840`（0x48000008，thunk 0x4014E2）：拖尾节点 → 四角碎片 → 第 0x28 帧放 0x3100000E。
+
+    ```
+    0x438848 [+0x20]++；0x438854 node.active = ([+0x20] > 0xF)
+    0x43885D if [+0x1C] != 0 && 父[+0x34]==0 → [+0x1C]=0
+    0x438872 [+0x20]==1 → 4×0x48000007（rec0/rec1 = ±4 的四角组合）
+    0x438905 [+0x20]==0x28：若 [+0x1C]==0 → return 0；否则
+        SE 7 pan=(父.x-0x140)<<4；0x3100000E @(父.x,父.y) rec3=自身 → ui49c
+    0x438974 return ([+0x24]==1 && [+0x20] < 0x258)
+    ```
+    """
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)
+    if e.node is not None:
+        e.node.active = 1 if t > 0xF else 0
+    h = e.s32(0x1C)
+    pr = self.p4_links.get(h & 0x7FFFFFFF) if h else None
+    if h and (pr is None or pr.m[0x34] == 0):
+        e.d32(0x1C, 0)
+        pr = None
+    if t == 1:
+        for dx, dy in ((4, 4), (4, -4), (-4, -4), (-4, 4)):
+            self.spawn(self._p4_q("ui4cc"), 0x48000007, dx, dy, 0)
+    if t == 0x28:
+        if not h or pr is None:
+            return False
+        self.p4_se_pan(7, (pr.s32(0x04) - 0x140) << 4)
+        _h = id(e) & 0x7FFFFFFF
+        self.p4_links[_h] = e
+        self.spawn(self._p4_q("ui49c"), 0x3100000E,
+                   pr.s32(0x04), pr.s32(0x08), _h)
+    return e.s32(0x24) == 1 and t < 0x258
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15111,6 +15146,7 @@ P4_BEH: dict[int, object] = {
     0x438660: _beh_438660,                          # 0x48000004/05 摆动碎片
     0x438750: _beh_438750,                          # 0x48000006 跟随碎片（0xAA）
     0x4387D0: _beh_4387D0,                          # 0x48000007 直线漂移
+    0x438840: _beh_438840,                          # 0x48000008 四角拖尾
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
