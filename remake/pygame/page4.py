@@ -17483,15 +17483,20 @@ class Page4Mixin:
 
     def p4_collide_pair(self, qa, qb) -> int:
         """`0x43BFD0(qa, qb)`：外层取 arg2 的 `[+0x28]` 链表、内层取 arg1 的，
-        对每对 (a,b) 做 `0x4306C0(b, a[4], a[8], a[0xC])`，命中则 `0x43C170(this, b, a)`。"""
+        对每对 (a=内层, b=外层) 做 `0x4306C0(a, b[4], b[8], b[0xC])`（**内层半径 vs 外层坐标**），
+        命中则 `0x43C170(this, a, b)`。"""
         hits = 0
         if self.p4_sys_bits() & 2:                    # 0x43BFD4 0x45AFF0(0x56CCB8,2)
             return 0
         for a in list(qa):
             self._p4_set_col(a)
             for b in list(qb):
+                if not b.g32(0x10):            # 0x43BFFC `mov al,[esi+0x10]; test; je`
+                    continue
                 self._p4_set_col(b)
-                if self.p4_hit_test(b, a.s32(0x04), a.s32(0x08), a.s32(0x0C)):   # 0x43C011
+                # 0x43C011 `0x4306C0(edi=内层 arg1, esi[4], esi[8], esi[0xC])`：
+                # **内层（arg1=qa=演员）** 的半径对 **外层（arg2=qb=43C）** 的坐标做判定
+                if self.p4_hit_test(a, b.s32(0x04), b.s32(0x08), b.s32(0x0C)):
                     # 0x43C01E → 0x43C170：回调 esi = **内层 qa**（walker 的 edi 最后 push）
                     self.p4_hit_cb(a, b)
                     hits += 1
@@ -19690,6 +19695,8 @@ class Page4Mixin:
         # 0x43C075 0x45B030(0x56CCB8, 2)：**bit2 清**时返回 1 → jne 跳过类型过滤
         bit2_clear = self.p4_bit_none(0x02)
         for e in list(qa):
+            if not e.g32(0x10):                    # 0x43C094 `mov al,[esi+0x10]; test; je`
+                continue
             self._p4_set_col(e)
             if not bit2_clear and not (e.g32(0x14) & 0x8000):   # 0x43C085 test ah,0x80
                 continue
@@ -19713,6 +19720,8 @@ class Page4Mixin:
         """`0x43C0F0(a, b)`：与 `0x43BFD0` 同形，但命中回调是 `0x43CCC0`（`0x43C135`）。"""
         hits = 0
         for e in list(qa):
+            if not e.g32(0x10):                    # 0x43C105 `mov al,[esi+0x10]; test; je`
+                continue
             self._p4_set_col(e)
             for t in list(qb):
                 self._p4_set_col(t)
