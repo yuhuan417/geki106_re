@@ -17807,7 +17807,7 @@ class Page4Mixin:
                 g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
         sub.d32(0x18, 0)                                         # 0x43D359
         sub.m[0x10] = 0                                          # 0x43D360
-        self.p4_45eff0(ta, sub.s32(0x04), sub.s32(0x08), drv.g32(0x14))     # 0x43D373
+        self.p4_45eff0(ta, drv.g32(0x14), sub.s32(0x04), sub.s32(0x08))     # 0x43D373
         self.p4_se_pan(8, (sub.s32(0x04) - 0x140) << 4)          # 0x43D38C
 
     def _p4_41000008(self, x: int, y: int, a3: int) -> None:
@@ -18412,7 +18412,10 @@ class Page4Mixin:
                 self.p4_stat[m + fb] = (self.p4_stat.get(m + fb, 0) + val) & 0xFFFFFFFF
 
     def p4_45eff0(self, typ: int, arg2: int = 0, arg3: int = 0, arg4: int = 0) -> None:
-        """`0x45EFF0(mgr, type, a, b, c)`：**全局效果分发**（数值累加 + 字形 + 里程）。
+        """`0x45EFF0(mgr, type, killer, x, y)`：**全局效果分发**（数值累加 + 字形 + 里程）。
+
+        ★ 参数序按 `0x43CA99..0x43CAB4` 原始字节校定：`push y; push x; push killer; push type`
+        ⇒ `arg2 = 击杀者类型`、`arg3/arg4 = 坐标`（0x500 分支生成 0x32000004/05 用的正是它们）。
 
         ```
         0x45F00E if ([mgr+0xEC] == 0) → ret            ; 表未就绪
@@ -19419,7 +19422,7 @@ class Page4Mixin:
             parent.d32(0x28, r & 0xFFFFFFFF)
         self.spawn(self._p4_q("ui40c"), 6,
                    a.s32(0x04), a.s32(0x08), hit, p.g32(0x1C))  # 0x43C5F7 / 0x43C594
-        self.p4_45eff0(ta, a.s32(0x04), a.s32(0x08), 0x10008431)   # 0x43C61D
+        self.p4_45eff0(ta, 0x10008431, a.s32(0x04), a.s32(0x08))   # 0x43C61D
         a.d32(0x18, 0)                                          # 0x43C612
         a.d32(0x10, 0)                                          # 0x43C619
         self.p4_se_pan(0xD, (p.s32(0x04) - 0x140) << 4)         # 0x43C636
@@ -19637,7 +19640,7 @@ class Page4Mixin:
                 g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
         a.d32(0x18, 0)                                         # 0x43CA9F
         a.d32(0x10, 0)                                         # 0x43CAA6
-        self.p4_45eff0(ta, a.s32(0x04), a.s32(0x08), p.g32(0x14))   # 0x43CAB9
+        self.p4_45eff0(ta, p.g32(0x14), a.s32(0x04), a.s32(0x08))   # 0x43CAB9
 
     def _p4_43c460_dispatch(self, p, a, t: int) -> None:
         """`0x43C508..0x43C9C2`：按**完整类型**做**无符号**二叉查找式的 cmp 链。
