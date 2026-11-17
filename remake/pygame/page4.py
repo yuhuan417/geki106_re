@@ -8551,17 +8551,23 @@ def _beh_40B040(self, e) -> bool:
                 if (t & 0x3F) == 0:
                     self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
             elif sub == 1:
+                # 0x40B1BB：`([+0x1C] & 7) != 4` → 跳过；否则
+                # `0x462D71(t, 0x50)` 取商（余数丢弃），以 (x,y) 生成 0x2A000005、
+                # prm = 商，入 **0x4AD43C**（0x401FA5 → 0x43BDC0）。无随机偏移、无 43B610。
                 if (t & 7) == 4:
-                    q, r = divmod(t, 0x50)
-                    if r == 0xB:
-                        self._p4_ent43c(0x2A000005,
-                                        x + (self.p4_rand() % 0x50),
-                                        y + (self.p4_rand() % 0xC))
-                        self.p4_43B610(e, self.p4_player_x(),
-                                       self.p4_player_y(), -0x400 & 0xFFFFFFFF)
+                    q = t // 0x50
+                    self._p4_ent43c(0x2A000005, x, y, q)
             elif sub == 3:
-                q, r = divmod(t, 0x50)
-                if r < 0x36 and (t & 3) == 3:
+                # 0x40B21D：`t % 0xC == 0xB` → 朝**左右边缘**平射：
+                # tx = (player_x >= x) ? 0x27F : 0，ty = y，速度 −0x400（0x401997→0x43B610）。
+                if (t % 0xC) == 0xB:
+                    tx = 0x27F if self.p4_player_x() >= x else 0
+                    self.p4_43B610(e, tx, y, -0x400 & 0xFFFFFFFF)
+            elif sub == 4:
+                # 0x40B26A：`t % 0x50 < 0x36` 且 `(t&3)==3` → 8 向扇形（4 对，速度 −0x200）。
+                # ⚠ 原件用两张 8 项表（A=[esp+0x18+4i]、B=[esp+0x38+4i]）分别作 x/y 分量，
+                #   复刻暂用单表对称近似，已记入 §15。
+                if (t % 0x50) < 0x36 and (t & 3) == 3:
                     for k in range(8):
                         v = (0x62, 0x64, 0x5C, 0x53, 0x47, 0x38, 0x26, 0x14)[k]
                         if x < self.p4_player_x():
@@ -8569,12 +8575,12 @@ def _beh_40B040(self, e) -> bool:
                         self.p4_43B290(e, -v, v, -0x200 & 0xFFFFFFFF)
                         self.p4_43B290(e, -v, -v, -0x200 & 0xFFFFFFFF)
             elif sub == 7:
-                if (t & 1) == 0:
+                # 0x40B383：`test cl,1; je` ⇒ **t 为奇数**才发射；ang = (0x1E − t)*30；
+                # `0x43B290(e, cos(ang), sin(ang), -0xE00)` **只发一发**。
+                if (t & 1) == 1:
                     ang = ((0x1E - t) * 30) & 0xFFFFFFFF
-                    c = page4_cos(ang)
-                    s_ = page4_sin(ang)
-                    self.p4_43B290(e, c, s_, -0xE00 & 0xFFFFFFFF)
-                    self.p4_43B290(e, -s_, -c, -0xE00 & 0xFFFFFFFF)
+                    self.p4_43B290(e, page4_cos(ang), page4_sin(ang),
+                                   -0xE00 & 0xFFFFFFFF)
             elif sub == 9:
                 if (t & 3) == 0:
                     spd = 0x600 if (t & 0xFC) > 0x14 else ((t >> 2) + 1) << 8
