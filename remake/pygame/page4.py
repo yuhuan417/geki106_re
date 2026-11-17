@@ -15043,6 +15043,58 @@ def _beh_438660(self, e) -> bool:
     return t < 0x190
 
 
+def _beh_438750(self, e) -> bool:
+    """`0x438750`（0x48000006，thunk 0x401F23）：与 0x4385E0 同构，dst 偏移 −0x48、
+    寿命 0xAA。
+
+    ```
+    0x438753 p = [+0x28]；[+0x20] += p[+0x28]；[+0x24] += p[+0x2C]
+    0x438772 x = (sar [+0x20],4)；y = (sar [+0x24],4)；dst = (x-0x48, y-0x48)
+    0x438799 t = ++[+0x1C]；cmp t,0xAA ; setl
+    ```
+    """
+    p = self.p4_links.get(e.s32(0x28) & 0x7FFFFFFF)
+    vx = e.s32(0x20)
+    vy = e.s32(0x24)
+    if p is not None:
+        vx += p.s32(0x28)
+        vy += p.s32(0x2C)
+        e.d32(0x20, vx & 0xFFFFFFFF)
+        e.d32(0x24, vy & 0xFFFFFFFF)
+    x = vx >> 4
+    y = vy >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0x48, y - 0x48)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    return t < 0xAA
+
+
+def _beh_4387D0(self, e) -> bool:
+    """`0x4387D0`（0x48000007，thunk 0x401A2D）：直线漂移 0x10 帧后自灭。
+
+    ```
+    0x4387D3 [+4] += [+0x20]；[+8] += [+0x24]
+    0x4387ED t = ++[+0x1C]；0x4387F1 cmp t,0x10 ; jne 0x4387FD
+    0x4387F9 t==0x10 → al=0 直接返回（**不更新 dst**）
+    0x4387FD dst = (x-0x18, y-0x18)；al=1
+    ```
+    """
+    x = (e.s32(0x04) + e.s32(0x20)) & 0xFFFFFFFF
+    y = (e.s32(0x08) + e.s32(0x24)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t == 0x10:
+        return False
+    if e.node is not None:
+        e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15057,6 +15109,8 @@ P4_BEH: dict[int, object] = {
     0x437F30: _beh_437F30, 0x437F80: _beh_437F80,   # 0x44000001/02 碎片
     0x4385E0: _beh_4385E0,                          # 0x48000003 跟随碎片
     0x438660: _beh_438660,                          # 0x48000004/05 摆动碎片
+    0x438750: _beh_438750,                          # 0x48000006 跟随碎片（0xAA）
+    0x4387D0: _beh_4387D0,                          # 0x48000007 直线漂移
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
