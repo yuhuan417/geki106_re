@@ -2600,6 +2600,8 @@ def main():
     class _K51:
         def __init__(self):
             self.bits = 0
+        def test(self, mask):
+            return bool(self.bits & mask)
         def field(self, mask):
             if not mask:
                 return 0

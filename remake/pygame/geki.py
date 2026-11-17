@@ -1317,6 +1317,7 @@ class Pages(Page4Mixin):
         self.flags = flags
         self.sysf = Flags()          # 0x56CC84：系统旗标（0x10 = 离开本页）
         self.p4_ensure()             # 页4 运行期状态（0x4AB5CC/0x56CCB8/统计区…）
+        self.grcd_read()             # state.dat 读入（0x45C020；不存在→出厂默认）
         # 0x56CC8C/0x56CC90：自机位置镜像（页面重置清零）。页13 无自机 ⇒ 恒 0，
         # 但 `0x42BB9E` 会读 `[0x56CC90]`，故仍需存在。
         self.mirror = {"x": 0, "y": 0}     # 0x56CC8C/0x56CC90
@@ -1351,6 +1352,57 @@ class Pages(Page4Mixin):
         self.quit = False
 
     # ---- 日志
+    # ---- GRCD 系统存档（state.dat 0x45CB70 写 / 0x45C020 读，2026-11-18 落地）----
+    # 容器：头 0x18 {'GRCD','106A', u32 总长, u32 保留×3} + GROD LZ 流。
+    # 流内容（顺序）：keys.bits(0x4AB5B0 dword)、disp_cfg.bits(0x4AB5B8 dword)、
+    # 排行表 0x4AB5CC（P4_TBL_4AB5CC_SIZE 字节）。解锁进度全在 keys.bits 内
+    # （0xF00000 到达关 / 0x70000 附加档 / bit31 二周目）。
+
+    def grcd_path(self) -> "Path":
+        from pathlib import Path as _P
+        return _P(__file__).resolve().parent / "state.dat"
+
+    def grcd_write(self) -> None:
+        """`0x45CB70`：程序退出（0x458640）时写 state.dat。"""
+        try:
+            from grod_encode import grod_encode as _gz
+            import struct as _st
+            body = bytearray()
+            body += (self.keys.bits & 0xFFFFFFFF).to_bytes(4, "little")
+            body += (self.disp_cfg.bits & 0xFFFFFFFF).to_bytes(4, "little")
+            body += bytes(self._p4_tbl4ab5cc())
+            hdr = bytearray()
+            hdr += b"GRCD"
+            hdr += b"106A"
+            hdr += _st.pack("<I", len(body))
+            hdr += _st.pack("<III", 0, 0, 0)
+            self.grcd_path().write_bytes(bytes(hdr) + _gz(bytes(body)))
+        except Exception as exc:                       # 磁盘故障不阻塞退出
+            self.log(f"grcd_write fail: {exc}")
+
+    def grcd_read(self) -> None:
+        """`0x45C020`：启动时读 state.dat（不存在 → 出厂默认 0x45C5F0，不覆盖）。"""
+        f = self.grcd_path()
+        if not f.is_file():
+            return
+        try:
+            from grod_encode import grod_decode as _unlz
+            data = f.read_bytes()
+            if data[:4] != b"GRCD" or data[4:8] != b"106A":
+                return
+            import struct as _st
+            total = _st.unpack_from("<I", data, 8)[0]
+            body = _unlz(data[0x18:0x18 + total])
+            if len(body) < 8:
+                return
+            self.keys.bits = int.from_bytes(body[0:4], "little")
+            self.disp_cfg.bits = int.from_bytes(body[4:8], "little")
+            tbl = body[8:]
+            self.p4_stat["tbl_4ab5cc"] = bytearray(tbl[:self.P4_TBL_4AB5CC_SIZE])
+            self.log(f"grcd_read: keys={self.keys.bits:#x} tbl={len(tbl)}B")
+        except Exception as exc:
+            self.log(f"grcd_read fail: {exc}")
+
     def log(self, s: str) -> None:
         self.trace.append(s)
         if len(self.trace) > 400:
@@ -2427,6 +2479,64 @@ class Pages(Page4Mixin):
         if cmd == 0:                       # ESC
             self.flags.set(FLAG_ESC)
             self.log("cmd.esc")
+        elif cmd == 2:                     # F1 音声切替（0x45900C）
+            # 0x4AB5B0 bit0x18 字段 0→1→3→0 循环 + bit8/0x10 写 + 音频重建
+            cur = self.keys.field(0x18)
+            nxt = {0: 1, 1: 3, 3: 0}.get(cur, 0)
+            self.keys.field_write(0x18, nxt)
+            self.keys.field_write(0x8, 8)
+            self.keys.field_write(0x10, nxt)
+            self.log(f"cmd.f1: 音声 {cur}→{nxt}")
+        elif cmd == 3:                     # F2 音楽 ON/OFF（0x45906A）
+            # bit4 翻转 + 停 MIDI
+            if self.keys.test(4):
+                self.keys.bits &= ~4
+                self.midi_stop()
+            else:
+                self.keys.bits |= 4
+            self.log(f"cmd.f2: 音楽 {'ON' if self.keys.test(4) else 'OFF'}")
+        elif cmd == 4:                     # F3 レーザー点滅（0x45909A）
+            if self.keys.test(0x800):
+                self.keys.bits &= ~0x800
+            else:
+                self.keys.bits |= 0x800
+        elif cmd == 5:                     # F4 背景明度切替（0x4590AC）
+            if self.keys.test(6):
+                self.keys.bits &= ~6
+            else:
+                self.keys.bits |= 6
+            # 0x45AF30(0x40)/0x45AFF0(0x40) + 色带/调色板重算
+            self.log("cmd.f4: 背景明度")
+        elif cmd in (6, 7):                # F5/F6 彩度 ±10（0x4590DC/0x45911F）
+            f = self.disp_cfg.field(0xFE000000)
+            f = f + 10 if cmd == 6 else f - 10
+            if f >= 0x64:
+                f = 0 if cmd == 6 else 0x63
+            self.disp_cfg.field_write(0xFE000000, f)
+            self._f89_palette_recalc()
+        elif cmd in (8, 9):                # F7/F8 明度 ±10（0x45915E/0x4591E0）
+            f = self.disp_cfg.field(0x1FC0000)
+            f = f + 10 if cmd == 8 else f - 10
+            if f >= 0x64:
+                f = 0 if cmd == 8 else 0x63
+            self.disp_cfg.field_write(0x1FC0000, f)
+            self._f89_palette_recalc()
+        elif cmd == 10:                    # F9 画面切替（0x4590DC 同形 → 彩度 +10 钳）
+            f = self.disp_cfg.field(0xFE000000)
+            f += 10
+            if f >= 0x64:
+                f = 0
+            self.disp_cfg.field_write(0xFE000000, f)
+            self._f89_palette_recalc()
+
+    def _f89_palette_recalc(self) -> None:
+        """F5..F9 共通尾（0x4591A5..0x4591DD）：明度/彩度 ×4−0xC8 → 调色板重算。"""
+        br = self.disp_cfg.field(0x1FC0000) * 4 - 0xC8
+        ct = self.disp_cfg.field(0xFE000000) * 4 - 0xC8
+        self.pal_flags |= 1                # 0x44B790 的 fade_a/fade_b 用
+        self.fade_a = br & 0xFFFFFFFF
+        self.fade_b = ct & 0xFFFFFFFF
+        self.log(f"cmd.f: 明度={br} 彩度={ct}")
 
     # ---- UI 实体（0x43D430 / 0x424410）------------------------------------
     def _p4_4cc_parent(self, prm):
@@ -4373,14 +4483,45 @@ class Pages(Page4Mixin):
     def p4_45d700(self, slot: int) -> bool:
         """`0x45D700(0x4CD5D8, slot, …)`：回放装载门（0x5E1200 的 3 个存槽，3 次重试）。
 
-        0x45D700 的可观察语义：按 slot 读存槽 → 0x45D1D0 有帧 → True。
-        复刻侧对接 P4Replay：count > 0 表示该槽有已记录回放。
-        持久化到磁盘属 §15.4 未闭合项（此处为会话内）。"""
-        rp = getattr(self, "p4_replay", None)
-        if rp is not None and rp.count > 0:
-            return True
-        saves = getattr(self, "p4_replay_saves", None)
-        return bool(saves) and 0 <= slot < 3 and saves.get(slot) is not None
+        2026-11-18 落地：读磁盘 rp_*.dat（GRPD 容器 + 三平面 LZ）→ 装进
+        0x4CD5D8 字节平面 → 帧计数/游标复位 → True。文件名经 0x45CFB0 的
+        gm/tr × m/j × gek/rin/kan 组合探测。"""
+        import struct as _st
+        from pathlib import Path as _Path
+        from grod_encode import grod_decode as _unlz
+        base = _Path(__file__).resolve().parent / "replays"
+        if not base.is_dir():
+            return False
+        # 探测候选名（gm/tr × m/j × 三段；页5 的 slot 从 0 起 → 行号 = slot）
+        for gm in (0, 1):
+            for mj in (0, 1):
+                for bl in range(3):
+                    nm = self.p4_45cfb0(gm, mj, slot, bl)
+                    f = base / nm
+                    if not f.is_file():
+                        continue
+                    data = f.read_bytes()
+                    if data[:4] != b"GRPD":
+                        continue
+                    frames = _st.unpack_from("<I", data, 8)[0]
+                    comp = _st.unpack_from("<I", data, 0xC)[0]
+                    if frames == 0 or frames > 0x34BC0:
+                        continue
+                    lz = data[0x2C:0x2C + comp]
+                    payload = _unlz(lz)
+                    planes = getattr(self, "p4_replay_planes", None)
+                    if planes is None:
+                        return False
+                    for k in range(3):
+                        planes[k][:frames] = payload[k * frames:(k + 1) * frames]
+                    self.p4_stat[0x4CD5D8 + 0x9E37C] = frames
+                    self.p4_stat[0x4CD5D8 + 0x9E380] = 0
+                    # 回放头 → 舞台选择器/旗标恢复（0x45D1A0 的 [4..10] dword）
+                    hdr4 = _st.unpack_from("<I", data, 0x10)[0]
+                    chain = hdr4 & 0xFFFF
+                    self.theatre = (hdr4 >> 16) & 0xFFFF
+                    return True
+        return False
 
     # 0x43E1C0（0x6F000002，OPMOVIE / "Now Loading" 进度屏）
     def _opmovie(self, e: UiEntity) -> None:

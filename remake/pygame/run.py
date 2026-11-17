@@ -318,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         elif not args.headless:
             pygame.time.wait(1)
 
+    pages.grcd_write()           # 0x458640：程序退出写 state.dat
     print(f"[end] page={pages.page} frame={frame} flags=0x{flags.bits:X}")
     for line in pages.trace:
         print("[trace]", line)
