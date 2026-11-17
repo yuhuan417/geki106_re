@@ -4745,13 +4745,6 @@ def p4_43B290(self, e, dx: int, dy: int, arg: int) -> None:
         return
     eb = self.spawn(self._p4_q("ui49c"), self.p4_43B020(e),
                     e.s32(0x04), e.s32(0x08), (vx, vy))
-    if eb is not None:
-        eb.raw[0x10] = 1
-        eb.d32(0x14, self.p4_43B020(e) & 0xFFFFFFFF)
-        eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
-        eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
-        eb.d32(0x0C, 0x18)
-        self._p4_q("ui49c").append(eb)
 
 
 def _beh_415410(self, e) -> bool:
@@ -6660,13 +6653,6 @@ def p4_43B150(self, e, x0: int, y0: int, spdarg: int) -> None:
         return
     typ = self.p4_43B020(e)
     eb = self.spawn(self._p4_q("ui49c"), typ, x0, y0, (vx, vy))
-    if eb is not None:
-        eb.raw[0x10] = 1
-        eb.d32(0x14, typ & 0xFFFFFFFF)
-        eb.d32(0x04, x0 & 0xFFFFFFFF)
-        eb.d32(0x08, y0 & 0xFFFFFFFF)
-        eb.d32(0x0C, 0x18)
-        self._p4_q("ui49c").append(eb)
 
 
 def _beh_416770(self, e) -> bool:
@@ -9017,13 +9003,6 @@ def _p4_40d030_fire(self, e, typ, a1, a2, a3, a4, spd):
     if vx == 0 and vy == 0:
         return
     eb = self.spawn(self._p4_q("ui49c"), typ, e.s32(0x04), e.s32(0x08), (vx, vy))
-    if eb is not None:
-        eb.raw[0x10] = 1
-        eb.d32(0x14, typ & 0xFFFFFFFF)
-        eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
-        eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
-        eb.d32(0x0C, 0x18)
-        self._p4_q("ui49c").append(eb)
 
 
 def _beh_40D030(self, e) -> bool:
@@ -21178,13 +21157,6 @@ class Page4Mixin:
                 continue
             eb2 = self.spawn(self._p4_q("ui49c"), typ,
                              e.s32(0x04), e.s32(0x08), (vx, vy))
-            if eb2 is not None:
-                eb2.raw[0x10] = 1
-                eb2.d32(0x14, typ & 0xFFFFFFFF)
-                eb2.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
-                eb2.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
-                eb2.d32(0x0C, 0x18)
-                self._p4_q("ui49c").append(eb2)            # 0x435440: 显式入队   # 0x43B22B
 
     def p4_43B070(self, e, arg: int) -> None:
         """`0x43B070`：朝玩家生成一枚 `0x31` 族实体进 **0x4AD49C**。
@@ -21279,13 +21251,6 @@ class Page4Mixin:
             return
         typ = self.p4_43B020(e)
         eb = self.spawn(self._p4_q("ui49c"), typ, x, y, (vx, vy))
-        if eb is not None:
-            eb.raw[0x10] = 1
-            eb.d32(0x14, typ & 0xFFFFFFFF)
-            eb.d32(0x04, int(x) & 0xFFFFFFFF)
-            eb.d32(0x08, int(y) & 0xFFFFFFFF)
-            eb.d32(0x0C, 0x18)
-            self._p4_q("ui49c").append(eb)
 
     def p4_43B500(self, e, x0: int, y0: int, x1: int, y1: int, spdarg: int) -> None:
         """`0x43B500`（thunk 0x40182F）：**A→B 定向弹**——方向 = (x1−x0, y1−y0)、
@@ -21301,13 +21266,6 @@ class Page4Mixin:
             return
         typ = self.p4_43B020(e)
         eb = self.spawn(self._p4_q("ui49c"), typ, e.s32(0x04), e.s32(0x08), (vx, vy))
-        if eb is not None:
-            eb.raw[0x10] = 1
-            eb.d32(0x14, typ & 0xFFFFFFFF)
-            eb.d32(0x04, e.s32(0x04) & 0xFFFFFFFF)
-            eb.d32(0x08, e.s32(0x08) & 0xFFFFFFFF)
-            eb.d32(0x0C, 0x18)
-            self._p4_q("ui49c").append(eb)
 
     def p4_401244(self, e) -> None:
         """`0x413030`（thunk 0x401244）：**绕主圆轨步进** —— ang = (主.[0x20] −
