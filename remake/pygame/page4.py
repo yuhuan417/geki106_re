@@ -16926,7 +16926,10 @@ class Page4Mixin:
                 nd.rect = (0, 0xA0, 0xFF, 0xDF)    # 0x4231F2 45A750(…,0,0xA0,0xFF,0xDF)
             else:
                 nd.rect = (0, 0, 0xFF, 0x3F)       # 0x423233
-            nd.dst = (e.s32(0x04), e.s32(0x08))    # 0x42328E 45A690([esi+4],[esi+8])
+            # 0x423270/0x42328E：push 0xD0; push 0xC0; call 0x401753(0x45A690)
+            # ⇒ node dst = **固定 (0xC0, 0xD0)**（旧实现取 [esi+4]/[esi+8]=(0,0)，
+            #    令提示面板画在左上角、与 p4_hud 的三个片段叠成乱码）
+            nd.dst = (0xC0, 0xD0)
             nd.active = 0                          # 0x4232A9 byte[node+0x1C]=0
             self.sysf.bits |= 0x10                 # 0x4232AC 0x45AF30(0x56CC84,0x10)
             v = self.keys.field(0x7F000000)        # 0x4232BB 0x45AFC0(0x4AB5B0,0x7F000000)
@@ -17700,7 +17703,7 @@ class Page4Mixin:
     # 表: (层, rect l,t,r,b, dst减, [0x1C], [0x20], [0x24], 行为 thunk)
     # 层 0 = bm_cm48 / 层 1 = bm_cm32
     P4_41_CTOR = {
-        0x41000001: (0, 0xC0, 0,    0xEF, 0x2F, 0x18, 3, 5, 0, 0x401B95),  # 爆炸核心 48×48 撃
+        0x41000001: (0, 0, 0xC0, 0x2F, 0xEF, 0x18, 3, 5, 0, 0x401B95),  # 爆炸核心：竖列 x0..0x2F、y0xC0+48r 破/滅/壊
         0x41000004: (1, 0xA0, 0,    0xBF, 0x1F, 0,    0, 0, 0, 0x40200E),  # 碰撞火花 32×32
         0x41000005: (0, 0xC0, 0x90, 0xEF, 0xBF, 0x18, 0, 0, 0, 0x401019),  # 激光纵条
         0x41000006: (0, 0xC0, 0x60, 0xEF, 0x8F, 0x18, 0, 0, 0, 0x402275),  # 激光横条
@@ -17819,7 +17822,7 @@ class Page4Mixin:
             g = self.p4_spawn41(x + o6, y + o5, 0x41000001)           # 0x43A62F
             if g is not None:
                 _, r3 = self.p4_rand_mod(3)                       # ctor 0x428CCF
-                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
         if (t & 0xF) == 8 and flag:                # 0x43A668 and 0xF / cmp 8
             self.p4_se_pan(4, (x - 0x140) << 4)    # 0x43A685 SE#4 声像
 
@@ -17829,7 +17832,7 @@ class Page4Mixin:
 
         每次两次 `rand % (2*dur)`，取 `o1 = 余数1 - dur`、`o2 = 余数2 - dur`，
         生成 `0x41000001 @ (x+o2, y+o1)`；ctor 内部再 `rand%3` 选爆炸行
-        （`rect = (0xC0+48*r3, 0, 0xEF+48*r3, 0x2F)`）。`flag != 0` → SE 11。
+        （`rect = (0, 0xC0+48*r3, 0x2F, 0xEF+48*r3)` —— bm_cm48 竖列 破/滅/壊）。`flag != 0` → SE 11。
         """
         m2 = 2 * dur
         for _ in range(dur >> 3):
@@ -17838,7 +17841,7 @@ class Page4Mixin:
             g = self.p4_spawn41(x + o2, y + o1, 0x41000001)
             if g is not None:
                 _, r3 = self.p4_rand_mod(3)
-                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
         if flag:
             self.p4_se_pan(11, (x - 0x140) << 4)
 
@@ -18000,7 +18003,7 @@ class Page4Mixin:
             g = self.p4_spawn41(sub.s32(0x04), sub.s32(0x08), 0x41000001)   # 0x43D32F
             if g is not None:
                 _, r3 = self.p4_rand_mod(3)                      # 0x428CD3 爆炸行随机
-                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
         sub.d32(0x18, 0)                                         # 0x43D359
         sub.m[0x10] = 0                                          # 0x43D360
         self.p4_45eff0(ta, drv.g32(0x14), sub.s32(0x04), sub.s32(0x08))     # 0x43D373
@@ -19833,7 +19836,7 @@ class Page4Mixin:
             g = self.p4_spawn41(a.s32(0x04), a.s32(0x08), 0x41000001)   # 0x43CA94
             if g is not None:
                 _, r3 = self.p4_rand_mod(3)                     # 0x428CD3 爆炸行随机
-                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
         a.d32(0x18, 0)                                         # 0x43CA9F
         a.d32(0x10, 0)                                         # 0x43CAA6
         self.p4_45eff0(ta, p.g32(0x14), a.s32(0x04), a.s32(0x08))   # 0x43CAB9
