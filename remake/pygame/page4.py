@@ -15271,6 +15271,40 @@ def _beh_4394B0(self, e) -> bool:
     return _p4_explosion_body(self, e, True)
 
 
+_P4_439250_T = (0, 0x18, 0x30, 0x44, 0x58, 0x68, 0x78)
+_P4_439250_V = (-1, 1, 1, -1, -1, 1, 0)
+
+
+def _beh_439250(self, e) -> bool:
+    """`0x439250`（0x4A000002 自机拖尾碎片，thunk 0x401032）：沿 45° 漂移 + 7 段速度换向。
+
+    ```
+    0x43925C mode=[+0x28]；mode∈{1,2} → dst 的第二分量取负，否则同号
+    0x439277 0x45A6B0(node+0x14, [+0x20], ±[+0x20])
+    0x43928B [+0x20] += [+0x24]
+    0x4392F1 t=[+0x1C] 命中 7 个阈值 {0,0x18,0x30,0x44,0x58,0x68,0x78} 之一时
+             [+0x24] = 表值 {−1,+1,+1,−1,−1,+1,0}（mode 为奇数则取反）
+    0x439311 t++；c=[+0x2C]++，返回 旧 c < 0x12C
+    ```
+    """
+    mode = e.s32(0x28)
+    v = e.s32(0x20)
+    dy = -v if mode in (1, 2) else v
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + v, e.node.dst[1] + dy)
+    e.d32(0x20, (v + e.s32(0x24)) & 0xFFFFFFFF)
+    t = e.s32(0x1C)
+    if t in _P4_439250_T:
+        spd = _P4_439250_V[_P4_439250_T.index(t)]
+        if mode & 1:
+            spd = -spd
+        e.d32(0x24, spd & 0xFFFFFFFF)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    c = e.s32(0x2C)
+    e.d32(0x2C, (c + 1) & 0xFFFFFFFF)
+    return c < 0x12C
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15294,6 +15328,7 @@ P4_BEH: dict[int, object] = {
     0x44AF60: _beh_44AF60,                          # 0x5C000002 节点镜像
     0x439000: _beh_439000,                          # 0x49000008 大爆炸
     0x4394B0: _beh_4394B0,                          # 0x4A000006 爆风环
+    0x439250: _beh_439250,                          # 0x4A000002 拖尾碎片
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
