@@ -21,6 +21,39 @@ EXE = HERE.parent.parent / "geki106" / "geki106.exe"
 fails = []
 
 
+class _AuditMem:
+    """把审计桩里的“指针”映射到 p4_stat 的偏移窗口（[ptr+off] ⇔ p4_stat[ptr+off]）。"""
+
+    def __init__(self, z, base):
+        self.z, self.base = z, base
+
+    def d32(self, off, v):
+        self.z.p4_stat[(self.base + off) & 0xFFFFFFFF] = v & 0xFFFFFFFF
+
+    def d16(self, off, v):
+        self.z.p4_stat[(self.base + off) & 0xFFFFFFFF] = v & 0xFFFF
+
+    def g32(self, off):
+        return self.z.p4_stat.get((self.base + off) & 0xFFFFFFFF, 0) & 0xFFFFFFFF
+
+    def s32(self, off):
+        v = self.g32(off)
+        return v - 0x100000000 if v & 0x80000000 else v
+
+
+class _AuditLinks(dict):
+    """句柄/指针查找桩：未登记的键当成“指向 p4_stat 窗口的指针”。"""
+
+    def __init__(self, z):
+        super().__init__()
+        self.z = z
+
+    def get(self, k, default=None):
+        if k in self:
+            return dict.get(self, k)
+        return _AuditMem(self.z, k) if k else default
+
+
 def check(name, cond, detail=""):
     if cond:
         print(f"  ok   {name}")
@@ -1407,6 +1440,7 @@ def main():
         def __init__(self, stat=None):
             self.calls = []
             self.p4_stat = dict(stat or {})
+            self.p4_links = _AuditLinks(self)
             self.keys = _ZK()
             self.keys.bits = self.p4_stat.get(0x4AB5B4, 0)   # 0x4AB5B0 位图统一镜像
             self.mirror = {"x": 0, "y": 0}      # p4_player_pos property 的真身
@@ -1455,7 +1489,7 @@ def main():
     _cv_a = page4.Ent(0x120, 0x90, 0x10008431, 0)
     _cv_a.d32(0x10, 1)
     _cv_a.d32(0x18, 5)
-    _cv_z = _Z({0x4CD4A0 + 0xEC: 0x1000, 0x10C4: 0x30000, 0x4AB5B0 + 4: 0x200})
+    _cv_z = _Z({0x4CD4A0 + 0xEC: 0x4993cc, 0x10C4: 0x30000, 0x4AB5B0 + 4: 0x200})
     page4.Page4Mixin.p4_43c460(_cv_z, _cv_p, _cv_a)
     _cv_hits = [c for c in _cv_z.calls if c[0] == "ui40c"]
     _cv_p2 = page4.Ent(0x1C0, 0x100, 0x10008431, 0)
@@ -1464,7 +1498,7 @@ def main():
     _cv_a2 = page4.Ent(0x120, 0x90, 0x10008431, 0)
     _cv_a2.d32(0x10, 1)
     _cv_a2.d32(0x18, 5)
-    _cv_z2 = _Z({0x4CD4A0 + 0xEC: 0x1000, 0x10C4: 0x30000})
+    _cv_z2 = _Z({0x4CD4A0 + 0xEC: 0x4993cc, 0x10C4: 0x30000})
     page4.Page4Mixin.p4_43c460(_cv_z2, _cv_p2, _cv_a2)
     _cv_hits2 = [c for c in _cv_z2.calls if c[0] == "ui40c"]
     _ef = _Z({0x4CD4A0 + 0xEC: 0x1000})
@@ -1773,11 +1807,11 @@ def main():
     _e31 = page4.Ent(0, 0, 0x23000006, 0)
     _t31 = []
     for _hi, _want in ((0x25000000, 0x31000006), (0x26000000, 0x31000019),
-                       (0x27000000, 0x31000001), (0x23000000, 0x3100000A)):
+                       (0x27000000, 0x3100000A), (0x23000000, 0x31000001)):
         _e31.d32(0x14, _hi | 1)
         _t31.append(page4.Page4Mixin.p4_43B020(None, _e31) == _want)
     check("0x43B020 按 [e+0x14]&0xFF000000 选类型：0x25→0x31000006、0x26→0x31000019、"
-          "0x27→0x31000001（neg/sbb 读 CF）、其余→0x3100000A；"
+          "0x27→0x3100000A、其余→0x31000001（NEG 操作数非 0 才置 CF）；"
           "0x43AF90 带难度(op==3 翻倍)与生命门控(r < life+arg-0x100)；"
           "0x43B070 朝玩家发弹，速度=(4096/|d|)*分量*(speed>>4)>>8，两分量全 0 则不发",
           _b020.get(0x43B023) == ("and", "eax, 0xff000000")
@@ -2287,11 +2321,12 @@ def main():
           and img[0x43043B - ib] == 0xC3, "")
     _hit = open(page4.__file__, encoding="utf-8").read()
     _anchor = _hit.index("—— 最后一击")
-    _lf = _hit[_anchor: _anchor + 1600]
+    _lf = _hit[_anchor: _anchor + 2600]
     check("0x43C1AF 命中(类型6)的最后一击分支：HP<=1 时**不扣血**，"
           "半径 0x30 且类型不在 6 例 → 生成 0x61000004 入 ui52c，否则 0x41000001 入 ui4cc；"
           "随后 0x45EFF0(type,0x100D1211,x,y) + 清 active/HP + SE 4 带声像",
-          _lf.count("0x61000004") >= 1 and _lf.count("0x41000001") >= 1
+          (_lf.count("0x61000004") >= 1 or _lf.count("p4_spawn_61000004") >= 1)
+          and _lf.count("0x41000001") >= 1
           and _lf.count("0x100D1211") >= 1 and _lf.count("0x140") >= 1
           and "p4_45eff0(a.s32(0x14), 0x100D1211" in _lf
           and "self.p4_se_pan(4," in _lf
@@ -3115,7 +3150,7 @@ def main():
           "写 [[p+0x1C]+0x28]，靶被注销",
           len(_cv_hits) == 1 and _cv_hits[0][1] == 6
           and _cv_hits[0][2] == 0x120 and _cv_hits[0][3] == 0x90
-          and _cv_z.p4_stat[0x5000 + 0x28] == 2
+          and _cv_z.p4_stat[0x5000 + 0x28] == 3   # bits(0x200)≠0 ⇒ 自动爆破 ON=3
           and _cv_a.g32(0x10) == 0 and _cv_a.g32(0x18) == 0
           and len(_cv_hits2) == 1 and _cv_z2.p4_stat[0x5001 + 0x28] == 2
           and _cv_p2.g32(0x10) == 1, "")
@@ -3170,9 +3205,11 @@ def main():
     _zs = _Z({0x56CCA8: 100, 0x4AB5B0 + 4: 0xC000})
     page4.Page4Mixin.p4_43c460(_zs, _zp, _za2)
     _kt = [c[1] for c in _zs.calls if c[0] == "ui4cc"]
-    check("0x43C6C4（类型 0x10008041）：1×0x41000006 + 4×0x41000005(y=4,-4,4,-4) + 1×0x41400507",
+    check("0x43C6C4（类型 0x10008041）：1×0x41000006 + 4×0x41000005"
+          "（rec1=4/-4 交替 ⇒ ctor 0x428DFB 落点 y=敌.y∓0x40）+ 1×0x41400507",
           _kt == [0x41000006, 0x41000005, 0x41000005, 0x41000005, 0x41000005, 0x41400507]
-          and [c[3] for c in _zs.calls if c[0] == "ui4cc" and c[1] == 0x41000005] == [4, -4, 4, -4]
+          and [c[3] for c in _zs.calls if c[0] == "ui4cc" and c[1] == 0x41000005]
+              == [0x90 - 0x40, 0x90 + 0x40, 0x90 - 0x40, 0x90 + 0x40]
           and _za2.g32(0x48) == 1 and _za2.m[0x4C] == 1
           and _zp.m[0x10] == 0 and _zp.g32(0x1C) == 4
           and _zs.calls[-1] == ("SE", 6, (0x300 - 0x140) << 4), "")
