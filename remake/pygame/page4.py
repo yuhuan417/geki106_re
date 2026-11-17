@@ -15902,6 +15902,37 @@ def _beh_42F570(self, e) -> bool:
     return True
 
 
+def _beh_42A370(self, e) -> bool:
+    """`0x42A370`（0x4100000C 的渐扩/渐缩动画）：节点矩形按帧生长、同时上移。
+
+    ```
+    0x42A373 [+0x1C] += 1；t = 新值
+    t < 0x0C：0x45A790(node+4, a=0,b=-1,c=0,d=1) ⇒ rect.t -=1、rect.b +=1；
+              node[+0x18] -= 1（= dst.y −1）；return 1
+    t < 0x48：return 1（静止保持）
+    t < 0x53：0x45A790(node+4, a=0,b=1,c=0,d=-1) ⇒ rect.t +=1、rect.b -=1；
+              node[+0x18] += 1；return 1
+    否则 return 0（自灭）
+    ```
+    """
+    t = (e.g32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    nd = e.node
+    if t < 0x0C:
+        if nd is not None:
+            nd.grow(0, -1, 0, 1)                  # 0x401A0A → 0x45A790
+            nd.dst[1] -= 1                        # 0x42A39B node[+0x18] -= 1
+        return True
+    if t < 0x48:
+        return True
+    if t < 0x53:
+        if nd is not None:
+            nd.grow(0, 1, 0, -1)
+            nd.dst[1] += 1
+        return True
+    return False
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15938,6 +15969,7 @@ P4_BEH: dict[int, object] = {
     0x425CD0: _beh_425CD0,                          # 0x5F 3 值窗
     0x438B20: _beh_438B20,                          # 0x49000005 大爆炸
     0x42F570: _beh_42F570,                          # 0x10008431 捕获弹
+    0x42A370: _beh_42A370,                          # 0x4100000C 渐扩动画
     0x439F80: _beh_439F80,                          # 0x4D000002 砖墙环
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
