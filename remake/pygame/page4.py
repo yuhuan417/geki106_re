@@ -20121,8 +20121,9 @@ class Page4Mixin:
         0x43B036 eax = hi - 0x27000000 ; neg ; sbb eax,eax ; and al,0xF7 ; add eax,0x3100000A
         ```
 
-        `neg/sbb` 那串读的是 **CF**：`hi == 0x27000000` 时 CF=1 → `eax = 0xF7` →
-        `0xFFFFFFF7 + 0x3100000A = 0x31000001`；否则 `eax = 0` → `0x3100000A`。
+        `neg/sbb` 那串读的是 **CF**，而 x86 `NEG` 在操作数**非 0** 时置 CF=1：
+        `hi == 0x27000000`（差为 0）→ CF=0 → `eax = 0` → `0x3100000A`；
+        其余 → CF=1 → `eax = 0xFFFFFFF7` → `+0x3100000A = 0x31000001`。
         """
         hi = e.s32(0x14) & 0xFF000000
         if hi == 0x25000000:

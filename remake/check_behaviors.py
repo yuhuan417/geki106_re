@@ -29,6 +29,32 @@ import geki  # noqa: E402
 import page4  # noqa: E402
 
 
+# op5 0x6x 控制器子实体：ctor 已落地，行为尚未逐条实现（2026-11-17 核出）。
+KNOWN_MISSING_BEH = {
+    0x425960, 0x425AD0, 0x425B20, 0x425B70, 0x425C10, 0x425CD0,
+    0x430550, 0x437F30, 0x437F80, 0x438070, 0x438110, 0x438240,
+    0x4385E0, 0x438660, 0x438750, 0x4387D0, 0x438840, 0x438B20,
+    0x438F10, 0x438F80, 0x439000, 0x439250, 0x439420, 0x4394B0,
+    0x439D30, 0x439F80, 0x4415F0, 0x44AE00, 0x44AE50, 0x44AEE0,
+    0x44AF60,
+}
+
+
+def geki_beh_assignments() -> tuple[set[int], set[int]]:
+    """geki.py 里 `e.beh = 0x...` 的地址集合 → (全部, 未实现且不在已知清单)。"""
+    import re
+    root = Path(__file__).resolve().parent / "pygame"
+    src = (root / "geki.py").read_text(encoding="utf-8")
+    all_addr = {int(m, 16) for m in re.findall(r"e\.beh\s*=\s*(0x[0-9A-Fa-f]+)", src)}
+    miss = set()
+    for a in all_addr:
+        ok = (page4.P4_BEH.get(a) is not None
+              or hasattr(page4, f"_beh_{a:X}"))
+        if not ok and a not in KNOWN_MISSING_BEH:
+            miss.add(a)
+    return all_addr, miss
+
+
 def missing_behaviours() -> list[tuple[str, str, str]]:
     tables = ("ENT24_INIT", "ENT25_INIT", "ENT26_INIT", "ENT27_INIT",
               "ENT28_INIT", "ENT29_INIT", "ENT2A_INIT", "ENT2C_INIT",
@@ -133,14 +159,20 @@ def main() -> int:
         print("0x31 跑帧异常：")
         for b in bad:
             print("  ", b)
+    beh_all, beh_miss = geki_beh_assignments()
+    if beh_miss:
+        print("geki.py 新引用但未实现的行为：")
+        for a in sorted(beh_miss):
+            print("   ", hex(a))
     undef = undefined_self_calls()
     if undef:
         print("未定义的 self 方法调用：")
         for u in undef:
             print("  ", u)
-    if not miss and not bad and not undef:
-        print(f"OK：行为全登记、无未定义 self 调用，ENT 表 {tested} 型各 20 帧、"
-              f"0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
+    if not miss and not bad and not undef and not beh_miss:
+        print(f"OK：行为全登记（geki 内 {len(beh_all)} 个 beh 引用，"
+              f"{len(KNOWN_MISSING_BEH)} 个待实现）、无未定义 self 调用，"
+              f"ENT 表 {tested} 型各 20 帧、0x31 {len(geki.P31_CTOR)} 型各 30 帧无异常")
         return 0
     return 1
 

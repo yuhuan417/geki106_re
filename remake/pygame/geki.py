@@ -1242,6 +1242,17 @@ def fcos(v: int) -> int:
     return _trig(_COS_TAB, v)
 
 
+def _c_div(a: int, b: int) -> int:
+    """C `idiv` 截断商（cdq/xor/sub/sar 系列；Python // 是向下取整，负数差 1）。"""
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b >= 0) else -q
+
+
+def _c_mod(a: int, b: int) -> int:
+    """C `idiv` 余数（符号随被除数）。"""
+    return a - _c_div(a, b) * b
+
+
 class Pages(Page4Mixin):
     """0x459360 页机 + 页1/2/3（页4 由原 main.py 的 game 逻辑接手）。"""
 
@@ -2322,6 +2333,36 @@ class Pages(Page4Mixin):
             self.log("cmd.esc")
 
     # ---- UI 实体（0x43D430 / 0x424410）------------------------------------
+    def _p4_4cc_parent(self, prm):
+        """ui4cc/ui4fc ctor 的 rec3（父实体槽）→ 对象。句柄走 p4_links 解，
+        实体对象直通，0/None → None（脚本 OP03 的 prm=0 即 owner=NULL）。"""
+        if isinstance(prm, int):
+            if prm == 0:
+                return None
+            return getattr(self, "p4_links", {}).get(prm & 0x7FFFFFFF)
+        return prm
+
+    @staticmethod
+    def _p4_ent_field(o, off: int) -> int:
+        """父实体 dword 字段（Ent/UiEntity 都有 s32；None → 0，对应 exe 的
+        owner=NULL 读 0 页）。"""
+        if o is None:
+            return 0
+        try:
+            return o.s32(off)
+        except AttributeError:
+            return 0
+
+    @staticmethod
+    def _p4_ent_alive(o) -> int:
+        """父实体 byte[+0x34]（Ent.m[0x34] / UiEntity.alive；None → 0）。"""
+        if o is None:
+            return 0
+        m = getattr(o, "m", None)
+        if m is not None:
+            return m[0x34]
+        return 1 if getattr(o, "alive", True) else 0
+
     def spawn(self, queue: list, type_word: int, x: int = 0, y: int = 0,
               a3: int = 0, a4: int = 0) -> UiEntity:
         e = UiEntity(type_word=type_word, a3=a3, a4=a4)
@@ -2336,6 +2377,37 @@ class Pages(Page4Mixin):
                 e.disp = DisplayNode(
                     layer=2, rect=[0x120, 0x180, 0x1DF, 0x23F],
                     dst=[x - 0x60, y - 0x60])     # 0x435B4A sub 0x60
+            elif type_word == 0x46000002:
+                # 0x435B5C ctor：beh 0x4022F7（→0x430520 倒数）、[0x1C]=rec3、
+                # 层 2 rect(0xF0,0x1B0,0x11F,0x1C7)、dst=(x-0x18,y-0xC)
+                e.beh = 0x430520
+                e.d32(0x04, int(x) & 0xFFFFFFFF)   # 0x430450 基类
+                e.d32(0x08, int(y) & 0xFFFFFFFF)
+                e.d32(0x14, type_word)
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF)  # 0x435B8B [esi+0x1C]=[edi+0xC]
+                e.disp = DisplayNode(2, [0xF0, 0x1B0, 0x11F, 0x1C7],
+                                     [int(x) - 0x18, int(y) - 0xC])
+            elif type_word == 0x46000003:
+                # 0x435BC4 ctor：beh 0x4022F7、[0x1C]=1、层 2
+                # rect(0x1B0, rec3, 0x1DF, rec3+0x2F)、dst=(x-0x18,y-0x18)
+                e.beh = 0x430520
+                e.d32(0x04, int(x) & 0xFFFFFFFF)
+                e.d32(0x08, int(y) & 0xFFFFFFFF)
+                e.d32(0x14, type_word)
+                e.d32(0x1C, 1)
+                _p3 = int(a3) if isinstance(a3, int) else 0
+                e.disp = DisplayNode(2, [0x1B0, _p3, 0x1DF, _p3 + 0x2F],
+                                     [int(x) - 0x18, int(y) - 0x18])
+            elif type_word == 0x46000004:
+                # 0x435C2B ctor：beh 0x4022F7、[0x1C]=1、层 2
+                # rect(0xF0,0x1F8,0x107,0x20F)、dst=(x-0xC,y-0xC)
+                e.beh = 0x430520
+                e.d32(0x04, int(x) & 0xFFFFFFFF)
+                e.d32(0x08, int(y) & 0xFFFFFFFF)
+                e.d32(0x14, type_word)
+                e.d32(0x1C, 1)
+                e.disp = DisplayNode(2, [0xF0, 0x1F8, 0x107, 0x20F],
+                                     [int(x) - 0xC, int(y) - 0xC])
             return e
         if hi == 0x42000000:
             # 0x42 家族（脚本 OP03 的摆放物）。目前只实现 0x42000004（色块条）；
@@ -2775,6 +2847,473 @@ class Pages(Page4Mixin):
                 e.raw[0x10] = 1
                 e.disp = DisplayNode(layer=0, rect=[0, 0, 0, 0],
                                      dst=[int(x) - 0xC, int(y) - 0xC])
+        elif hi == 0x44000000:
+            # 0x4355E0 的 0x44 分派（0x435943）：0x44000001→0x4359B3、0x44000002→0x435952
+            e.d32(0x04, int(x) & 0xFFFFFFFF)          # 0x430450 基类：[+4]=x
+            e.d32(0x08, int(y) & 0xFFFFFFFF)          # [+8]=y
+            e.d32(0x14, type_word)                    # [+0x14]=type
+            if type_word == 0x44000001:
+                # ctor 0x4359B3：beh 0x401B86→0x437F30；[0x1C]=rand%0x10-8、
+                # [0x20]=rand%0x10-0x18；层 2 rect(0x150,0xC0,0x17F,0xEF)、
+                # dst=(x-0x18,y-0x18)
+                e.beh = 0x437F30
+                e.d32(0x1C, (self.p4_rand() % 0x10 - 8) & 0xFFFFFFFF)        # 0x4359BC divmod 余数
+                e.d32(0x20, (self.p4_rand() % 0x10 - 0x18) & 0xFFFFFFFF)    # 0x4359DC
+                e.disp = DisplayNode(2, [0x150, 0xC0, 0x17F, 0xEF],
+                                     [int(x) - 0x18, int(y) - 0x18])
+            elif type_word == 0x44000002:
+                # ctor 0x435952：beh 0x4013D4→0x437F80；层 2
+                # rect(0x1C0,0xC0,0x1DF,0xDF)、dst=(x-0x10,y-0x10)
+                e.beh = 0x437F80
+                e.disp = DisplayNode(2, [0x1C0, 0xC0, 0x1DF, 0xDF],
+                                     [int(x) - 0x10, int(y) - 0x10])
+            else:
+                e.beh = "default"
+        elif hi == 0x47000000:
+            # 0x435A64 分派：仅 0x47000001 → ctor 0x435A70
+            if type_word == 0x47000001:
+                # beh 0x4020F4→0x438070；[0x1C]=0、[0x20]=rec3(摆动周期)、[0x24]=0x18；
+                # 层 2 rect(0x180,0xC0,0x197,0xD7)、dst=(x-0xC,y-0xC)
+                e.beh = 0x438070
+                e.d32(0x04, int(x) & 0xFFFFFFFF)
+                e.d32(0x08, int(y) & 0xFFFFFFFF)
+                e.d32(0x14, type_word)
+                e.d32(0x1C, 0)                             # 0x435A7F [esi+0x1C]=ebx(0)
+                e.d32(0x20, int(a3) & 0xFFFFFFFF)          # 0x435A9B [esi+0x20]=rec3
+                e.d32(0x24, 0x18)                          # 0x435A9E
+                e.disp = DisplayNode(2, [0x180, 0xC0, 0x197, 0xD7],
+                                     [int(x) - 0xC, int(y) - 0xC])
+            else:
+                e.beh = "default"
+        elif hi == 0x48000000:
+            # 0x435C93 分派：0x48000001..08 → 0x435CA9/0x435D6F/0x435E34/0x435EA9/
+            # 0x435EA9/0x435F32/0x435FB0/0x43601C
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            _p48 = self._p4_4cc_parent(a3)
+            if type_word in (0x48000001, 0x48000002):
+                # ctor 0x435CA9/0x435D6F：beh 0x4012C1→0x438240 / 0x401D4D→0x438410。
+                # [0x1C]=0、[0x20]=(rand&0x18)+8 / (rand&0x30)+0x10、[0x24]=±0x18
+                # （rand 奇偶 → neg/sbb/and 0xD0/add 0x18）、
+                # [0x28]=((rand&0x3FF)-0xC0)<<4、[0x2C]=((rand&0x3FF)-0x110)<<4、
+                # [0x30]=rec3（滚动主人）；层 2；
+                # rect 01=(0x18,0x78,0x27,0x87) / 02=(0,0x78,0xB,0x83)；
+                # dst 初始 (−0x10,−0x10) / (−0xC,−0xC)；
+                # byte[node+0x1C] = ([0x2C]+0x100)<0（sets al：约 1/4 概率立即可见）
+                _tw = 0x18 if type_word == 0x48000001 else 0x30
+                _tb = 8 if type_word == 0x48000001 else 0x10
+                e.beh = 0x438240 if type_word == 0x48000001 else 0x438410
+                e.d32(0x1C, 0)                             # 0x435CB0/0x435D76
+                e.d32(0x20, ((self.p4_rand() & _tw) + _tb) & 0xFFFFFFFF)
+                _r1 = self.p4_rand()
+                e.d32(0x24, (0xE8 if (_r1 & 1) else 0x18) & 0xFFFFFFFF)
+                e.d32(0x28, ((self.p4_rand() & 0x3FF) - 0xC0) << 4 & 0xFFFFFFFF)
+                v2c = ((self.p4_rand() & 0x3FF) - 0x110) << 4
+                e.d32(0x2C, v2c & 0xFFFFFFFF)
+                e.d32(0x30, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.d32(0x1C, 0)                             # 覆盖（句柄模式存 0x30 之外）
+                if type_word == 0x48000001:
+                    e.disp = DisplayNode(2, [0x18, 0x78, 0x27, 0x87], [-0x10, -0x10])
+                else:
+                    e.disp = DisplayNode(2, [0, 0x78, 0xB, 0x83], [-0xC, -0xC])
+                # 0x435D5E/0x435E1D：byte[node+0x1C] = SF([0x2C]+0x100)
+                e.disp.active = ((v2c + 0x100) & 0xFFFFFFFF) >= 0x80000000
+            elif type_word == 0x48000003:
+                # ctor 0x435E34：beh 0x401A91→0x4385E0；[0x1C]=0、[0x20]=rec0<<4、
+                # [0x24]=rec1<<4、[0x28]=rec3；层 2 rect(0x30,0,0x11F,0xEF)、
+                # dst=(x-0x78,y-0x78)
+                e.beh = 0x4385E0
+                e.d32(0x1C, 0)
+                e.d32(0x20, (int(x) << 4) & 0xFFFFFFFF)
+                e.d32(0x24, (int(y) << 4) & 0xFFFFFFFF)
+                e.d32(0x28, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.disp = DisplayNode(2, [0x30, 0, 0x11F, 0xEF],
+                                     [int(x) - 0x78, int(y) - 0x78])
+            elif type_word in (0x48000004, 0x48000005):
+                # ctor 0x435EA9（两型共用）：beh 0x40150F→0x438660；[0x1C]=0、
+                # [0x20]=rec0<<4、[0x24]=rec1<<4、[0x28]=rec3、
+                # [0x2C]=(type==0x48000005)（闪烁门）；层 2 rect(0x120,0x90,0x17F,0xEF)、
+                # dst=(x-0x30,y-0x30)
+                e.beh = 0x438660
+                e.d32(0x1C, 0)
+                e.d32(0x20, (int(x) << 4) & 0xFFFFFFFF)
+                e.d32(0x24, (int(y) << 4) & 0xFFFFFFFF)
+                e.d32(0x28, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.d32(0x2C, 1 if type_word == 0x48000005 else 0)
+                e.disp = DisplayNode(2, [0x120, 0x90, 0x17F, 0xEF],
+                                     [int(x) - 0x30, int(y) - 0x30])
+            elif type_word == 0x48000006:
+                # ctor 0x435F32：beh 0x401F23→0x438750；[0x1C]=0、[0x20]=rec0<<4、
+                # [0x24]=rec1<<4、[0x28]=rec3、[0x2C]=1；层 2 rect(0x120,0,0x1AF,0x8F)、
+                # dst=(x-0x48,y-0x48)
+                e.beh = 0x438750
+                e.d32(0x1C, 0)
+                e.d32(0x20, (int(x) << 4) & 0xFFFFFFFF)
+                e.d32(0x24, (int(y) << 4) & 0xFFFFFFFF)
+                e.d32(0x28, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.d32(0x2C, 1)
+                e.disp = DisplayNode(2, [0x120, 0, 0x1AF, 0x8F],
+                                     [int(x) - 0x48, int(y) - 0x48])
+            elif type_word == 0x48000007:
+                # ctor 0x435FB0：beh 0x401A2D→0x4387D0；出生点=自机−(rec0,rec1)·16、
+                # [0xC]=0x18、[0x18]=1、[0x1C]=0、[0x20]=rec0、[0x24]=rec1；
+                # 层 2 rect(0x180,0xC0,0x1AF,0xEF)、dst=(x-0x18,y-0x18)
+                e.beh = 0x4387D0
+                _r0 = int(x) & 0xFFFFFFFF
+                _r1 = int(y) & 0xFFFFFFFF
+                e.d32(0x04, (self.p4_player_x() - ((_r0 << 4) & 0xFFFFFFFF)) & 0xFFFFFFFF)
+                e.d32(0x08, (self.p4_player_y() - ((_r1 << 4) & 0xFFFFFFFF)) & 0xFFFFFFFF)
+                e.d32(0x0C, 0x18)                          # 0x435FD9
+                e.d32(0x1C, 0)                             # 0x435FE5
+                e.d32(0x20, _r0)                           # 0x435FF0 [esi+0x20]=rec0
+                e.d32(0x24, _r1)                           # 0x435FFD [esi+0x24]=rec1
+                e.d32(0x18, 1)                             # 0x435FF6
+                e.disp = DisplayNode(2, [0x180, 0xC0, 0x1AF, 0xEF],
+                                     [e.s32(0x04) - 0x18, e.s32(0x08) - 0x18])
+            elif type_word == 0x48000008:
+                # ctor 0x43601C：beh 0x4014E2→0x438840；[0xC]=0x18、byte[0x10]=1、
+                # [0x1C]=rec3（父）、[0x20]=0、[0x24]=1、[0x18]=1；层 2
+                # rect(0x180,0x90,0x1AF,0xBF)、dst=(x-0x18,y-0x18)、byte[node+0x1C]=0
+                e.beh = 0x438840
+                e.d32(0x0C, 0x18)                          # 0x436026
+                e.raw[0x10] = 1                            # 0x43602D
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.d32(0x20, 0)                             # 0x436057
+                e.d32(0x24, 1)                             # 0x43605A
+                e.d32(0x18, 1)                             # 0x43605D
+                e.disp = DisplayNode(2, [0x180, 0x90, 0x1AF, 0xBF],
+                                     [int(x) - 0x18, int(y) - 0x18])
+                e.disp.active = 0                          # 0x4360AD byte[edx+0x1C]=bl(0)
+            else:
+                e.beh = "default"
+        elif hi == 0x49000000:
+            # 0x436409 分派：0x49000001..08 → 表 0x4370E0
+            #   1→0x43641F、2→0x4364EA、3→0x4365BC、4→0x43660D、5→0x4366AF、
+            #   6→0x43671D、7→0x4367B0、8→0x4367F9
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word in (0x49000002, 0x49000003):
+                # ctor 0x43641F/0x4364EA：beh 0x4012C1→0x438240 / 0x401D4D→0x438410。
+                # [0x1C]=0、[0x20]=(rand&0x18)+8 / (rand&0x30)+0x10、[0x24]=±0x18、
+                # r=(rand&0x3F)+0x20、ang=(rand&0xFF)*14、
+                # [0x28]=(cos(ang)*r>>4)+0x1400、[0x2C]=(sin(ang)*r>>4)+0xF00、
+                # [0x30]=rec3；层 2 rect 02=(0x18,0x78,0x27,0x87) / 03=(0,0x78,0xB,0x83)、
+                # dst (−0x10,−0x10) / (−0xC,−0xC)；不写 node+0x1C（heap 残留→可见）
+                _tw = 0x18 if type_word == 0x49000002 else 0x30
+                _tb = 8 if type_word == 0x49000002 else 0x10
+                e.beh = 0x438240 if type_word == 0x49000002 else 0x438410
+                e.d32(0x1C, 0)
+                e.d32(0x20, ((self.p4_rand() & _tw) + _tb) & 0xFFFFFFFF)
+                _r1 = self.p4_rand()
+                e.d32(0x24, (0xE8 if (_r1 & 1) else 0x18) & 0xFFFFFFFF)
+                _rr = (self.p4_rand() & 0x3F) + 0x20       # 0x43644F/0x43651C
+                _ang = (self.p4_rand() & 0xFF) * 14        # 0x436461/0x43652C
+                e.d32(0x28, ((fcos(_ang) * _rr) >> 4) + 0x1400 & 0xFFFFFFFF)
+                e.d32(0x2C, ((fsin(_ang) * _rr) >> 4) + 0xF00 & 0xFFFFFFFF)
+                e.d32(0x30, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                if type_word == 0x49000002:
+                    e.disp = DisplayNode(2, [0x18, 0x78, 0x27, 0x87], [-0x10, -0x10])
+                else:
+                    e.disp = DisplayNode(2, [0, 0x78, 0xB, 0x83], [-0xC, -0xC])
+            elif type_word == 0x49000005:
+                # ctor 0x4366AF：beh 0x4023BF→0x438B20；[0x1C]=0、[0x20]=0xC0、
+                # [0x24]=rec3（≠0 时每 2 帧发 0x31000001 狙击弹）；层 2
+                # rect(0xF0,0,0x1AF,0xBF)、dst=(x-0x60,y-0x60)
+                e.beh = 0x438B20
+                e.d32(0x1C, 0)                             # 0x4366BE
+                e.d32(0x20, 0xC0)                          # 0x4366C1
+                e.d32(0x24, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.disp = DisplayNode(2, [0xF0, 0, 0x1AF, 0xBF],
+                                     [int(x) - 0x60, int(y) - 0x60])
+            elif type_word == 0x49000006:
+                # ctor 0x43671D：beh 0x401195→0x438F10；[0x1C]=0、[0x20]=rec3；层 2；
+                # rect t/b 按 rec3≠0 取窄带：(0,0x60,0x2F,0x61)/(0,0x90,0x2F,0x91)；
+                # dst=(x-0x18,y-0x18)、byte[node+0x1C]=0（438F10 在 t>0x18 点亮）
+                _nz = 0 if (isinstance(a3, int) and a3 == 0) else 1
+                e.beh = 0x438F10
+                e.d32(0x1C, 0)                             # 0x436727
+                e.d32(0x20, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                _t = 0x60 if _nz else 0x90                 # 0x436759 add edi,0x90
+                _b = 0x61 if _nz else 0x91                 # 0x436749 add edx,0x91
+                e.disp = DisplayNode(2, [0, _t, 0x2F, _b],
+                                     [int(x) - 0x18, int(y) - 0x18])
+                e.disp.active = 0                          # 0x4367A8 byte[edx+0x1C]=bl(0)
+            elif type_word == 0x49000007:
+                # ctor 0x4367B0：beh 0x401DE3→0x438F80；[0x1C]=0、[0x20]=rec3；层 2；
+                # rect (0,0x60,0x2F,0x8F)/(0,0x90,0x2F,0xBF) 按 rec3≠0；dst=(x-0x18,y-0x18)
+                _nz = 0 if (isinstance(a3, int) and a3 == 0) else 1
+                e.beh = 0x438F80
+                e.d32(0x1C, 0)                             # 0x4367BA
+                e.d32(0x20, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                _t = 0x60 if _nz else 0x90
+                _b = 0x8F if _nz else 0xBF                 # 0x4367DC add edx,0xBF
+                e.disp = DisplayNode(2, [0, _t, 0x2F, _b],
+                                     [int(x) - 0x18, int(y) - 0x18])
+            elif type_word == 0x49000008:
+                # ctor 0x4367F9：beh 0x401708→0x439000；[0x1C]=0x40（半径模）、
+                # [0x20]=rec3；层 2 rect(0xF0,0,0x1DF,0xEF)、dst=(x-0x78,y-0x78)
+                e.beh = 0x439000
+                e.d32(0x1C, 0x40)                          # 0x436808
+                e.d32(0x20, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.disp = DisplayNode(2, [0xF0, 0, 0x1DF, 0xEF],
+                                     [int(x) - 0x78, int(y) - 0x78])
+            else:
+                e.beh = "default"
+        elif hi == 0x4A000000:
+            # 0x4360DC 分派：0x4A000002..07 → 表 0x4370B8
+            #   2→0x4360F2、3→0x436230、4→0x436295、5→0x4362D3、6→0x43634D、7→0x4363B3
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word == 0x4A000002:
+                # ctor 0x4360F2：beh 0x401032→0x439250（自机拖尾碎片）。
+                # [0x1C]=rec1 奇偶 → (rec1−0x140)/2 或 −(rec1/2)（帧相位）、
+                # [0x20]=[0x24]=[0x2C]=0、[0x28]=rec1&3（方向）；层 2；
+                # rect/dst 由 rec0(0..3) 选 4 条带，rec0>3 只留层号：
+                #   0: rect(0,rec1,0x10F,rec1+1)  dst=(轨+0x30, rec1∓0x160/+0x200)
+                #   1: rect(0x110,rec1,0x16F,rec1+1)
+                #   2: rect(0x110,rec1+0x20,0x16F,rec1+0x21)
+                #   3: rect(0x170,rec1-0x32,0x1DF,rec1-0x31)  dst=(轨, …)
+                # 轨 = (rec1&2) ? 0x178 : 0x2D8；dst.y = (rec1&1) ? rec1-0x160 : rec1+0x200
+                _r1 = int(y) & 0xFFFFFFFF
+                _r0 = int(x) & 0xFFFFFFFF
+                _s1 = _r1 - 0x100000000 if _r1 & 0x80000000 else _r1   # 有符号 rec1
+                e.beh = 0x439250
+                if _r1 & 1:                                # 0x4360FC test al,1
+                    _ph = _c_div(_s1 - 0x140, 2)           # 0x436100 add -0x140; sar 1
+                else:
+                    _ph = -_c_div(_s1, 2)                  # 0x43610C sar 1; neg
+                e.d32(0x1C, _ph & 0xFFFFFFFF)              # 0x436116
+                e.d32(0x20, 0)                             # 0x436119
+                e.d32(0x24, 0)                             # 0x43611C
+                e.d32(0x2C, 0)                             # 0x436122
+                e.d32(0x28, _r1 & 3)                       # 0x436128 方向
+                _rail = 0x178 if (_r1 & 2) else 0x2D8      # 0x436136..0x436143
+                _dy = (_r1 - 0x160) if (_r1 & 1) else (_r1 + 0x200)   # 0x436152/0x43615A
+                _rects = {
+                    0: ([0, _r1, 0x10F, _r1 + 1], [_rail + 0x30, _dy]),
+                    1: ([0x110, _r1, 0x16F, _r1 + 1], [_rail, _dy]),
+                    2: ([0x110, _r1 + 0x20, 0x16F, _r1 + 0x21], [_rail, _dy]),
+                    3: ([0x170, _r1 - 0x32, 0x1DF, _r1 - 0x31], [_rail, _dy]),
+                }
+                if _r0 <= 3:
+                    _rc, _ds = _rects[_r0]
+                    e.disp = DisplayNode(2, _rc, _ds)
+                else:
+                    e.disp = DisplayNode(2, [0, 0, 0, 0], [0, 0])   # 0x43704E 无 rect/dst
+            elif type_word == 0x4A000003:
+                # ctor 0x436230：beh 0x401B95→0x430550（通用粒子）；[0x1C]=2、
+                # [0x20]=4、[0x24]=[0x28]=[0x2C]=0；层 3；rect=(0, w*48, 0x2F, w*48+0x2F)
+                # （w=0x45AFC0(0x4AB5B0,0xC000)=选机）；dst=(x-0x18,y-0x18)
+                e.beh = 0x430550
+                e.d32(0x1C, 2)                             # 0x43623A
+                e.d32(0x20, 4)                             # 0x436241
+                e.d32(0x24, 0)
+                e.d32(0x28, 0)
+                e.d32(0x2C, 0)
+                _w = (self.p4_afc0(0xC000) & 0xFFFFFFFF) * 48
+                e.disp = DisplayNode(3, [0, _w, 0x2F, _w + 0x2F],
+                                     [int(x) - 0x18, int(y) - 0x18])
+            elif type_word == 0x4A000004:
+                # ctor 0x436295：beh 0x401B95→0x430550；[0x1C]=1、[0x20]=9；层 3；
+                # rect(0x60,0x1C0,0x6F,0x1CF)、dst=(x-8,y-8)
+                e.beh = 0x430550
+                e.d32(0x1C, 1)                             # 0x4362A6
+                e.d32(0x20, 9)                             # 0x4362AD
+                e.d32(0x24, 0)
+                e.d32(0x28, 0)
+                e.d32(0x2C, 0)
+                e.disp = DisplayNode(3, [0x60, 0x1C0, 0x6F, 0x1CF],
+                                     [int(x) - 8, int(y) - 8])
+            elif type_word == 0x4A000005:
+                # ctor 0x4362D3：beh 0x401AB4→0x439420（扩散环）；[0x1C]=0、
+                # [0x20]=rand%0x20-0xF、[0x24]=rand%0x20-0xF；层 3；
+                # rect(0x60,0x1B0,0x6F,0x1BF)、dst=(x-8,y-8)
+                e.beh = 0x439420
+                e.d32(0x1C, 0)                             # 0x4362DA
+                e.d32(0x20, (self.p4_rand() % 0x20 - 0xF) & 0xFFFFFFFF)
+                e.d32(0x24, (self.p4_rand() % 0x20 - 0xF) & 0xFFFFFFFF)
+                e.disp = DisplayNode(3, [0x60, 0x1B0, 0x6F, 0x1BF],
+                                     [int(x) - 8, int(y) - 8])
+            elif type_word in (0x4A000006, 0x4A000007):
+                # ctor 0x43634D（beh 0x401D93→0x4394B0 爆风环，[0x1C]=0x40、x-=0x18、
+                # node+0x1C=1）/ 0x4363B3（beh 0x4022F7→0x430520，[0x1C]=0x100）：
+                # 层 2，节点 rect/dst 从父实体（rec3）节点拷贝
+                _par = self._p4_4cc_parent(a3)
+                e.beh = 0x4394B0 if type_word == 0x4A000006 else 0x430520
+                if type_word == 0x4A000006:
+                    e.d32(0x1C, 0x40)                      # 0x436357
+                    e.d32(0x04, (int(x) - 0x18) & 0xFFFFFFFF)   # 0x4363A5 x-=0x18
+                else:
+                    e.d32(0x1C, 0x100)                     # 0x4363BD
+                _pn = getattr(_par, "node", None) if _par is not None else None
+                _pr = list(_pn.rect) if _pn is not None else [0, 0, 0, 0]
+                _pd = list(_pn.dst) if _pn is not None else [0, 0]
+                e.disp = DisplayNode(2, _pr, _pd)
+                if type_word == 0x4A000006:
+                    e.disp.active = 1                      # 0x4363A1 byte[edx+0x1C]=1
+            else:
+                e.beh = "default"
+        elif hi == 0x4B000000:
+            # 0x436864 分派：0x4B000001→case0 0x436955（0x4B000002/03 另行）
+            if type_word == 0x4B000001:
+                # ctor 0x436955：beh 0x4022F7→0x430520、[0x1C]=-1（永生门）；层 0；
+                # rect/dst 由 rec0/rec1/rec3 的 word 半拆拼：
+                #   rect=(lo16(rec1), hi16(rec1), lo16(rec1)+lo16(rec3), hi16(rec1)+hi16(rec3))
+                #   dst=(lo16(rec0), hi16(rec0))
+                e.beh = 0x430520
+                _r0 = int(x) & 0xFFFFFFFF
+                _r1 = int(y) & 0xFFFFFFFF
+                _r3 = int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0
+                e.d32(0x04, _r0)
+                e.d32(0x08, _r1)
+                e.d32(0x14, type_word)
+                e.d32(0x1C, 0xFFFFFFFF)                    # 0x43695F
+                _rl = _r1 & 0xFFFF
+                _rt = (_r1 >> 16) & 0xFFFF
+                e.disp = DisplayNode(0, [_rl, _rt, _rl + (_r3 & 0xFFFF),
+                                         _rt + ((_r3 >> 16) & 0xFFFF)],
+                                     [_r0 & 0xFFFF, (_r0 >> 16) & 0xFFFF])
+            else:
+                e.beh = "default"
+        elif hi == 0x4D000000:
+            # 0x436F55 分派：0x4D000001→case0 0x436FCB、0x4D000002→case1 0x436F64
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word == 0x4D000001:
+                # ctor 0x436FCB：beh 0x401B95→0x430550（通用粒子）、[0x1C]=0xF、
+                # [0x20]=1、[0x24]=1、[0x28]=[0x2C]=0；层 2 rect(0xC0,0x60,0xEF,0x8F)、
+                # dst=(x-0x18,y-0x18)
+                e.beh = 0x430550
+                e.d32(0x1C, 0xF)                           # 0x436FEA
+                e.d32(0x20, 1)                             # 0x436FD5
+                e.d32(0x24, 1)                             # 0x436FD8
+                e.d32(0x28, 0)                             # 0x436FF1
+                e.d32(0x2C, 0)                             # 0x436FF4
+                e.disp = DisplayNode(2, [0xC0, 0x60, 0xEF, 0x8F],
+                                     [int(x) - 0x18, int(y) - 0x18])
+            elif type_word == 0x4D000002:
+                # ctor 0x436F64：beh 0x40171C→0x439F80（砖墙）；[0x1C]=rec3（父实体/0）、
+                # [0x20]=(rec1<<16)|(rec0&0xFFFF)（模式字/轨道字）、[0x24]=0、
+                # [0x28]=0x960/rec0（角步，rec0=0 → 0）、[0x2C]=[0x30]=0；层 2；
+                # rect(0xF0,0x1C0,0x12F,0x1FF)、dst=(0,0)
+                e.beh = 0x439F80
+                _r0 = int(x) & 0xFFFFFFFF
+                _r1 = int(y) & 0xFFFFFFFF
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                e.d32(0x20, (((_r1 << 16) & 0xFFFFFFFF) | (_r0 & 0xFFFF)) & 0xFFFFFFFF)
+                e.d32(0x24, 0)                             # 0x436F76
+                _step = 0
+                _sx = _r0 - 0x100000000 if _r0 & 0x80000000 else _r0
+                if _sx != 0:
+                    _step = _c_div(0x960, _sx)             # 0x436F8D idiv
+                e.d32(0x28, _step & 0xFFFFFFFF)            # 0x436F99
+                e.d32(0x2C, 0)                             # 0x436FA9
+                e.d32(0x30, 0)                             # 0x436FAC
+                e.disp = DisplayNode(2, [0xF0, 0x1C0, 0x12F, 0x1FF], [0, 0])
+            else:
+                e.beh = "default"
+        elif hi == 0x4F000000:
+            # 0x4369D6 分派（0x4F000001..0C，表 0x437100）；这里落 01/0A/0C
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word == 0x4F000001:
+                # ctor 0x4369E6：beh 0x401924→0x438110（調整网格砖）；[0x1C]=[0x20]=0、
+                # [0x24]=(rec3&1?2:0)-1、[0x28]=(rec3&2?2:0)-1；层 0；rect(0,0,0x78,0x50)、
+                # dst=(x-0x3C,y-0x28)
+                e.beh = 0x438110
+                _r3 = int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0
+                e.d32(0x1C, 0)                             # 0x4369ED
+                e.d32(0x20, 0)                             # 0x4369F0
+                e.d32(0x24, ((2 if (_r3 & 1) else 0) - 1) & 0xFFFFFFFF)   # 0x436A08
+                e.d32(0x28, ((2 if (_r3 & 2) else 0) - 1) & 0xFFFFFFFF)   # 0x436A22
+                e.disp = DisplayNode(0, [0, 0, 0x78, 0x50],
+                                     [int(x) - 0x3C, int(y) - 0x28])
+            elif type_word == 0x4F00000A:
+                # ctor 0x436E6C：beh 0x401992→0x439D30（結局面板）；[0x1C]=rec3、
+                # [0x20]=0、[0x24]=rec0<<2、[0x28]=rec1<<2、[0x2C]=0；层 = (rec3&0x10)?
+                # (rec3&3)+7 : (rec3&1)+5；rect = rec3&0x10 ? (0,0,0xF0,0xF0) :
+                # (0,0,0x290,0x1F0)；dst=(x,y)
+                _r3 = int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0
+                e.beh = 0x439D30
+                e.d32(0x1C, _r3)                           # 0x436E84
+                e.d32(0x20, 0)                             # 0x436E87
+                e.d32(0x24, (int(x) << 2) & 0xFFFFFFFF)    # 0x436E8A
+                e.d32(0x28, (int(y) << 2) & 0xFFFFFFFF)    # 0x436E8D
+                e.d32(0x2C, 0)
+                if _r3 & 0x10:
+                    e.disp = DisplayNode((_r3 & 3) + 7, [0, 0, 0xF0, 0xF0],
+                                         [int(x), int(y)])
+                else:
+                    e.disp = DisplayNode((_r3 & 1) + 5, [0, 0, 0x290, 0x1F0],
+                                         [int(x), int(y)])
+            elif type_word == 0x4F00000C:
+                # ctor 0x436DEF：beh 0x4022F7→0x430520、[0x1C]=-1（永生）；层 3；
+                # rect(0,0,0x27F,0x1DF)、dst=(0,0)
+                e.beh = 0x430520
+                e.d32(0x1C, 0xFFFFFFFF)                    # 0x436E03
+                e.disp = DisplayNode(3, [0, 0, 0x27F, 0x1DF], [0, 0])
+            else:
+                e.beh = "default"
+        elif hi == 0x5A000000:
+            # 0x449721 分派：0x5A000003→0x44977C、0x5A000004→0x449736
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word == 0x5A000003:
+                # ctor 0x44977C：beh 0x40141F→0x44AE00；[0x1C]=0；层 3；
+                # rect(0x60,0x1B0,0x6F,0x1BF)、dst=(x-8,y-8)
+                e.beh = 0x44AE00
+                e.d32(0x1C, 0)                             # 0x44978D
+                e.disp = DisplayNode(3, [0x60, 0x1B0, 0x6F, 0x1BF],
+                                     [int(x) - 8, int(y) - 8])
+            elif type_word == 0x5A000004:
+                # ctor 0x449736：beh 0x4018B1→0x44AE50；[0x1C]=0、[0x20]=rand%0x20-0xF、
+                # [0x24]=rand%0x20-0xF；层 3 rect(0x60,0x1B0,0x6F,0x1BF)、dst=(x-8,y-8)
+                e.beh = 0x44AE50
+                e.d32(0x1C, 0)                             # 0x44973D
+                e.d32(0x20, (self.p4_rand() % 0x20 - 0xF) & 0xFFFFFFFF)
+                e.d32(0x24, (self.p4_rand() % 0x20 - 0xF) & 0xFFFFFFFF)
+                e.disp = DisplayNode(3, [0x60, 0x1B0, 0x6F, 0x1BF],
+                                     [int(x) - 8, int(y) - 8])
+            else:
+                e.beh = "default"
+        elif hi == 0x5C000000:
+            # 0x44996B 分派：0x5C000001→0x4499FB、0x5C000002→0x449999
+            e.d32(0x04, int(x) & 0xFFFFFFFF)
+            e.d32(0x08, int(y) & 0xFFFFFFFF)
+            e.d32(0x14, type_word)
+            if type_word == 0x5C000001:
+                # ctor 0x4499FB：beh 0x401A32→0x44AEE0；[0x1C]=rec0<<8、[0x20]=rec1<<8、
+                # [0x24]=-(rand&0x3FF)、[0x28]=-0x200-(rand%0x3FF)；层 2；
+                # rect(0xC0,0x90,0xEF,0xBF)、dst=(x-0x18,y-0x18)、byte[node+0x1C]=1
+                e.beh = 0x44AEE0
+                e.d32(0x1C, (int(x) << 8) & 0xFFFFFFFF)    # 0x449A07
+                e.d32(0x20, (int(y) << 8) & 0xFFFFFFFF)    # 0x449A10
+                e.d32(0x24, (-(self.p4_rand() & 0x3FF)) & 0xFFFFFFFF)     # 0x449A1D
+                e.d32(0x28, ((-0x200 - self.p4_rand() % 0x3FF)) & 0xFFFFFFFF)  # 0x449A54
+                e.disp = DisplayNode(2, [0xC0, 0x90, 0xEF, 0xBF],
+                                     [int(x) - 0x18, int(y) - 0x18])
+            elif type_word == 0x5C000002:
+                # ctor 0x449999：beh 0x401A3C→0x44AF60（贴父跟随）；[0xC]=父[0xC]、
+                # [0x1C]=父指针；层/rect/dst 从父节点拷贝；byte[node+0x1C]=1
+                _par = self._p4_4cc_parent(a3)
+                e.beh = 0x44AF60
+                e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
+                _pc = self._p4_ent_field(_par, 0x0C)
+                e.d32(0x0C, _pc & 0xFFFFFFFF)              # 0x4499A6
+                _pn = getattr(_par, "node", None) if _par is not None else None
+                _pl = getattr(_pn, "layer", 0) if _pn is not None else 0
+                _pr = list(_pn.rect) if _pn is not None else [0, 0, 0, 0]
+                _pd = list(_pn.dst) if _pn is not None else [0, 0]
+                e.disp = DisplayNode(_pl, _pr, _pd)
+                e.disp.active = 1                          # 0x449AA3
+            else:
+                e.beh = "default"
         else:
             e.beh = "default"                     # 0x43DA4F / 0x449AA7
         queue.append(e)
