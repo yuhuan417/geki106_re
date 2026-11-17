@@ -15,3 +15,6 @@ remake/godot/.godot/
 .DS_Store
 *.swp
 remake/fonts/*.ttc
+
+# 参考视频（518MB，仅供人工对照；结论以 exe 反汇编为准）
+geki.mp4
