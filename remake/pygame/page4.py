@@ -15220,6 +15220,57 @@ def _beh_44AF60(self, e) -> bool:
     return p.m[0x34] != 0
 
 
+def _p4_explosion_body(self, e, se_random: bool) -> bool:
+    """`0x439000`/`0x4394B0` 共用主体：每帧 2 颗火花、每 0x10 帧一颗核心 + SE，
+    第 0xE0 帧放 0x61000005 闪光，第 0x140 帧走 0x43A700 终结环并自灭。
+
+    ```
+    0x439013 每颗：ang=rand%0xE10；r=rand % [+0x1C]
+                   cb=(cos*r+0x7F)>>8；sb=(sin*r+0x7F)>>8
+                   0x41000004 @(x+cb, y+sb)，速度对=((cb+2)>>2,(sb+2)>>2)
+    0x4390D7 (t & 0xF)==0 → 0x41000001 @(x-cb, y-sb) + SE
+                   （0x439000 固定 4；0x4394B0 按 (rand&3)?4:0xB）
+    0x43914A t==0xE0 → 0x61000005 @(0, 0xFF) prm=2 → ui52c
+    0x439191 t++；旧 t==0x140 → 0x43A700(x,y,0xF0,1) 并 return 0
+    ```
+    """
+    t = e.s32(0x1C)
+    x = e.s32(0x04)
+    y = e.s32(0x08)
+    div = t if t else 1
+    cb = sb = 0
+    for _ in range(2):
+        ang = self.p4_rand() % 0xE10
+        r = self.p4_rand() % div
+        cb = (page4_cos(ang) * r + 0x7F) >> 8
+        sb = (page4_sin(ang) * r + 0x7F) >> 8
+        self.spark_spawn(x + cb, y + sb, (cb + 2) >> 2, (sb + 2) >> 2)
+    if (t & 0xF) == 0:
+        self.spawn(self._p4_q("ui4cc"), 0x41000001, x - cb, y - sb)
+        if se_random:
+            se = 4 if (self.p4_rand() & 3) else 0xB
+        else:
+            se = 4
+        self.p4_se_pan(se, (x - cb - 0x140) << 4)
+    if t == 0xE0:
+        self.spawn(self._p4_q("ui52c"), 0x61000005, 0, 0xFF, 2)
+    e.d32(0x1C, (t + 1) & 0xFFFFFFFF)
+    if t == 0x140:
+        self.p4_43a700(x, y, 0xF0, 1)
+        return False
+    return True
+
+
+def _beh_439000(self, e) -> bool:
+    """`0x439000`（0x49000008，thunk 0x401708）：大爆炸（SE 固定 4）。"""
+    return _p4_explosion_body(self, e, False)
+
+
+def _beh_4394B0(self, e) -> bool:
+    """`0x4394B0`（0x4A000006，thunk 0x401D93）：爆风环（SE 4/0xB 随机）。"""
+    return _p4_explosion_body(self, e, True)
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15241,6 +15292,8 @@ P4_BEH: dict[int, object] = {
     0x438F80: _beh_438F80,                          # 0x49000007 闪烁壳（dst 下移）
     0x439420: _beh_439420,                          # 0x4A000005 扩散环
     0x44AF60: _beh_44AF60,                          # 0x5C000002 节点镜像
+    0x439000: _beh_439000,                          # 0x49000008 大爆炸
+    0x4394B0: _beh_4394B0,                          # 0x4A000006 爆风环
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
@@ -16978,6 +17031,24 @@ class Page4Mixin:
             self.p4_se_pan(4, (x - 0x140) << 4)    # 0x43A685 SE#4 声像
 
 
+    def p4_43a700(self, x: int, y: int, dur: int, flag: int) -> None:
+        """`0x43A700`（thunk 0x4015BE）：`dur>>3` 次环形火花 + 可选 SE11。
+
+        每次两次 `rand % (2*dur)`，取 `o1 = 余数1 - dur`、`o2 = 余数2 - dur`，
+        生成 `0x41000001 @ (x+o2, y+o1)`；ctor 内部再 `rand%3` 选爆炸行
+        （`rect = (0xC0+48*r3, 0, 0xEF+48*r3, 0x2F)`）。`flag != 0` → SE 11。
+        """
+        m2 = 2 * dur
+        for _ in range(dur >> 3):
+            o1 = self.p4_rand_mod(m2)[1] - dur
+            o2 = self.p4_rand_mod(m2)[1] - dur
+            g = self.p4_spawn41(x + o2, y + o1, 0x41000001)
+            if g is not None:
+                _, r3 = self.p4_rand_mod(3)
+                g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
+        if flag:
+            self.p4_se_pan(11, (x - 0x140) << 4)
+
     def _beh_427580(self, e) -> bool:
         """`0x427580`（0x61000004 击破波纹驱动，thunk 0x40193D）。
 
@@ -17005,17 +17076,7 @@ class Page4Mixin:
             y = e.s32(0x08)
             dur = e.s32(0x20)
             flag = e.g32(0x24)
-            m2 = 2 * dur
-            n = dur >> 3                               # 0x43A70E sar 3
-            for _ in range(n):                         # 0x43A723..0x43A792 循环
-                o1 = self.p4_rand_mod(m2)[1] - dur
-                o2 = self.p4_rand_mod(m2)[1] - dur
-                g = self.p4_spawn41(x + o2, y + o1, 0x41000001)       # 0x43A758
-                if g is not None:
-                    _, r3 = self.p4_rand_mod(3)                       # ctor 0x428CCF
-                    g.node.rect = (0xC0 + 48 * r3, 0, 0xEF + 48 * r3, 0x2F)
-            if flag:
-                self.p4_se_pan(11, (x - 0x140) << 4)   # 0x43A7AE SE#11 声像
+            self.p4_43a700(x, y, dur, flag)             # 0x43A700 终结环
             return False                               # 0x4275D4 自灭
         return True                                    # 0x4275D8
 
