@@ -19815,11 +19815,16 @@ class Page4Mixin:
         return bool(self.p4_in_bits() & 1)
 
     def p4_btn0_edge(self) -> bool:
+        """`byte[0x4AB596]`：**任意动作键按住**（不是按下沿）。
+
+        反汇编证据（2026-11-17）：`0x44E7CF mov [edi+0xA], al`，`al` 由 `0x44E7A5..0x44E7C8`
+        对三处 DIK 状态取 OR；记录基址 +0xA = `0x4AB596`。见 ANALYSIS §16.444。
+        """
         import os as _o
         if _o.environ.get("P4_AUTOKEY") and getattr(self, "p4_frames", 0) >= 240:
             return True
-        """`byte[0x4AB596]`：btn0 **按下沿**（输入记录第 3 字节，`rec.e0`）。"""
-        return bool(getattr(self.inp.rec, "e0", 0))
+        r = self.inp.rec
+        return bool(getattr(r, "b0", 0) or getattr(r, "b1", 0))
 
     def p4_key_held(self) -> bool:
         """`byte[0x4AB597]`：**当前按键码非 0**（0x44E9F6..0x44EA08 写入 `eax+0x20`，
@@ -19827,8 +19832,8 @@ class Page4Mixin:
         return bool(getattr(self.inp.rec, "key", 0))
 
     def p4_btn1_edge(self) -> bool:
-        """`byte[0x4AB597]`：btn1 **按下沿**（输入记录第 4 字节，`rec.e1`）。"""
-        return bool(getattr(self.inp.rec, "e1", 0))
+        """`byte[0x4AB597]`：**当前按键码非 0**（不是按下沿）；等价于 `p4_key_held()`。"""
+        return self.p4_key_held()
 
     def p4_btn1_release(self) -> bool:
         """`byte[0x4AB599]`：btn1 **松开沿**（输入记录第 6 字节，`rec.r1`）。"""
