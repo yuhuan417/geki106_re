@@ -383,7 +383,9 @@ ENT23_INIT = {
     #   "第一关 boss 看不见"）。[+0x1C] 的 ctor 初值此前也漏了（脚本 d=0，暂未显形）。
     0x23000015: {"beh": 0x4017EE, "imm": {0x20: 0}, "d_to": 0x1C,
                  "r01sh4": ((0x24, 0), (0x28, 1))},
-    0x23000016: {"beh": 0x401D48, "imm": {}},
+    # 0x40DD5E：payload 三元组 p[0]/p[1]/p[2] → [+0x1C]/[+0x24]/[+0x2C]；
+    #   [+0x20]=0x30、[+0x28]=0；**p[2]==0 时 [+0x18]=-1**（否则保留 prop 的 0xC80）
+    0x23000016: {"beh": 0x401D48, "imm": {}, "s2316": True},
     0x23000017: {"beh": 0x401951,
                  "imm": {0x24: 0, 0x28: 0x1E, 0x2C: 0, 0x30: 0},
                  "p3pair": (0x1C, 0x20)},   # ctor 0x40DDB6：[0x1C]=p3[0]、[0x20]=p3[1]
@@ -951,6 +953,15 @@ class Ent:
                 if "vtup" in info and isinstance(d, tuple):
                     self.d32(0x1C, d[0] & 0xFFFFFFFF)
                     self.d32(0x20, (d[1] << 4) & 0xFFFFFFFF)
+                if info.get("s2316"):        # 0x40DD5E（0x23000016）
+                    if isinstance(d, tuple) and len(d) >= 3:
+                        self.d32(0x1C, int(d[0]) & 0xFFFFFFFF)
+                        self.d32(0x24, int(d[1]) & 0xFFFFFFFF)
+                        self.d32(0x2C, int(d[2]) & 0xFFFFFFFF)
+                        self.d32(0x20, 0x30)
+                        self.d32(0x28, 0)
+                        if (int(d[2]) & 0xFFFFFFFF) == 0:
+                            self.d32(0x18, 0xFFFFFFFF)
                 if info.get("slot1"):        # 0x40DE43：[0x18]=0x45AFC0(0x4AB5B0,0xC000)+1
                     pg = getattr(self, "_pages", None)
                     if pg is not None:
