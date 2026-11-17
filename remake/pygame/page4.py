@@ -8564,16 +8564,21 @@ def _beh_40B040(self, e) -> bool:
                     tx = 0x27F if self.p4_player_x() >= x else 0
                     self.p4_43B610(e, tx, y, -0x400 & 0xFFFFFFFF)
             elif sub == 4:
-                # 0x40B26A：`t % 0x50 < 0x36` 且 `(t&3)==3` → 8 向扇形（4 对，速度 −0x200）。
-                # ⚠ 原件用两张 8 项表（A=[esp+0x18+4i]、B=[esp+0x38+4i]）分别作 x/y 分量，
-                #   复刻暂用单表对称近似，已记入 §15。
+                # 0x40B26A：`t % 0x50 < 0x36` 且 `(t&3)==3` → 4 轮 ×2 发（速度 −0x200）。
+                # 两张表按栈跟踪定值（E 为函数入口 esp）：A 基 E−220、B 基 E−188，
+                # 循环只走 i=0..3（`edi += 8; cmp edi,0x20`）：
+                #   A = (0x64, 0x62, 0x5C, 0x53)；B = (0, 0x14, 0x26, 0x38)
+                # 每轮：`if (main.x < 玩家x) A[i] 取负`，发 (−A, +B) 与 (−A, −B)。
                 if (t % 0x50) < 0x36 and (t & 3) == 3:
-                    for k in range(8):
-                        v = (0x62, 0x64, 0x5C, 0x53, 0x47, 0x38, 0x26, 0x14)[k]
+                    tabA = (0x64, 0x62, 0x5C, 0x53)
+                    tabB = (0, 0x14, 0x26, 0x38)
+                    for i in range(4):
+                        a = tabA[i]
+                        b = tabB[i]
                         if x < self.p4_player_x():
-                            v = -v
-                        self.p4_43B290(e, -v, v, -0x200 & 0xFFFFFFFF)
-                        self.p4_43B290(e, -v, -v, -0x200 & 0xFFFFFFFF)
+                            a = -a
+                        self.p4_43B290(e, -a, b, -0x200 & 0xFFFFFFFF)
+                        self.p4_43B290(e, -a, -b, -0x200 & 0xFFFFFFFF)
             elif sub == 7:
                 # 0x40B383：`test cl,1; je` ⇒ **t 为奇数**才发射；ang = (0x1E − t)*30；
                 # `0x43B290(e, cos(ang), sin(ang), -0xE00)` **只发一发**。
