@@ -14934,6 +14934,44 @@ def _beh_42A750(self, e) -> bool:
     return self.p4_430640(e)                                # 0x42A7D9 在屏=存活
 
 
+def _beh_437F30(self, e) -> bool:
+    """`0x437F30`（0x44000001 爆散碎片，thunk 0x401B86）：x += [0x1C]、[0x20]++、
+    y += [0x20]；node dst 同步 (+[0x1C], +[0x20])；存活 = **有符号** y < 0x1F8。
+
+    ```
+    0x437F33 ecx=[+0x1C]；0x437F36..3E x += ecx
+    0x437F39 eax=[+0x20]；0x437F44 inc；0x437F48 y += eax
+    0x437F56 0x401415(node+0x14, ecx, eax)   ; 0x45A6B0 dst += (vx, vy)
+    0x437F63 cmp [+8],0x1F8 ; setl
+    ```
+    """
+    vx = e.s32(0x1C)
+    e.d32(0x04, (e.s32(0x04) + vx) & 0xFFFFFFFF)
+    v = e.s32(0x20) + 1                                 # 有符号：inc 后直接参与加法
+    e.d32(0x20, v & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x08) + v) & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] + vx, e.node.dst[1] + v)
+    return e.s32(0x08) < 0x1F8
+
+
+def _beh_437F80(self, e) -> bool:
+    """`0x437F80`（0x44000002 碎片，thunk 0x4013D4）：node dst += (-4, 8)；
+    存活 = **有符号** node[+0x18]（dst.y）< 0x1F0。
+
+    ```
+    0x437F83 push 8 ; 0x437F85 push -4 ; 0x437F87 0x401415(node+0x14, -4, 8)
+    0x437F9B edx = [node+0x18] ; 0x437F9F cmp edx,0x1F0 ; setl
+    ```
+    """
+    if e.node is not None:
+        e.node.dst = (e.node.dst[0] - 4, e.node.dst[1] + 8)
+        y = e.node.dst[1]
+    else:
+        y = 0
+    return y < 0x1F0
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -14945,6 +14983,7 @@ P4_BEH: dict[int, object] = {
     0x442F60: _beh_442F60, 0x443040: _beh_443040,
     0x443210: _beh_443210, 0x4457F0: _beh_4457F0,
     0x44A000: _beh_44A000, 0x44A070: _beh_44A070,   # 0x54 族板条（op5 控制器子体）
+    0x437F30: _beh_437F30, 0x437F80: _beh_437F80,   # 0x44000001/02 碎片
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
     0x42A750: _beh_42A750,                       # 0x41000014 boss 闪 overlay
     0x432F20: _beh_432F20,
