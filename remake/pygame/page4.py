@@ -17390,7 +17390,11 @@ class Page4Mixin:
         else:
             l = code * 24
             rect = (l, 0x150, l + 0x17, 0x167)
-        self.p4_44d060(0xD, (x, y), 0, rect)
+        # ★ 2026-11-17 校正：0x44D060 的 arg1(0xD) 是**目标层**（`eax=[ecx+eax*4+0x14]`
+        # 取到的对象才 `call [vtable+0x1C]`），arg3(0) 是**源层**。
+        # 而字形格在层 0 = bm_cm48（240×528，实测 (code*24,0x150)-(+0x17,0x167) 有字、
+        # 字母行 0x180 同）（§16.468）；旧实现把 0xD 当源 ⇒ 从面板底图取格 ⇒ 数字空白。
+        self.p4_44d060(0, (x, y), 0xD, rect)
 
     def p4_423780(self, val: int, row: int) -> None:
         """`0x423780(this, val, row)`：定距三连画（个/十/百位，x = 0xF0/0xC0/0x90、
