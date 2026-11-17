@@ -15421,6 +15421,75 @@ def _beh_438070(self, e) -> bool:
     return self.p4_bit_any(4)
 
 
+def _beh_438240(self, e) -> bool:
+    """`0x438240`（0x48000001，thunk 0x4012C1）：受击壳——周期扩 rect、追踪父体、
+    越界 ±0x4000 回绕。
+
+    ```
+    0x438245 t=++[+0x1C]；t>[+0x20] → 0x45A790(node+4, 0,w,0,w) → rect.t/b += w；
+             rect.t∈{0,0xD8} → [+0x24] = −w
+    0x438286 p=[+0x30]；p[+0x1C] > 0x7D0：
+             sh = 5 + (type==0x48000001)
+             dx=(sar([+0x28]-0x13F1,sh))、dy=(sar([+0x2C]-0xEF1,sh))
+             两者为 0 → 各 +0x10；否则各加 dx/dy
+             [+0x28] 或 [+0x2C] 越出 [-0xC00,0x3400] → return 0
+             p[+0x1C] > 0x8BB → return 0
+    否则 [+0x28] += p[+0x20]；[+0x2C] += p[+0x24]
+    0x43831E 越界则 ±0x4000 回绕并把 byte[node+0x1C] 置 1
+    0x438386 x=(sar[+0x28],4)、y=(sar[+0x2C],4)；dst=(x-0xC,y-0xC)；return 1
+    ```
+    """
+    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
+    e.d32(0x1C, t)
+    if t > e.s32(0x20):
+        w = e.s32(0x24)
+        if e.node is not None:
+            r = e.node.rect
+            e.node.rect = (r[0], r[1] + w, r[2], r[3] + w)
+            if e.node.rect[1] in (0, 0xD8):
+                e.d32(0x24, (-w) & 0xFFFFFFFF)
+    p = self.p4_links.get(e.s32(0x30) & 0x7FFFFFFF)
+    vx = e.s32(0x28)
+    vy = e.s32(0x2C)
+    if p is not None:
+        if p.s32(0x1C) > 0x7D0:
+            sh = 5 + (1 if e.g32(0x14) == 0x48000001 else 0)
+            dx = (vx - 0x13F1) >> sh
+            dy = (vy - 0xEF1) >> sh
+            if dx == 0 and dy == 0:
+                vx += 0x10
+                vy += 0x10
+            else:
+                vx += dx
+                vy += dy
+            if not (-0xC00 <= vx <= 0x3400) or not (-0xC00 <= vy <= 0x3400):
+                return False
+            if p.s32(0x1C) > 0x8BB:
+                return False
+        else:
+            vx += p.s32(0x20)
+            vy += p.s32(0x24)
+        e.d32(0x28, vx & 0xFFFFFFFF)
+        e.d32(0x2C, vy & 0xFFFFFFFF)
+    if not (-0xC00 <= vx <= 0x3400):
+        vx += -0x4000 if vx >= 0 else 0x4000
+        e.d32(0x28, vx & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.active = 1
+    if not (-0xC00 <= vy <= 0x3400):
+        vy += -0x4000 if vy >= 0 else 0x4000
+        e.d32(0x2C, vy & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.active = 1
+    x = vx >> 4
+    y = vy >> 4
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = (x - 0xC, y - 0xC)
+    return True
+
+
 P4_BEH: dict[int, object] = {
     # op5 0x6x 族控制器（thunk 0x43DC90 = jmp [obj+0x40]，P4_OP5_BEH_THUNK 解真址）
     0x441490: _beh_441490, 0x4417D0: _beh_4417D0,
@@ -15447,6 +15516,7 @@ P4_BEH: dict[int, object] = {
     0x439250: _beh_439250,                          # 0x4A000002 拖尾碎片
     0x439D30: _beh_439D30,                          # 0x4F00000A 螺旋漂移
     0x438070: _beh_438070,                          # 0x47000001 摆动壳
+    0x438240: _beh_438240,                          # 0x48000001 受击壳
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
     0x44AEE0: _beh_44AEE0,                          # 0x5A000004 二次加速漂移
     0x41BD20: _beh_41BD20,                          # 0x28000017 变身后卫星本体
