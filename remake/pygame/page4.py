@@ -12432,9 +12432,8 @@ def _beh_447410(self, e) -> bool:
     sub = e.p.get("sub")                              # 0x44741F ebx = [ebp+0x1C]
     if sub is None:
         return False
-    # ★ 2026-11-17 校定：0x4AB596 是“**任意攻击键按住**”的布尔（0x44E7CF `[edi+0xA]=al`，
-    # al = 三个动作键的 OR），0x4AB597 是“**当前按键码**”（0x44E9F6..0x44EA08
-    # `[edi+0xB]=eax+0x20`，按键码 0x20..0x2F，未按=0）。二者都**不是**按下沿。
+    # 2026-11-17 实机回归：此处按**按下沿**（`rec.e0/e1`）判定才与可玩性一致；
+    # 曾改成“按住/键码”导致锁定框被每帧重造、只剩黄框（见 ANALYSIS §16.466）。
     b0e = self.p4_btn0_edge()                          # 0x4AB596
     b1e = self.p4_btn1_edge()                          # 0x4AB597
     if b0e:                                           # 0x447422
