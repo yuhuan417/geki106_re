@@ -2391,6 +2391,7 @@ rect.l 撞到 0x180/0x1C8 时 `[+0x24] = −w`。`node.dst.y -= 2`。
 | 冻结金标 | `python3 remake/regress_pages.py` | 16/16 哈希一致 |
 | 不变量审计 | `python3 remake/audit_p4.py` | 全部通过（rc=0） |
 | ctor 字段审计 | `python3 remake/audit_ctor.py` | 10 族 180 case，0 差异 |
+| 行为层审计 | `python3 remake/audit_beh.py` | 175 行为地址缺实现 0；290 键非入口 0 |
 | 行为登记/冒烟 | `python3 remake/check_behaviors.py` | 0 待实现；ENT 154 型×20 帧、0x31 26 型×30 帧 |
 | 长跑 | `python3 remake/longrun_p4.py 3000` | 无异常、无未实现、队列有界 |
 | 脚本回放 | `python3 remake/replay_scripts.py` | 26 链、异常 0 |
@@ -2617,3 +2618,14 @@ rec0/rec4 的指针解引用。
 
 **结论**：机器可验证的部分全部通过；文档（矩阵 301 行 + 8 个 §16 子章 + §15 三态表）
 与代码一致。仍属“待实机”的只有视觉/手感对照与 Windows 补丁效果（§15 第 5、7 项）。
+### 16.463 行为层审计脚本（2026-11-17）
+
+新增 `remake/audit_beh.py`，两条检查：
+
+1. **表驱动实现覆盖**：从 `ENT*_INIT` + `P4_41_CTOR` 收集 beh 并做 thunk 解析，
+   逐个确认有实现（`P4_BEH` / `Page4Mixin._beh_*` / `Pages._beh_*`；
+   `0x429D40` 由 geki 的 `_tick_spark4cc` 承担）；
+2. **入口合法性**：`P4_BEH` 的每个键都必须是 `re_dis` 认定的函数入口
+   （防止把 mid-function 地址当行为，0x41 族那次 thunk 误读就是这类问题的变体）。
+
+当前结果：**行为地址 175 个、缺实现 0；`P4_BEH` 290 键、非函数入口 0**。

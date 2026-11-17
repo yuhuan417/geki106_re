@@ -1223,3 +1223,7 @@ A1-A4/B1/C1-C9/D1-D3/E/F 全项：0x56CC94 总门、冲刺速度语义、子体�
 
 - 金标 16/16、audit_p4 rc=0、audit_ctor 180 case/0 差异、beh 34/34、longrun 3000 帧、
   replay 26 链 —— 全绿（详见 ANALYSIS §17.4）。
+
+### 批次 123：行为层审计（2026-11-17）
+
+- 新增 remake/audit_beh.py：175 个行为地址全有实现；P4_BEH 290 键全为函数入口。
