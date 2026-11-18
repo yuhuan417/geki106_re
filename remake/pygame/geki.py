@@ -2477,6 +2477,14 @@ class Pages(Page4Mixin):
             self.flags.set(2)
             return
         self.inp.set_mode(0)                              # 0x453B9B 0x44EDA0(0x4AB454,0)
+        # 回放输入管线：delta 由 page14_step 直接加到 inp.x/y（0x44EB60 回放分支 =
+        # [mgr+0x14] += tmp.dx 裸加 + 边界钳），但 inp.build 每帧仍会跑 —— 若留在
+        # 菜单管线（p4_cfg=None）它的尾部钳位会把指针拽回 448x400、和回放 delta
+        # 打架（实测飞机定在原点不跟手）。这里给一个"全屏边界、kb/ms 全 0"的
+        # 合成预设：_build_p4 只算出 dx=dy=0 并钳到 (0,0)-(640,480)，指针所有权
+        # 归回放。页14 收尾不恢复 —— 下一页的 enter 会重载自己的预设。
+        self.inp.p4_cfg = dict(kb=0, ms=0, fixed=0, step=0, shift=0, catch=0,
+                               bounds=(0, 0, 0x280, 0x1E0))
         ok = True                                         # 0x453BA0..0x453D2E 音效装载
         for slot_no, wav in self.P14_SE_SLOTS:
             if not self.load_wave(slot_no, wav):
@@ -2524,12 +2532,13 @@ class Pages(Page4Mixin):
         self.replay_play()                                # 0x453EEF 0x45D2B0
         if real_skip:                                     # 0x453F1F → 旗标 0x200
             self.flags.set(0x200)
-        # 0x44EB60 的回放分支：tmp 的 dx/dy 累加进虚拟指针并镜像 0x56CC8C/90
+        # 0x44EB60 的回放分支：[mgr+0x14] += tmp.dx（裸加；边界钳由上面的合成预设
+        # 的 _build_p4 承担）。不要写 p4_player_pos —— 0x56CC8C/90 是自机坐标镜像，
+        # 由自机行为每帧写；旧实现把指针写进镜像，死亡重生 0x460C00 读镜像
+        # ⇒ 飞机重生到指针位置而不是死亡点。
         if rec is not None and (rec.dx or rec.dy):
-            x = max(0, min(640, int(self.inp.x) + rec.dx))
-            y = max(0, min(480, int(self.inp.y) + rec.dy))
-            self.inp.x, self.inp.y = x, y
-            self.p4_player_pos = (x, y)
+            self.inp.x = max(0, min(640, int(self.inp.x) + rec.dx))
+            self.inp.y = max(0, min(480, int(self.inp.y) + rec.dy))
         if rec is not None and rec.key:
             self.key_command(rec.key)                     # 0x453F84 0x458FD0
         self.p4_frames += 1                               # 0x453F93 [0x56CCA8]++
