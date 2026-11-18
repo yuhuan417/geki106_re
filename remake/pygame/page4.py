@@ -13197,6 +13197,7 @@ def p4_6e_ctor(self, typ: int, wingman) -> "Ent":
     e = Ent(0, 0, typ, 0)
     e.d32(0x14, typ & 0xFFFFFFFF)
     e.d32(0x1C, id(wingman) & 0x7FFFFFFF if wingman is not None else 0)  # 0x4277DE rec[3]
+    e.p["wingman"] = wingman                   # 复刻侧对象引用（exe 是裸指针解引用）
     sub = typ & 0xFFFF
     if sub <= 7:                                           # 0x4277F6 add ecx,0x91ffffff / cmp 7
         e.beh = P4_6E_MOV_BEH[sub]                         # 0x427A88 jmp [ecx*4+0x427a88]
@@ -13353,7 +13354,7 @@ def _beh_428020(self, e) -> bool:
     px, py = _p4_6e_player_obj(wm)
     ax = e.s32(0x20) - (px << 5)                           # 0x42803A shl 5 / sub
     ay = e.s32(0x24) - (py << 5)
-    ang = p4_45a9a0(ay, ax)                                # 0x428049 0x401091→0x45A9A0
+    ang = page4_45a9a0(ay, ax)                                # 0x428049 0x401091→0x45A9A0
     spd = e.s32(0x28)
     nx = (px << 5) + ((p4_sin_q(ang, "cos") * spd) >> 8)   # 0x428056..0x428066
     ny = (py << 5) + ((p4_sin_q(ang, "sin") * spd) >> 8)   # 0x42806C..0x428080
@@ -13444,7 +13445,7 @@ def _beh_428340(self, e) -> bool:
     else:
         if self.p4_btn0_edge():                            # 0x428394 byte[0x4AB596]（按下沿）
             e.d32(0x28, 0x110)                             # 0x42839E
-            ang = p4_45a9a0(_p4_s16(wm.g32(0x24) >> 16), _p4_s16(wm.g32(0x24) & 0xFFFF))
+            ang = page4_45a9a0(_p4_s16(wm.g32(0x24) >> 16), _p4_s16(wm.g32(0x24) & 0xFFFF))
             e.d32(0x2C, ang & 0xFFFFFFFF)                  # 0x4283AF 0x401091→0x45A9A0
         else:                                              # 0x4283BC
             e.d32(0x20, (e.s32(0x20) + (px - wm.s32(0x04)) + 0x90) & 0xFFFFFFFF)
