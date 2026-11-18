@@ -14967,6 +14967,30 @@ def _beh_44A070(self, e) -> bool:
     return False
 
 
+def _beh_449F10(self, e) -> bool:
+    """0x53000001 stage-logo strip behavior (0x449F10)."""
+    frame = (e.s32(0x24) + 1) & 0xFFFFFFFF
+    e.d32(0x24, frame)
+    part = e.s32(0x1C)
+    if frame == 8 and part != 5:
+        self.p4_stage_title_spawn(0, 0, 0x53000001, part + 1)
+
+    node = e.node
+    if node is None:
+        return False
+    speed = e.s32(0x2C)
+    if (part << 6) < node.dst[0]:
+        ticks = (e.s32(0x28) + 1) & 0xFFFFFFFF
+        e.d32(0x28, ticks)
+        if ticks < 0x80:
+            speed -= int(speed != 0)
+        else:
+            speed += int(speed < 0x10)
+        e.d32(0x2C, speed & 0xFFFFFFFF)
+    node.dst = (node.dst[0] + speed, node.dst[1])
+    return node.dst[0] < 0x298
+
+
 def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
     """op5 控制器对 0x4AD4FC 的直生成（0x430400 + 0x40128A→0x44B140，ctor 0x449150）。
     0x54000001/0x54000003/0x56000001 的 ctor case + 0x51 族转 p4_51_spawn。"""
@@ -16091,7 +16115,8 @@ P4_BEH: dict[int, object] = {
     0x443370: _beh_443370, 0x4434A0: _beh_4434A0,
     0x442F60: _beh_442F60, 0x443040: _beh_443040,
     0x443210: _beh_443210, 0x4457F0: _beh_4457F0,
-    0x44A000: _beh_44A000, 0x44A070: _beh_44A070,   # 0x54 族板条（op5 控制器子体）
+    0x449F10: _beh_449F10,                          # 0x53000001 阶段标题分片
+    0x44A000: _beh_44A000, 0x44A070: _beh_44A070,   # 0x54 族板条/标题横条
     0x437F30: _beh_437F30, 0x437F80: _beh_437F80,   # 0x44000001/02 碎片
     0x4385E0: _beh_4385E0,                          # 0x48000003 跟随碎片
     0x438660: _beh_438660,                          # 0x48000004/05 摆动碎片
@@ -23196,6 +23221,36 @@ class Page4Mixin:
         e.node.active = 0                                 # 0x445FFF byte[节点+0x1C]=0
         self.actorq.append(e)                             # 0x4AD40C
 
+    def p4_stage_title_spawn(self, x: int, y: int, typ: int, prm: int):
+        """OP04 constructors at 0x4491F3/0x4492D9; both draw from layer 13."""
+        e = Ent(int(x), int(y), int(typ), 0)
+        e.d32(0x14, typ & 0xFFFFFFFF)
+        if typ == 0x53000001:
+            # 0x4492E0..0x449370: `setle; dec; and 0x40` subtracts 0x40
+            # only when prm > 3; prm=0..4 selects x=0,64,128,192,192.
+            left = (prm << 6) - (0x40 if prm > 3 else 0)
+            e.d32(0x40, 0x401154)
+            e.beh = 0x449F10
+            e.d32(0x1C, prm & 0xFFFFFFFF)
+            e.d32(0x24, 0)
+            e.d32(0x28, 0)
+            e.d32(0x2C, 0x10)
+            e.node = DNode(0xD, left, 0)
+            e.node.rect = (left, 0, left + 0x3F, 0x3F)
+            e.node.dst = (-0x40, 0xD0)
+            e.node.active = int(prm != 3)
+        else:
+            # 0x4491F3: a 384x64 layer-13 strip entering from the right.
+            e.d32(0x40, 0x40191A)
+            e.beh = 0x44A070
+            e.d32(0x1C, 0)
+            e.node = DNode(0xD, 0, 0)
+            e.node.rect = (0, 0, 0x17F, 0x3F)
+            e.node.dst = (int(x) - 0xC0, int(y) - 0x20)
+            e.node.active = 1
+        self._p4_q("ui4fc").append(e)
+        return e
+
     def p4_vm_entity(self, op: int, rec: tuple) -> None:
         """op1..op5 → 五个队列原语（`0x448FF0`/`0x43BDC0`/`0x43A3C0`/`0x44B140`/`0x445AA0`）。
 
@@ -23237,6 +23292,8 @@ class Page4Mixin:
             # （流75 的 0x51000002 param=1）不推进。
             if (c & 0xFFFF0000) == 0x51000000:
                 self.p4_51_spawn(a, b, c, d)
+            elif c in (0x53000001, 0x54000003):
+                self.p4_stage_title_spawn(a, b, c, d)
             elif c == 0x5F000012:
                 # 0x424410 → case16 @ 0x424B48（0x5F 族二级 ctor，跳表 0x425114）：
                 # 制作名单行条——beh 0x401555 → 0x426200（node.dst.y 每帧 −1、
