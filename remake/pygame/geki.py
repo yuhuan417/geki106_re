@@ -891,12 +891,22 @@ class Input:
         self._prev_key = keycode                # [esi+0x1F] = 原始键码
         if prev_key != 0:
             keycode = 0                         # 上帧有键 ⇒ 本帧清 0（按住不重复）
-        b0 = bool(mouse_buttons[0]) or keys.get("shot", False)
-        b1 = bool(mouse_buttons[2]) or keys.get("lock", False)
+        # 捕獲键（默认 X）在 exe 里是"双键同按"的映射键：0x447410 读 e0/e1
+        # （0x4AB596/0x4AB597），没有独立的第三按钮。这里把 capture 合成为
+        # b0+b1 同帧按下 ⇒ e0/e1 同时为 1，type8 捕获控制器才会开火；
+        # 普通武器槽同帧也看到 b0/b1（与双键同按一致）。
+        _cap = bool(keys.get("capture", False))
+        b0 = bool(mouse_buttons[0]) or keys.get("shot", False) or _cap
+        b1 = bool(mouse_buttons[2]) or keys.get("lock", False) or _cap
         r = Record()
         r.b0, r.b1 = b0, b1
         r.e0 = b0 and not self._prev[0]
         r.e1 = b1 and not self._prev[1]
+        if _cap:
+            # 映射键：按住攻击时再按 X，b0 没有新沿（e0=False）→ type8 的
+            # [+0x20]+[+0x24] 仍 ≥4，捕获控制器不开火。映射键语义是"同帧双键沿"，
+            # 因此这里强制 e0=e1=1（与从静止同时按 C+V 等价）。
+            r.e0 = r.e1 = True
         r.r0 = (not b0) and self._prev[0]
         r.r1 = (not b1) and self._prev[1]
         self._prev = (b0, b1)
@@ -3535,6 +3545,11 @@ class Pages(Page4Mixin):
                 e.disp.active = 1                          # 0x449AA3
             else:
                 e.beh = "default"
+        elif hi == 0x11000000:
+            # 0x42D780 → 0x42A820：捕获僚机（type6）的 0x11xxA3xx 武器弹。
+            # 旧实现没有这一族 ⇒ 0x447640 的扇形爆发/状态机弹全部落 default。
+            prm = int(a3) if isinstance(a3, int) else 0
+            return self.p4_spawn11(queue, x, y, type_word, prm)
         elif hi == 0x10000000:
             # 0x42D780 的 0x10 族分支：0x10008431（捕获弹）ctor 0x42DA2B
             e.d32(0x04, int(x) & 0xFFFFFFFF)
@@ -3558,6 +3573,19 @@ class Pages(Page4Mixin):
                     e.d32(0x30, 0)                         # 0x42DA76
                 e.d32(0x18, 1)                             # 0x42DAB0 HP=1
                 e.disp = DisplayNode(0, [0, 0, 1, 1], [int(x), int(y)])
+            elif type_word == 0x10000051:
+                # 0x42D8B4：层1、rect (0xA0,0xD0,0xAF,0xDF)、行为 0x401B95→0x430550，
+                # [0x1C]=1、[0x20]=6、[0x18]=-1（无限粒子）；捕获束每帧 3 条尾迹。
+                e.beh = 0x430550
+                e.d32(0x1C, 1)                            # 0x42D8D1
+                e.d32(0x20, 6)                            # 0x42D8D4
+                e.d32(0x24, 0)
+                e.d32(0x28, 0)
+                e.d32(0x2C, 0)
+                e.d32(0x18, 0xFFFFFFFF)                   # 0x42D8E4
+                e.raw[0x10] = 0                           # 0x42D8CD
+                e.disp = DisplayNode(1, [0xA0, 0xD0, 0xAF, 0xDF],
+                                     [int(x) - 8, int(y) - 8])
             else:
                 e.beh = "default"
         else:

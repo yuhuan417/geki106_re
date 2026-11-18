@@ -158,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     # "泵事件 + 建记录"（0x4516C1 → 0x44EB60），由 pages.frame_input 钩子驱动。
     def _pump_events(full: bool) -> int:
         """泵一轮事件。full=False（intro 循环内）跳过调试键，防止重入切页。"""
-        nonlocal pend_dx, pend_dy, pend_key, pend_shot, pend_lock, pend_dir
+        nonlocal pend_dx, pend_dy, pend_key, pend_shot, pend_lock, pend_capture, pend_dir
         nonlocal running, _grab, _abs_mouse
         keycode = 0
         for ev in pygame.event.get():
@@ -168,7 +168,9 @@ def main(argv: list[str] | None = None) -> int:
                 keycode = KEYCODES.get(ev.key, 0)
                 if ev.key == pygame.K_c:
                     pend_shot = True
-                elif ev.key in (pygame.K_x, pygame.K_v):
+                elif ev.key in inp.assigned_pygame_keys("capture"):
+                    pend_capture = True
+                elif ev.key in inp.assigned_pygame_keys("lock"):
                     pend_lock = True
                 elif ev.key == pygame.K_LEFT:
                     pend_dir["left"] += 1
@@ -223,13 +225,15 @@ def main(argv: list[str] | None = None) -> int:
         return keycode
 
     def _build_record() -> None:
-        nonlocal pend_dx, pend_dy, pend_key, pend_shot, pend_lock, pend_dir
+        nonlocal pend_dx, pend_dy, pend_key, pend_shot, pend_lock, pend_capture, pend_dir
         keys = pygame.key.get_pressed()
         state = {
             # 慢帧（Python 渲染 0.3~0.7s/帧）时按住状态可能在两帧之间被跳过，
             # 所以把"本间隔内出现过 KEYDOWN"也算作按下，只作用于下一个到期帧。
             "shot": any(keys[k] for k in inp.assigned_pygame_keys("attack")) or pend_shot,
             "lock": any(keys[k] for k in inp.assigned_pygame_keys("lock")) or pend_lock,
+            # 捕獲键（X）：exe 无独立按钮，映射为 b0+b1 同帧（0x447410 读 e0/e1）。
+            "capture": any(keys[k] for k in inp.assigned_pygame_keys("capture")) or pend_capture,
             # 方向键同理：按住靠 get_pressed()，**点按**靠事件锁存（否则一次快按会落在两帧之间）
             "left": keys[pygame.K_LEFT] or pend_dir["left"] > 0,
             "right": keys[pygame.K_RIGHT] or pend_dir["right"] > 0,
@@ -241,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         inp.build(state, pygame.mouse.get_pressed(), (_dx, _dy), pend_key)
         pend_dx = pend_dy = 0
         pend_key = 0
-        pend_shot = pend_lock = False
+        pend_shot = pend_lock = pend_capture = False
         for _k in pend_dir:
             pend_dir[_k] = 0
 
@@ -268,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
     running = True
     pend_dx = pend_dy = 0          # 自上一"帧"以来累积的鼠标位移
     pend_key = 0                   # 自上一帧以来最后一次映射到的键码
-    pend_shot = pend_lock = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
+    pend_shot = pend_lock = pend_capture = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
     pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
     _t_last = time.perf_counter()
     while running and pages.page != 0 and not pages.quit:

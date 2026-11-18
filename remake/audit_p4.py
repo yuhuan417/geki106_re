@@ -3407,6 +3407,50 @@ def main():
           "0x4100000C 走 p4_spawn41 落到 4CC",
           len(_gl) == 2 and all(c[3] == 45 for c in _gl)
           and sorted(c[2] for c in _gl) == [111, 135], "")
+    # ---- 0x11 族（捕获僚机武器弹）----------------------------------------
+    class _S11:
+        def __init__(self):
+            self.q = []
+        def _p4_q(self, n):
+            return self.q
+    _s11 = _S11()
+    _b11 = page4.Page4Mixin.p4_spawn11(_s11, _s11.q, 100, 50, 0x11FFA321, 7)
+    check("0x11 族 ctor 0x42A820：层0/rect(0,0,1,1)/半径8/dst=(x,y)/"
+          "相位=prm&0x1000?-1:-0x3D/行为表六型",
+          _b11 is not None and _b11.g32(0x0C) == 8 and _b11.m[0x10] == 0
+          and _b11.g32(0x1C) == 7 and _b11.s32(0x20) == -0x3D
+          and _b11.g32(0x24) == (100 << 8) and _b11.g32(0x28) == (50 << 8)
+          and _b11.g32(0x2C) == 0 and _b11.beh == 0x42AAA0
+          and _b11.node.layer == 0 and tuple(_b11.node.rect) == (0, 0, 1, 1)
+          and tuple(_b11.node.dst) == (100, 50) and _b11.node.active == 0, "")
+    _m11 = page4.Page4Mixin.p4_spawn11(_s11, _s11.q, 0, 0, 0x1180A322, 0x1100)
+    check("0x11 ctor 的 0x1000 位：相位=-1、[+0x2C]=0x1000（扇形子弹出生的防递归位）",
+          _m11.s32(0x20) == -1 and _m11.g32(0x2C) == 0x1000
+          and _m11.beh == 0x42AB90, "")
+    _zf = _Z({})
+    _f11 = page4.Ent(100, 100, 0x1140A323, 0)
+    _f11.d32(0x14, 0x1140A323)
+    _f11.d32(0x1C, 0)
+    _f11.d32(0x20, 0)
+    _f11.d32(0x24, 100)
+    _f11.d32(0x28, 100)
+    _f11.d32(0x2C, 0)
+    _f11.d32(0x18, 0)                                   # HP=0（死亡帧才分裂）
+    page4._beh_42ACF0(_zf, _f11)
+    _sp = [c for c in _zf.calls if len(c) >= 2 and c[0] == "ui46c"
+           and c[1] == 0x1140A323]
+    check("0x42ACF0：HP=0 且 [+0x2C]=0 时按 0x1100..0x1138（步4）生成 15 发同型子弹",
+          len(_sp) == 15 and [c[4] for c in _sp] == list(range(0x1100, 0x113C, 4)), "")
+    from geki import Input as _In
+    _inp = _In()
+    _r = _inp.build({"capture": True}, (False, False, False), (0, 0), 0)
+    check("捕獲键 X 映射：同帧置 b0/b1 ⇒ e0/e1 同时为 1（0x447410 读 e0/e1）",
+          _r.b0 and _r.b1 and _r.e0 and _r.e1, "")
+    _inp2 = _In()
+    _inp2.build({"shot": True}, (False, False, False), (0, 0), 0)   # 先按住攻击
+    _r2 = _inp2.build({"shot": True, "capture": True}, (False, False, False), (0, 0), 0)
+    check("映射键在按住攻击时仍强制 e0=e1（否则 type8 的 +0x20/+0x24 仍 ≥4、不开火）",
+          _r2.b0 and _r2.b1 and _r2.e0 and _r2.e1, "")
     _zg = _Z({})
     _gb = page4.Ent(320, 240, 0x32000005, 0)
     _gb.d32(0x14, 0x32000005)

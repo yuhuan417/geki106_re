@@ -12739,6 +12739,236 @@ def _beh_447320(self, e) -> bool:
     return p4_laser(self, e, "kb_f10")
 
 
+# ---- 0x11 族：捕获僚机（0x447640）的武器弹，ctor 0x42A820 -------------------
+# 六个精确型各有独立行为（0x42AAA0/AB90/ACF0/AE70/AF90/B120）；字段：
+#   [+0xC]=8（半径）、[+0x10]=0（初始不碰撞）、[+0x1C]=rec[3]&0xFF、
+#   [+0x20]=(rec[3]&0x1000)?-1:-0x3D（相位种子）、[+0x24]=x<<8、[+0x28]=y<<8、
+#   [+0x2C]=rec[3]&0x1000、[+0x18]=1；节点层0、rect(0,0,1,1)、active=0。
+P4_11_BEH = {
+    0x11FFA321: 0x42AAA0,
+    0x1180A322: 0x42AB90,
+    0x1140A323: 0x42ACF0,
+    0x11FFA324: 0x42AE70,
+    0x1140A325: 0x42AF90,
+    0x11C0A326: 0x42B120,
+}
+
+
+def _p4_11_nearest(self, x: int, y: int):
+    """`0x43BCE0(0x4AD43C, &pt, out)`：最近敌机（曼哈顿距离，跳过碰撞关/离屏）。
+
+    初始 out=(0x2710,0)（0x43BCE6 0x45A690(0x2710,0)）；逐项 0x43AD60 比较
+    `|bx-ex|+|by-ey|`，更小才更新；全部不合格返回 None。
+    """
+    best = 0x2710
+    out = None
+    for e in self.p4_q43c:
+        if not e.g32(0x10) or not self.p4_4305f0(e, 0x30):
+            continue
+        d = abs(e.s32(0x04) - x) + abs(e.s32(0x08) - y)
+        if d < best:
+            best = d
+            out = (e.s32(0x04), e.s32(0x08))
+    return out
+
+
+def _p4_11_tick(self, e) -> None:
+    """`0x42A9D0`：相位++、每帧在当前位置生成 0x4100000B 粒子；
+    **相位 < 0** 时按 `angle=(param+phase)*60` 做 sin/cos 各 +12 的 8.8 螺旋，
+    相位 ≥ 0 只留给各型自己的运动段。"""
+    from page4 import _idiv_trunc
+    ph = (e.g32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, ph)
+    self.spawn(self._p4_q("ui4cc"), 0x4100000B, e.s32(0x04), e.s32(0x08), 0)
+    sp = ph - 0x100000000 if ph & 0x80000000 else ph
+    if sp < 0:
+        ang = ((e.s32(0x1C) + sp) * 60) & 0xFFFFFFFF
+        e.d32(0x24, (e.g32(0x24) + page4_sin(ang) * 12) & 0xFFFFFFFF)
+        e.d32(0x28, (e.g32(0x28) + page4_cos(ang) * 12) & 0xFFFFFFFF)
+        e.d32(0x04, (e.g32(0x24) >> 8) & 0xFFFFFFFF)
+        e.d32(0x08, (e.g32(0x28) >> 8) & 0xFFFFFFFF)
+
+
+def _p4_11_end(self, e, ph: int, lim: int) -> bool:
+    """`0x4305F0(e,0x10)` 离屏判据的共用尾：相位 ≥ lim 且离屏 → HP=0。"""
+    if ph >= lim and not self.p4_4305f0(e, 0x10):
+        e.d32(0x18, 0)
+    return e.g32(0x18) != 0
+
+
+def _beh_42AAA0(self, e) -> bool:
+    """`0x42AAA0`（0x11FFA321）：螺旋扩散弹。相位 0 把 [+0x24]/[+0x28] 复位为像素，
+    之后 x=初值+sin((ph+2·param)·30)·ph/43、y 同构；ph>8 开碰撞，ph≥0x64 离屏自灭。"""
+    from page4 import _idiv_trunc
+    _p4_11_tick(self, e)
+    ph = e.s32(0x20)
+    if ph < 0:
+        return True
+    if ph == 0:
+        e.d32(0x24, e.g32(0x04))
+        e.d32(0x28, e.g32(0x08))
+    ang = ((ph + 2 * e.s32(0x1C)) * 30) & 0xFFFFFFFF
+    e.d32(0x04, (e.g32(0x24) + _idiv_trunc(page4_sin(ang) * ph, 43)) & 0xFFFFFFFF)
+    e.d32(0x08, (e.g32(0x28) + _idiv_trunc(page4_cos(ang) * ph, 43)) & 0xFFFFFFFF)
+    e.m[0x10] = 1 if ph > 8 else 0
+    return _p4_11_end(self, e, ph, 0x64)
+
+
+def _beh_42AB90(self, e) -> bool:
+    """`0x42AB90`（0x1180A322）：边界反弹弹。相位 0 初速 (cos,sin)(param·60)·12，
+    开碰撞；ph<0x96 时撞四边反向并播 SE 0xF；ph≥0x96 离屏自灭。"""
+    _p4_11_tick(self, e)
+    ph = e.s32(0x20)
+    if ph < 0:
+        return True
+    if ph == 0:
+        ang = (e.s32(0x1C) * 60) & 0xFFFFFFFF
+        e.d32(0x2C, (page4_cos(ang) * 12) & 0xFFFFFFFF)
+        e.d32(0x30, (page4_sin(ang) * 12) & 0xFFFFFFFF)
+        e.m[0x10] = 1
+    if ph < 0x96:
+        vx, vy = e.s32(0x2C), e.s32(0x30)
+        hit = False
+        x, y = e.s32(0x04), e.s32(0x08)
+        if (x < 0 and vx < 0) or (x > 0x280 and vx > 0):
+            vx = -vx
+            hit = True
+        if (y < 0 and vy < 0) or (y > 0x1E0 and vy > 0):
+            vy = -vy
+            hit = True
+        e.d32(0x2C, vx & 0xFFFFFFFF)
+        e.d32(0x30, vy & 0xFFFFFFFF)
+        if hit:
+            self.p4_se_pan(0x0F, (x - 0x140) << 4)
+    e.d32(0x24, (e.g32(0x24) + e.g32(0x2C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.g32(0x28) + e.g32(0x30)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.g32(0x24) >> 8) & 0xFFFFFFFF)
+    e.d32(0x08, (e.g32(0x28) >> 8) & 0xFFFFFFFF)
+    return _p4_11_end(self, e, ph, 0x96)
+
+
+def _beh_42ACF0(self, e) -> bool:
+    """`0x42ACF0`（0x1140A323）：扇形发射器。相位 0 开碰撞、[+0x24]/[+0x28] 复位像素；
+    若 HP≠0 且 [+0x2C]==0，在当前位置按角度 0x1100..0x1138（步4，共15发）
+    生成同型子弹入 0x4AD46C。子弹带 0x1000 位 ⇒ 不再递归发射。"""
+    from page4 import _idiv_trunc
+    _p4_11_tick(self, e)
+    ph = e.s32(0x20)
+    if ph < 0:
+        return True
+    if ph == 0:
+        e.m[0x10] = 1
+        e.d32(0x24, e.g32(0x04))
+        e.d32(0x28, e.g32(0x08))
+    ang = ((ph + 2 * e.s32(0x1C)) * 30) & 0xFFFFFFFF
+    x = (e.g32(0x24) + _idiv_trunc(page4_sin(ang) * ph, 43)) & 0xFFFFFFFF
+    y = (e.g32(0x28) + _idiv_trunc(page4_cos(ang) * ph, 43)) & 0xFFFFFFFF
+    e.d32(0x04, x)
+    e.d32(0x08, y)
+    # 0x42AD78 test [0x18] ; jne 0x42ADE4：HP≠0 跳过；0x42AD82 [0x2C]≠0 也跳过。
+    # 即 **死亡时** 才放一圈扇形，子弹出生的 [+0x2C]=0x1000 阻止再分裂。
+    if e.g32(0x18) == 0 and e.g32(0x2C) == 0:
+        a = 0x1100
+        while a < 0x113C:
+            self.spawn(self._p4_q("ui46c"), 0x1140A323,
+                       e.s32(0x04), e.s32(0x08), a)
+            a += 4
+    if ph >= 0x64 and (not self.p4_4305f0(e, 0x10) or (e.s32(0x1C) & 2)):
+        e.d32(0x18, 0)
+    return e.g32(0x18) != 0
+
+
+def _beh_42AE70(self, e) -> bool:
+    """`0x42AE70`（0x11FFA324）：横移后下坠弹。相位 0 定目标 x=(x+(param+4)·10)/2、
+    y8.8=y<<8、vy=(rand&0xFFF)+0x1800；每帧 x 向目标 ±1；ph==0x3C 开碰撞、
+    vy=-vy/2 且重设 vy=(rand&0x3F)·vy；之后 y8.8-=vy；y>0x1F0 自灭。"""
+    from page4 import _idiv_trunc
+    _p4_11_tick(self, e)
+    ph = e.s32(0x20)
+    if ph < 0:
+        return True
+    if ph == 0:
+        e.d32(0x28, 0)
+        tx = _idiv_trunc(e.s32(0x04) + (e.s32(0x1C) + 4) * 10, 2)
+        e.d32(0x24, tx & 0xFFFFFFFF)
+        e.d32(0x2C, (e.g32(0x08) << 8) & 0xFFFFFFFF)
+        e.d32(0x30, ((self.p4_rand() & 0xFFF) + 0x1800) & 0xFFFFFFFF)
+    vx = e.s32(0x28)
+    vx += -1 if e.s32(0x04) >= e.s32(0x24) else 1
+    e.d32(0x28, vx & 0xFFFFFFFF)
+    e.d32(0x04, (e.s32(0x04) + vx) & 0xFFFFFFFF)
+    if ph == 0x3C:
+        e.m[0x10] = 1
+        vy = e.s32(0x30) >> 1
+        e.d32(0x30, (-vy) & 0xFFFFFFFF)
+        e.d32(0x2C, ((self.p4_rand() & 0x3F) * e.s32(0x30)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) - e.s32(0x30)) & 0xFFFFFFFF)
+    e.d32(0x08, (e.s32(0x2C) >> 8) & 0xFFFFFFFF)
+    if ph >= 0x3C and e.s32(0x08) > 0x1F0:
+        e.d32(0x18, 0)
+    return e.g32(0x18) != 0
+
+
+def _beh_42AF90(self, e) -> bool:
+    """`0x42AF90`（0x1140A325）：追踪弹。相位 0 初速 (cos,sin)(param·60)·12、开碰撞；
+    8<ph<0x78 时找最近敌机，按 `(dx,dy)` 的倒数距离各加 inv·Δ/8，再用 0x45A9A0
+    求角、速度重设为 (cos,sin)·12；ph≥0x3C 离屏自灭。"""
+    _p4_11_tick(self, e)
+    ph = e.s32(0x20)
+    if ph < 0:
+        return True
+    if ph == 0:
+        ang = (e.s32(0x1C) * 60) & 0xFFFFFFFF
+        e.d32(0x2C, (page4_cos(ang) * 12) & 0xFFFFFFFF)
+        e.d32(0x30, (page4_sin(ang) * 12) & 0xFFFFFFFF)
+        e.m[0x10] = 1
+    if 8 < ph < 0x78:
+        tgt = _p4_11_nearest(self, e.s32(0x04), e.s32(0x08))
+        if tgt is not None:
+            dx = tgt[0] - e.s32(0x04)
+            dy = tgt[1] - e.s32(0x08)
+            inv = self.p4_45aa80(dx, dy)
+            vx = (e.s32(0x2C) + ((inv * dy) >> 3)) & 0xFFFFFFFF
+            vy = (e.s32(0x30) + ((inv * dx) >> 3)) & 0xFFFFFFFF
+            e.d32(0x2C, vx)
+            e.d32(0x30, vy)
+            ang = self.p4_45a9a0(e.s32(0x2C), e.s32(0x30))
+            e.d32(0x2C, (page4_cos(ang) * 12) & 0xFFFFFFFF)
+            e.d32(0x30, (page4_sin(ang) * 12) & 0xFFFFFFFF)
+    e.d32(0x24, (e.g32(0x24) + e.g32(0x2C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.g32(0x28) + e.g32(0x30)) & 0xFFFFFFFF)
+    e.d32(0x04, (e.g32(0x24) >> 8) & 0xFFFFFFFF)
+    e.d32(0x08, (e.g32(0x28) >> 8) & 0xFFFFFFFF)
+    return _p4_11_end(self, e, ph, 0x3C)
+
+
+def _beh_42B120(self, e) -> bool:
+    """`0x42B120`（0x11C0A326）：横向漂移弹。相位 0 定 vx=sin(param·30)/43+6、
+    y8.8=y<<8、vy=cos(param·30)·32、目标 y=y、开碰撞；每帧 x+=vx，
+    y≥目标时 vy-=0x200 否则 vy+=0x200，y8.8+=vy；x>0x290 自灭。"""
+    from page4 import _idiv_trunc
+    _p4_11_tick(self, e)
+    ph = e.s32(0x20)
+    if ph < 0:
+        return True
+    if ph == 0:
+        ang = (e.s32(0x1C) * 30) & 0xFFFFFFFF
+        e.d32(0x24, (_idiv_trunc(page4_sin(ang), 43) + 6) & 0xFFFFFFFF)
+        e.d32(0x28, (e.g32(0x08) << 8) & 0xFFFFFFFF)
+        e.d32(0x2C, (page4_cos(ang) * 32) & 0xFFFFFFFF)
+        e.d32(0x30, e.g32(0x08))
+        e.m[0x10] = 1
+    e.d32(0x04, (e.s32(0x04) + e.s32(0x24)) & 0xFFFFFFFF)
+    vy = e.s32(0x2C)
+    vy += -0x200 if e.s32(0x08) >= e.s32(0x30) else 0x200
+    e.d32(0x2C, vy & 0xFFFFFFFF)
+    e.d32(0x28, (e.g32(0x28) + vy) & 0xFFFFFFFF)
+    e.d32(0x08, (e.g32(0x28) >> 8) & 0xFFFFFFFF)
+    if e.s32(0x04) > 0x290:
+        e.d32(0x18, 0)
+    return e.g32(0x18) != 0
+
+
 P4_447640_TYPES = (0x11FFA321, 0x11FFA321, 0x1180A322, 0x1140A323,
                    0x11FFA324, 0x1140A325, 0x11C0A326)   # 0x4476A6..0x4476D9
 P4_447640_TAB = (0, 3, 3, 3, 3, 3, 3, 3, 1, 3, 1, 3, 2, 3, 2)  # 0x447DA0
@@ -12762,7 +12992,8 @@ def _beh_447640(self, e) -> bool:
         return False                                     # 不可能：type 6 必带子对象
     if sub.g32(0x28) == 0:                               # 0x44764C
         self._p4_447640_burst(e)
-        return True
+        self._p4_447640_flag()                           # 0x4477E9 0x45AF30(0x56CCB8,0x1000)
+        return False                                     # 0x4477FB xor al,al：爆发后自灭
     if sub.g32(0x34) == 0:                               # 0x44772B
         self._p4_447640_spawn(e)
         return True
@@ -12787,7 +13018,12 @@ def _p4_447640_burst(self, e) -> None:
     self.p4_se_pan(0x0E, (e.s32(0x04) - 0x140) << 4)       # 0x44765A 0x450350(0x4AB4B0,0x0E,…)
     rec = [e.s32(0x04), e.s32(0x08), 0x11FFA321, 0]       # 0x447684
     idx = (e.s32(0x28) >> 8) & 0xF                        # 0x4476B3/0x4476B6
-    t = P4_447640_TYPES[idx]                              # 0x4476E1（越界见 §16.202）
+    # 0x4476E1 是 `[esp+ecx*4+0x60]` 读**栈上 7 项表**；idx>6 在 exe 属越界读栈（UB）。
+    # 实际武器种 0x45FAD0 返回的高字节目前只到 1，越界不可达；这里取 0 防崩并留痕。
+    if idx >= len(P4_447640_TYPES):
+        self.p4_stat[0x56CCB2] = 1
+        idx = 0
+    t = P4_447640_TYPES[idx]                              # 0x4476E1
     n = 0                                                 # 0x4476E5 计数器 → vel
     while n < 0x3C:                                       # 0x447707
         self.spawn(self._p4_q("ui46c"), t, rec[0], rec[1], n)
@@ -16150,6 +16386,12 @@ P4_BEH: dict[int, object] = {
     0x42F570: _beh_42F570,                          # 0x10008431 捕获弹
     0x42A370: _beh_42A370,                          # 0x4100000C 渐扩动画
     0x42A400: _beh_42A400,                          # 0x4100000D/0E 螺旋追踪
+    0x42AAA0: _beh_42AAA0,                          # 0x11FFA321 螺旋扩散弹
+    0x42AB90: _beh_42AB90,                          # 0x1180A322 反弹弹
+    0x42ACF0: _beh_42ACF0,                          # 0x1140A323 扇形发射器
+    0x42AE70: _beh_42AE70,                          # 0x11FFA324 横移下坠弹
+    0x42AF90: _beh_42AF90,                          # 0x1140A325 追踪弹
+    0x42B120: _beh_42B120,                          # 0x11C0A326 横向漂移弹
     0x439F80: _beh_439F80,                          # 0x4D000002 砖墙环
     0x44AE00: _beh_44AE00,                          # 0x5A000003 扩散环
     0x44AE50: _beh_44AE50,                          # 0x5A000004 扩散环（同 0x439420）
@@ -17956,6 +18198,40 @@ class Page4Mixin:
             e.d32(0x28, _r1 & 0xFFFFFFFF)                  # 0x42958D rec[4]
         e.node.active = 1
         self._p4_q("ui4cc").append(e)
+        return e
+
+    def p4_spawn11(self, queue, x: int, y: int, typ: int, prm: int = 0):
+        """`0x42A820`（0x11 族 ctor）：捕获僚机武器弹。
+
+        ```
+        0x42A830 [0xC]=8 ; 0x42A837 byte[0x10]=0
+        0x42A83B [0x1C]=rec[3]&0xFF
+        0x42A84E..0x42A861 [0x20]=(rec[3]&0x1000)?-1:-0x3D
+        0x42A864..0x42A873 [0x24]=x<<8、[0x28]=y<<8
+        0x42A876..0x42A882 [0x2C]=rec[3]&0x1000
+        0x42A885 [0x18]=1
+        0x42A88D [rect]=(0,0,1,1)、0x42A8B7 dst=(x,y)、node.active=0
+        0x42A8D7.. 按精确型写 [0x40] 行为（六型见 P4_11_BEH）
+        ```
+        """
+        e = Ent(int(x), int(y), int(typ), 0)
+        e.d32(0x14, int(typ) & 0xFFFFFFFF)
+        e.d32(0x0C, 8)                                      # 0x42A830
+        e.m[0x10] = 0                                       # 0x42A837
+        e.d32(0x1C, int(prm) & 0xFF)                        # 0x42A83B
+        e.d32(0x20, 0xFFFFFFFF if (int(prm) & 0x1000) else 0xFFFFFFC3)  # 0x42A84E
+        e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)             # 0x42A864
+        e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)             # 0x42A86A
+        e.d32(0x2C, int(prm) & 0x1000)                      # 0x42A876
+        e.d32(0x18, 1)                                      # 0x42A885
+        beh = P4_11_BEH.get(int(typ) & 0xFFFFFFFF, 0)
+        e.d32(0x40, beh)
+        e.beh = beh
+        e.node = DNode(0, 0, 0)
+        e.node.rect = (0, 0, 1, 1)
+        e.node.dst = (int(x), int(y))
+        e.node.active = 0
+        queue.append(e)
         return e
 
     def p4_spawn_61000004(self, x: int, y: int, rec3: int):
@@ -20131,11 +20407,12 @@ class Page4Mixin:
         for e in list(qa):
             if not e.g32(0x10):                    # 0x43C094 `mov al,[esi+0x10]; test; je`
                 continue
-            self._p4_set_col(e)
             if not bit2_clear and not (e.g32(0x14) & 0x8000):   # 0x43C085 test ah,0x80
                 continue
             for t in list(qb):
-                self._p4_set_col(t)
+                # 0x4306C0(t, …) 自己检查 t[+0x10]；exe **不写**两边的参与位。
+                # 旧实现把 t[0x10] 强置 1 ⇒ 已被捕获回调清零的敌机会被下一发束再命中
+                # （一次捕获生成两个 type6）。这里只读不写。
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):   # 0x43C0A9
                     self.p4_43c460(e, t)                        # 0x43C0B2 push edi / 0x43C0B3 push esi
                     hits += 1
