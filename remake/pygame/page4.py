@@ -22903,11 +22903,17 @@ class Page4Mixin:
         self.p4_stat[0x4CD5D8 + 0x9E37C] = n + 1
 
     def replay_play(self) -> None:
-        """0x45135F → `0x45D2B0` 回放播放（仅回放页）：游标帧 → 写 0x4AB594。
+        """0x45135F → `0x45D2B0` 回放播放（**仅回放页**）：游标帧 → 写 0x4AB594。
+
+        0x45135F 的外层门是 `byte[0x56CCB5]`（回放标志）；非回放页必须直接返回，
+        否则每帧用刚录下的上一帧覆盖 `inp.rec`，把 e0/e1 按下沿冲掉（X 捕获/
+        狙击/暂停在实机里会"按了没反应"）。
 
         0x45D2B0 的可见语义（§12.4）：解 23 位 → rec[+0x10/+0x14] = dx/dy、
         rec[+0/+1] = held、rec[+2/+3] = pressed（与前帧异或）；游标 ≥ 帧数 →
         0x45AF30(0x4AB5C0, 0x10000)（回放结束 → 离页）。"""
+        if not getattr(self, "replay_mode", False):       # 0x45135F 外层门 [0x56CCB5]
+            return
         n = self.p4_stat.get(0x4CD5D8 + 0x9E37C, 0)
         cur = self.p4_stat.get(0x4CD5D8 + 0x9E380, 0)
         if cur >= n and n > 0:

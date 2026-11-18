@@ -3451,6 +3451,14 @@ def main():
     _r2 = _inp2.build({"shot": True, "capture": True}, (False, False, False), (0, 0), 0)
     check("映射键在按住攻击时仍强制 e0=e1（否则 type8 的 +0x20/+0x24 仍 ≥4、不开火）",
           _r2.b0 and _r2.b1 and _r2.e0 and _r2.e1, "")
+    _zr = _Z({})
+    _zr.inp.rec = _Rec(b0=True, b1=True, e0=True, e1=True)
+    _zr.replay_mode = False
+    _zr.p4_replay_planes = [bytearray(4) for _ in range(3)]
+    _zr.p4_stat[0x4CD5D8 + 0x9E37C] = 1        # n=1、cur=0
+    _zr.replay_play()
+    check("0x45135F 外层门：非回放页 replay_play 直接返回，不覆盖 inp.rec 的 e0/e1",
+          _zr.inp.rec.e0 and _zr.inp.rec.e1, "")
     _zg = _Z({})
     _gb = page4.Ent(320, 240, 0x32000005, 0)
     _gb.d32(0x14, 0x32000005)
