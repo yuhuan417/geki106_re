@@ -3139,9 +3139,12 @@ def main():
           "rec[4] 的 bit0/bit1 分别屏蔽两个分支",
           _ef1 == (0x21, 0x21) and _ef2.p4_stat == {}, "")
     _e3 = _Z({0x4CD4A0 + 0xEC: 0x1000})
-    page4.Page4Mixin.p4_45eff0(_e3, 0x21000131, 7, 9)
+    # sel 取 **arg2**（0x45F092 的 [esp+0xF8]），不是 arg1：
+    # 0x45F01C 的 [esp+0xE8]=arg1 只用于表项查找。这里 arg1=0x21000131 查 0x4993C4，
+    # arg2=0x100D1111 的 &0xF00 = 0x100 走 0x100 分支。
+    page4.Page4Mixin.p4_45eff0(_e3, 0x21000131, 0x100D1111, 7, 9)
     _ev = page4.Page4Mixin.p4_45dfb0(None, page4.p4_tbl_4993c4()[0x31])["b0"]
-    check("0x45EFF0：0x21 族查 0x4993C4 → 拆包 → (type&0xF00)==0x100 时 eb=rec[0]，"
+    check("0x45EFF0：0x21 族查 0x4993C4 → 拆包 → (arg2&0xF00)==0x100 时 eb=rec[0]，"
           "分数/坐标/两路里程都加同一个值，调用计数 +1",
           _e3.p4_stat.get(0x4CD4A0 + 0x50) == 1
           and _e3.p4_stat.get(0x4CD4A0 + 0x26) == 1
@@ -3353,6 +3356,10 @@ def main():
             return _Q(n)
         def spawn(self, q, t, x, y, extra=None):
             self.calls.append((t, x, y, extra))
+        def p4_spawn41(self, x, y, t, rec=()):
+            # 0x4100000C 走 p4_spawn41（0x430400→0x43A3C0→ctor 0x4290FC），
+            # rec[0] 就是 exe 记录第 4 个 dword（字形索引）。
+            self.calls.append((t, x, y, rec[0] if rec else 0))
     _st = _Stub()
     page4.Page4Mixin.p4_45e4a0(_st, 7, 100, 50)
     _v7 = list(_st.calls)
@@ -3365,6 +3372,53 @@ def main():
     check("0x45E4A0 的三条发射路径都进 0x4AD4CC（0x45E552 / 0x45E5A0）",
           img[0x45E552 - ib:0x45E557 - ib] == bytes([0xB9, 0xCC, 0xD4, 0x4A, 0x00])
           and img[0x45E5A0 - ib:0x45E5A5 - ib] == bytes([0xB9, 0xCC, 0xD4, 0x4A, 0x00]), "")
+    # ---- 0x4100000C（得分汉字数字板）---------------------------------------
+    class _S41:
+        P4_41_CTOR = page4.Page4Mixin.P4_41_CTOR
+        def __init__(self):
+            self.q = []
+        def _p4_q(self, n):
+            return self.q
+    _s41 = _S41()
+    _g = page4.Page4Mixin.p4_spawn41(_s41, 100, 50, 0x4100000C, (13,))
+    check("0x4100000C ctor 0x4290FC：字形 13 → 行1/列3、层0、"
+          "rect=(0x48,0x1A3,0x5F,0x1A4)、dst=(x-0xC,y-1)，行为 0x42A370",
+          _g is not None and len(_s41.q) == 1
+          and _g.g32(0x14) == 0x4100000C and _g.beh == 0x42A370
+          and _g.node.layer == 0 and tuple(_g.node.rect) == (0x48, 0x1A3, 0x5F, 0x1A4)
+          and tuple(_g.node.dst) == (100 - 0xC, 50 - 1)
+          and _g.g32(0x0C) == 0xC and _g.g32(0x1C) == 0 and _g.m[0x10] == 0, "")
+    _grow_ok = []
+    for _k in range(0x53):
+        _alive = page4._beh_42A370(_s41, _g)
+        _grow_ok.append(_alive)
+    check("0x42A370：t<0xC 展开（每帧 t-=1/b+=1、dst.y-=1）、0x48≤t<0x53 收拢、t≥0x53 自灭",
+          _grow_ok[0x0B] is True and _grow_ok[0x0C] is True
+          and tuple(_g.node.rect) == (0x48, 0x1A3, 0x5F, 0x1A4)
+          and tuple(_g.node.dst) == (100 - 0xC, 50 - 1)
+          and _grow_ok[0x47] is True and _grow_ok[0x51] is True
+          and _grow_ok[0x52] is False, "")
+    check("0x41000014 的 rec 分支不再引用未定义名 prm",
+          "isinstance(prm, tuple)" not in _src and "isinstance(rec, tuple)" in _src, "")
+    _zco = _Z({0x4CD4A0 + 0xEC: 0x1000})
+    page4.Page4Mixin.p4_45eff0(_zco, 0x21000131, 0x100D1311, 123, 45)
+    _gl = [c for c in _zco.calls if c[0] == "ui4cc" and c[1] == 0x4100000C]
+    check("0x45EFF0 sel=0x300 → 0x45E4A0 用 arg3/arg4 当 x/y（击破点），"
+          "0x4100000C 走 p4_spawn41 落到 4CC",
+          len(_gl) == 2 and all(c[3] == 45 for c in _gl)
+          and sorted(c[2] for c in _gl) == [111, 135], "")
+    _zg = _Z({})
+    _gb = page4.Ent(320, 240, 0x32000005, 0)
+    _gb.d32(0x14, 0x32000005)
+    _gt = page4.Ent(320, 240, 1, 0)
+    _gt.d32(0x14, 1)
+    page4.Page4Mixin.p4_43ccc0(_zg, _gb, _gt)
+    _gg = [c for c in _zg.calls if c[0] == "ui4cc" and c[1] == 0x4100000C]
+    check("0x43CCC0 idx=3（0x32000005 掠过自机）→ 0x45F5F0 连击 200 并在自机处生成"
+          "0x4100000C 汉字（视频中的“弐千”）",
+          len(_gg) == 2 and _zg.p4_stat.get(0x4CD4A0 + 4) == 200
+          and _zg.p4_stat.get(0x4CD4A0 + 0x14) == 200
+          and _zg.p4_stat.get(0x4CD4A0 + 0x30) == 1, "")
     check("0x45AFF0 与 0x45B030 只差最后一条：neg eax(0x45B001) vs inc eax(0x45B041) ⇒ 语义相反",
           img[0x45AFFD - ib:0x45B003 - ib] == bytes([0xF7, 0xD8, 0x1B, 0xC0, 0xF7, 0xD8])
           and img[0x45B03D - ib:0x45B042 - ib] == bytes([0xF7, 0xD8, 0x1B, 0xC0, 0x40])

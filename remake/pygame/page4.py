@@ -829,6 +829,18 @@ class DNode:
         self.dst = (0, 0)             # [+0x14]/[+0x18]
         self.active = 1               # [+0x1C]
 
+    def grow(self, dl: int, dt: int, dr: int, db: int) -> None:
+        """`0x45A790(node+4, dl,dt,dr,db)`：源矩形四分量各自加减（与 DisplayNode 同义）。
+
+        0x4100000C 的 0x42A370 会用它做上/下沿展开与收拢；DNode 的 rect 初值是
+        tuple，这里改写成 list 再累加，避免原地写 tuple 抛 TypeError。"""
+        r = list(self.rect)
+        r[0] += dl
+        r[1] += dt
+        r[2] += dr
+        r[3] += db
+        self.rect = r
+
     # ---- 字节模型视图（0x44785A 等行为按 node+4/+8 dword 读写）-------------
     #  exe 节点布局：[+0]=层、[+4..+0x10]=rect 四 dword、[+0x14]/[+0x18]=dst、[+0x1C]=active
     _OFF = {0x04: ("rect", 0), 0x08: ("rect", 1), 0x0C: ("rect", 2), 0x10: ("rect", 3),
@@ -16027,14 +16039,14 @@ def _beh_42A370(self, e) -> bool:
     if t < 0x0C:
         if nd is not None:
             nd.grow(0, -1, 0, 1)                  # 0x401A0A → 0x45A790
-            nd.dst[1] -= 1                        # 0x42A39B node[+0x18] -= 1
+            nd.dst = (nd.dst[0], nd.dst[1] - 1)   # 0x42A39B node[+0x18] -= 1
         return True
     if t < 0x48:
         return True
     if t < 0x53:
         if nd is not None:
             nd.grow(0, 1, 0, -1)
-            nd.dst[1] += 1
+            nd.dst = (nd.dst[0], nd.dst[1] + 1)
         return True
     return False
 
@@ -17849,7 +17861,10 @@ class Page4Mixin:
         0x41000006: (0, 0xC0, 0x60, 0xEF, 0x8F, 0x18, 0, 0, 0, 0x402275),  # 激光横条
         0x41000008: (0, 0xA0, 0x40, 0xBF, 0x5F, 0x10, 5, 0, 0, 0x401B95),  # 捕獲波纹
         0x4100000B: (0, 0xA0, 0x40, 0xBF, 0x5F, 0x10, 1, 5, 0, 0x401B95),  # 粒子1
-        0x4100000C: (1, 0x174, 0x173, 0x17 + (0x18*0x30), 0x173 + (0x18*0x30), 0xC, 0, 0, 0, 0x401447),  # 数字板
+        # 0x4100000C（ctor 0x4290FC）：层0（bm_cm48）、半径 0xC；字形索引从 rec[3] 取，
+        # 按 **两位十进制** 拆成 (列,行)：l=列*0x18、t=0x173+行*0x30、r=l+0x17、b=t+1
+        # （初始 24×1，由 0x42A370 逐帧展开到 24×0x30 再收拢）。见 p4_spawn41 特判。
+        0x4100000C: (0, 0, 0x173, 0x17, 0x174, 0xC, 0, 0, 0, 0x401447),  # 得分汉字数字板
         # 0x4100000D 的 ctor case 是 0x4293F8：[0x40]=0x4022F7 → 0x430520、[0x1C]=-1，
         # 节点层/rect 取自 rec0 指向的静态块。旧表把它与 0x0E 并成同一 thunk，属误读。
         0x4100000D: (0, 0, 0, 0, 0, 0, 0, 0, 0, 0x4022F7),                 # 放大窗（dst/rect 动态）
@@ -17878,6 +17893,9 @@ class Page4Mixin:
         spec = self.P4_41_CTOR.get(typ)
         if spec is None:
             return
+        # rec 是 exe 的 5-dword 记录：rec[0]=x/附加参数、rec[1]=y、rec[2]=type、
+        # rec[3]=第 5 个 push（0x4100000C 的字形索引、0x41000014 的父/种子/模式三元组）。
+        prm = rec[0] if rec else 0
         layer, l, t, r, b, dv, c1c, c120, c124, thunk = spec
         e = Ent(int(x), int(y), int(typ), 0)
         e.d32(0x14, typ & 0xFFFFFFFF)
@@ -17901,10 +17919,31 @@ class Page4Mixin:
         e.node.rect = (l, t, r, b)
         e.node.dst = (int(x) - dv, int(y) - dv)
         e.node.active = 1
-        if typ == 0x41000014 and isinstance(prm, tuple) and len(prm) == 3:
+        if typ == 0x4100000C:
+            # 0x429120 层=0；0x429142..0x42919E 用 rec[3] 的十位/个位取字形格：
+            #   行 = rec[3] / 10、列 = rec[3] % 10
+            #   l = 列*0x18、t = 0x173 + 行*0x30、r = l + 0x17、b = t + 1
+            #   dst = (x - 0xC, y - 1)（0x4291C7 dec ecx / 0x4291C8 sub edx,0xC）
+            g = int(prm) & 0xFFFFFFFF
+            col = g % 10
+            row = (g // 10) & 0xFFFFFFFF
+            gl = col * 0x18
+            gt = 0x173 + row * 0x30
+            e.node.layer = 0
+            e.node.rect = (gl, gt, gl + 0x17, gt + 1)
+            e.node.dst = (int(x) - 0xC, int(y) - 1)
+            e.d32(0x0C, 0xC)                                # 0x42910F
+            e.d32(0x1C, 0)                                  # 0x429116
+            e.d32(0x18, 1)                                  # 0x429119
+            e.d32(0x20, 0)
+            e.d32(0x24, 0)
+            e.d32(0x28, 0)
+            e.d32(0x2C, 0)
+            e.m[0x10] = 0                                   # ctor 不置碰撞字节
+        if typ == 0x41000014 and isinstance(rec, tuple) and len(rec) == 3:
             # 0x429551：[4]/[8]=父节点 dst.x/y、[0xC]=rec3(父)、[0x20]=rec0(漂移种子)、
             # [0x28]=rec1(模式 0/1/2)、node rect/dst 从父节点拷贝、byte[node+0x1C]=1
-            _h, _r0, _r1 = prm
+            _h, _r0, _r1 = rec
             _p = getattr(self, "p4_links", {}).get(_h & 0x7FFFFFFF)
             if _p is not None and _p.node is not None:
                 e.d32(0x04, _p.node.dst[0] & 0xFFFFFFFF)   # 0x42956A [edx+0x14]
@@ -18794,7 +18833,10 @@ class Page4Mixin:
         self.p4_45e670(rec, 0, 1, 0)                            # 0x45F074
         if rec["b4"] & 4:                                       # 0x45F079
             self.p4_45e670(rec, 1, 0, 0)                        # 0x45F08D
-        sel = typ & 0xF00                                       # 0x45F092
+        # 0x45F092 `[esp+0xF8]` = **arg2**（击杀者/驱动类型），不是 arg1（靶类型）；
+        # arg1 只用于 0x45F01C 的表项查找。旧实现按 arg1 取 ⇒ 普通敌机类型
+        # &0xF00 恒 0，0x300/0x500 的得分汉字链永远不触发（用户实测"击破不出分数"）。
+        sel = arg2 & 0xF00                                      # 0x45F092
         eb = rec["b0"]
         if sel == 0x100:                                        # 0x45F0C9
             self.p4_stat[m + 0x26] = (self.p4_stat.get(m + 0x26, 0) + 1) & 0xFFFF
@@ -18804,7 +18846,9 @@ class Page4Mixin:
         elif sel == 0x300:                                      # 0x45F0D6
             self.p4_45e670(rec, 0, 0, 1)
             eb = self.p4_45e710(rec, 8)                         # 0x45F0F1
-            self.p4_45e4a0(eb, arg2, arg3)                      # 0x45F10B
+            # 0x45F0F6/0x45F0FF 读 [esp+0xFC]/[esp+0x100] = **arg3/arg4**（x,y）；
+            # 0x45F106..0x45F108 依次 push y、x、eb ⇒ 0x45E4A0(mgr, eb, x, y)。
+            self.p4_45e4a0(eb, arg3, arg4)                      # 0x45F10B
         elif sel == 0x400:                                      # 0x45F212
             self.p4_stat[m + 0x58] = (self.p4_stat.get(m + 0x58, 0) + 1) & 0xFFFF
             self.p4_stat[m + 0x26] = 0
@@ -18815,7 +18859,7 @@ class Page4Mixin:
             self.p4_stat[m + 0x26] = (self.p4_stat.get(m + 0x26, 0) + 1) & 0xFFFF
             self.p4_45e670(rec, 0, 0, 1)
             eb = self.p4_45e710(rec, self.p4_stat.get(0x56CCA4, 0) & 0xFFFF)   # 0x45F156
-            self.p4_45e4a0(eb, arg2, arg3)                      # 0x45F170
+            self.p4_45e4a0(eb, arg3, arg4)                      # 0x45F170
             n = (self.p4_stat.get(m + 0x28, 0) + 1) & 0xFFFF    # 0x45F175
             self.p4_stat[m + 0x28] = n
             if n >= 0x32:                                       # 0x45F17D
@@ -19261,14 +19305,16 @@ class Page4Mixin:
             bx -= 0xC                                       # 0x45E505
         if groups:
             bx -= 0xC                                       # 0x45E510
+        # 0x45E517/0x45E563/0x45E5B5 的 5 参数记录 = (x, y, 0x4100000C, 字形索引, 栈残留)，
+        # 记录只保留前 4 项有效；0x430400 后由 0x401686 入 0x4AD4CC。复刻走同型 ctor。
         if q:                                               # 0x45E513
-            self.spawn(self._p4_q("ui4cc"), 0x4100000C, bx, y, q - 1)
+            self.p4_spawn41(bx, y, 0x4100000C, (q - 1,))
             bx += 0x18                                      # 0x45E5AA
         if cnt:                                             # 0x45E55F
-            self.spawn(self._p4_q("ui4cc"), 0x4100000C, bx, y, cnt + 9)
+            self.p4_spawn41(bx, y, 0x4100000C, (cnt + 9,))
             bx += 0x18
         if groups:                                          # 0x45E5AD
-            self.spawn(self._p4_q("ui4cc"), 0x4100000C, bx, y, groups + 0xC)
+            self.p4_spawn41(bx, y, 0x4100000C, (groups + 0xC,))
 
     # ---- `0x43CCC0` 子弹→目标的命中处置（§16.208）----
     def p4_43ccc0(self, b, tgt) -> None:

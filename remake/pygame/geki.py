@@ -2579,6 +2579,15 @@ class Pages(Page4Mixin):
               a3: int = 0, a4: int = 0) -> UiEntity:
         e = UiEntity(type_word=type_word, a3=a3, a4=a4)
         hi = type_word & 0xFF000000
+        if hi == 0x41000000:
+            # 0x41 族统一走 0x428C70 的 ctor：旧实现在这里没有分支 ⇒ 0x41000001
+            # 爆炸核心、0x41000004 命中火花、0x4100000C 得分汉字等全落 default
+            # （无节点 = 不可见）。复刻侧真身是 p4_spawn41（含各型 rect/行为），
+            # exe 里这一族也只入 0x4AD4CC，故忽略传入的 queue 直接复用。
+            rec = a3 if isinstance(a3, tuple) else (a3,)
+            ent41 = self.p4_spawn41(x, y, type_word, rec)
+            if ent41 is not None:
+                return ent41
         if hi == 0x46000000:
             if type_word == 0x46000001:
                 # 0x435AF8 ctor：层 2、src (0x120,0x180,0x1DF,0x23F)、
