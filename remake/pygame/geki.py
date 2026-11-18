@@ -1317,6 +1317,7 @@ class Pages(Page4Mixin):
         self.flags = flags
         self.sysf = Flags()          # 0x56CC84：系统旗标（0x10 = 离开本页）
         self.p4_ensure()             # 页4 运行期状态（0x4AB5CC/0x56CCB8/统计区…）
+        self.trace: list[str] = []   # 必须先于 grcd_read：读档失败也要能 log（见下）
         self.grcd_read()             # state.dat 读入（0x45C020；不存在→出厂默认）
         # 0x56CC8C/0x56CC90：自机位置镜像（页面重置清零）。页13 无自机 ⇒ 恒 0，
         # 但 `0x42BB9E` 会读 `[0x56CC90]`，故仍需存在。
@@ -1335,7 +1336,6 @@ class Pages(Page4Mixin):
         self.actorq: list[UiEntity] = []         # 0x4AD40C（演员；页13 = 0x0A 汉字）
         self.screen_fill = -1
         self.bar_color = 0xD9          # 0x42000004 色块条用的索引（ctor 里由 desc 决定，暂取亮色）
-        self.trace: list[str] = []
         self.p1_done: set[int] = set()
         self.p13_frames = 0          # 0x56CCA8（页13 的帧计数）
         self.p13_portrait_arr = None # 0x6F000007 画出的整屏人像（0x43F340）
@@ -1365,6 +1365,9 @@ class Pages(Page4Mixin):
     def grcd_write(self) -> None:
         """`0x45CB70`：程序退出（0x458640）时写 state.dat。"""
         try:
+            _r = str(Path(__file__).resolve().parent.parent)
+            if _r not in sys.path:
+                sys.path.insert(0, _r)
             from grod_encode import grod_encode as _gz
             import struct as _st
             body = bytearray()
@@ -1386,6 +1389,9 @@ class Pages(Page4Mixin):
         if not f.is_file():
             return
         try:
+            _r = str(Path(__file__).resolve().parent.parent)
+            if _r not in sys.path:
+                sys.path.insert(0, _r)
             from grod_encode import grod_decode as _unlz
             data = f.read_bytes()
             if data[:4] != b"GRCD" or data[4:8] != b"106A":
