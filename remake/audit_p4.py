@@ -3555,6 +3555,40 @@ def main():
           len(_e61) == 1 and _e61[0].aux == 0x7F and _e61[0].a3 == 0 and _e61[0].a4 == -8,
           f"{[(e.type_word, e.aux, e.a3, e.a4) for e in _vq61.ui52c]}")
 
+    print("\n[关卡标题 0x4492D9 / 0x449F10 / 0x4491F3]")
+    check("exe 源偏移分支为 setle cl; dec ecx，再 and ecx,0x40",
+          img[0x4492F4-ib:0x4492F8-ib] == bytes.fromhex("0f9ec149")
+          and img[0x4492FB-ib:0x4492FE-ib] == bytes.fromhex("83e140"))
+    title_owner = type("_TitleOwner", (page4.Page4Mixin,), {})()
+    title_owner.ui4fc = []
+    title_owner._p4_q = lambda name: title_owner.ui4fc
+    title_owner.p4_vm_entity(4, (0, 0, 0x53000001, 0))
+    for frame in range(120):
+        for ent in title_owner.ui4fc:
+            page4.P4_BEH[ent.beh](title_owner, ent)
+    parts = title_owner.ui4fc
+    # 0x4492EB..0x44936D: 第三块取“幕”；prm3隐藏；最后两块取“市”“街”。
+    check("OP04 标题递归生成参数0..5（含隐藏空格）",
+          [e.s32(0x1C) for e in parts] == list(range(6)))
+    check("六片源 x=0,64,128,192,192,256，参数3隐藏",
+          [(e.node.rect, e.node.active) for e in parts] == [
+              ((x, 0, x+63, 63), int(i != 3))
+              for i, x in enumerate((0, 64, 128, 192, 192, 256))])
+    check("0x449F10 停留时五个可见字均未丢失且按64像素间距排列",
+          [e.node.dst for e in parts if e.node.active] ==
+          [(136, 208), (200, 208), (264, 208), (392, 208), (456, 208)])
+    title_owner.p4_vm_entity(4, (832, 240, 0x54000003, 0))
+    strip_vm = title_owner.ui4fc[-1]
+    strip_direct = page4.p4_op5_ui4fc_spawn(title_owner, 0x54000003, 832, 240, 0)
+    check("0x4491F3 两条生成路径均按中心坐标取标题横条",
+          all(e.node.rect == (0, 0, 383, 63) and e.node.dst == (640, 208)
+              for e in (strip_vm, strip_direct)))
+    strip_frames = 0
+    while page4.P4_BEH[strip_vm.beh](title_owner, strip_vm):
+        strip_frames += 1
+    check("0x44A070 横条左移到 x=-395 后结束（第69帧）",
+          strip_frames + 1 == 69 and strip_vm.node.dst == (-395, 208))
+
     print()
     if fails:
         print(f"[audit] {len(fails)} 项失败：{fails}")

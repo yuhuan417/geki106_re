@@ -14996,6 +14996,8 @@ def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
     0x54000001/0x54000003/0x56000001 的 ctor case + 0x51 族转 p4_51_spawn。"""
     if (typ & 0xFF000000) == 0x51000000:
         return self.p4_51_spawn(x, y, typ, prm)
+    if typ == 0x54000003:
+        return self.p4_stage_title_spawn(x, y, typ, prm)
     e = Ent(int(x) & 0xFFFFFFFF, int(y) & 0xFFFFFFFF, typ, 0)
     e.d32(0x14, typ & 0xFFFFFFFF)
     if typ == 0x54000001:                          # 0x44924F
@@ -15006,14 +15008,6 @@ def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
         e.node = DNode(2, 0x180, 0x60)
         e.node.rect = (0x180, 0x60, 0x1DF, 0xBF)
         e.node.dst = (int(x), int(y))              # 0x4492C0 0x401753(rec0, rec1)
-        e.node.active = 1
-    elif typ == 0x54000003:                        # 0x4491F3
-        e.d32(0x40, 0x40191A)
-        e.beh = 0x44A070
-        e.d32(0x1C, 0)
-        e.node = DNode(0xD, 0, 0)
-        e.node.rect = (0, 0, 0x17F, 0x3F)
-        e.node.dst = (int(x), int(y))
         e.node.active = 1
     elif typ == 0x56000001:                        # 0x4494A8
         e.d32(0x40, 0x4022F7)
@@ -23232,6 +23226,7 @@ class Page4Mixin:
             e.d32(0x40, 0x401154)
             e.beh = 0x449F10
             e.d32(0x1C, prm & 0xFFFFFFFF)
+            e.d32(0x20, left & 0xFFFFFFFF)
             e.d32(0x24, 0)
             e.d32(0x28, 0)
             e.d32(0x2C, 0x10)
