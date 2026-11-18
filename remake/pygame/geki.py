@@ -2433,26 +2433,124 @@ class Pages(Page4Mixin):
         else:
             self.page = 0xFF
 
-    # ---- 页14：OP movie（页3 的 0x2000000 出口）--------------------------------
+    # ---- 页14：attract 演示（0x453A60 / 0x453EA0 / 0x4540A0）------------------
+    # 页3 遊戲開始超时（0x2000000 出口）进入；用内置回放（资源 90..97）驱动
+    # 与页4 同一套游戏逻辑，VM 链 = 回放头 dword4 低字（0x5E=(63,64) demo 流）。
+    P14_SE_SLOTS = ((0, 0x27), (1, 0x28), (2, 0x1C), (3, 0x1C), (4, 0x16),
+                    (5, 0x1E), (6, 0x22), (7, 0x23), (8, 0x20), (9, 0x21),
+                    (0xA, 0x1D), (0xB, 0x15), (0xC, 0x1B), (0xD, 0x17),
+                    (0xE, 0x26), (0xF, 0x25), (0x10, 0x19), (0x11, 0x1A),
+                    (0x12, 0x18), (0x13, 0x1F))          # 0x453BA0..0x453D2E
+
     def page14_enter(self) -> None:
-        """`0x453A60`：装调色板 → SetPeriod。"""
+        """`0x453A60`：theatre←选机 → 装内置回放（0x45D930）→ 头参数写配置 →
+        清状态 → 亮度 → 层/输入/音效 → 0x458D60 阶段初始化 → VM 装链 → 跑一帧。"""
         self.flags.clear()
         self.screen_fill = -1
-        self.pal = self._load_pal(2)
-        self.pal_now = self.pal
-        self.timer.set_period(0)
+        slot = self.keys.field(0xC000) & 0xFFFF
+        self.theatre = slot                               # 0x453A74 [0x4AB5C8] = eax
+        hdr = self.p4_45d930()                            # 0x453A8B/0x453A9A
+        if hdr is None:                                   # 0x45D9DA xor al,al → 离页
+            self.flags.set(0x10000)
+            return
+        # 0x453A9F..0x453AE9：头参数 → 0x4AB5B0 / 0x56CCB0
+        d7 = int.from_bytes(hdr[0x1C:0x20], "little")
+        self._p4_boolset(1, bool(d7))                     # 0x45B0A0(obj,1,d7) 鍛錬
+        self._p4_boolset(2, hdr[0x1D] != 0)               # mask2（操作器）
+        self.p4_45b0e0_set(0xC000, 0xC000, hdr[0x18])     # 选机 ← byte d6 b0（0x453AC1）
+        self._p4_boolset(0x200, hdr[0x1B] != 0)           # 調整 XOR 位
+        import struct as _st
+        self.p4_stat[0x56CCB0] = _st.unpack_from("<H", hdr, 0x12)[0]   # 0x453B1B
+        # 0x453AF1..0x453B35：清统计/状态字节 + 0x56CCB8 直接赋值 0
+        for a in (0x56CC94, 0x56CC98, 0x56CC9C, 0x56CCA0, 0x56CCA4, 0x56CCA8):
+            self.p4_stat[a] = 0
+        for a in (0x56CCB2, 0x56CCB3, 0x56CCB4, 0x56CCB5):
+            self.p4_stat[a] = 0
+        self.p4_stat[0x56CCB8] = 0                        # 0x401AAA → 0x45AF10 直接赋值
+        self.p4_ccc8 = 1                                  # 0x453B4E byte[0x56CCC8]=1
+        # 0x453B3F..0x453B7B：亮度/对比度（0x4AB5B8 两字段 ×4−0xC8 → 0x44CDF0）
+        _br = (self.disp_cfg.bits & 0x1FC0000) & 0xFFFFFFFF
+        _ct = (self.disp_cfg.bits & 0xFE000000) & 0xFFFFFFFF
+        _br = ((0 if _br == 0 else _br) * 4 - 0xC8) & 0xFFFFFFFF
+        _ct = ((0 if _ct == 0 else _ct) * 4 - 0xC8) & 0xFFFFFFFF
+        if not self.p4_load_palette(1, _ct, _br):         # 0x453B87 失败 → 旗标 2
+            self.flags.set(2)
+            return
+        self.inp.set_mode(0)                              # 0x453B9B 0x44EDA0(0x4AB454,0)
+        ok = True                                         # 0x453BA0..0x453D2E 音效装载
+        for slot_no, wav in self.P14_SE_SLOTS:
+            if not self.load_wave(slot_no, wav):
+                ok = False
+                break
+        if not ok:
+            self.flags.set(8)                             # 0x453D39
+            return
+        # 0x453D43..0x453D5C：0x458D60(App, a1..a4) —— 与 p4_enter 同一参数布局
+        # （a1=dword hdr+0x1A、a2=word hdr+0x14、a3=sbyte hdr+0x1A=残机、a4=sbyte hdr+0x19=继续门）
+        a1 = int.from_bytes(hdr[0x1A:0x1E], "little")
+        a2 = int.from_bytes(hdr[0x14:0x16], "little")
+        a3 = hdr[0x1A] - 0x100 if hdr[0x1A] & 0x80 else hdr[0x1A]
+        a4 = hdr[0x19] - 0x100 if hdr[0x19] & 0x80 else hdr[0x19]
+        self.p4_engine(a1, a2, a3, a4)
+        # 0x453D6B：VM 装链（dword hdr+0x10 低字 = 链号 0x5E/0x60）
+        chain = int.from_bytes(hdr[0x10:0x14], "little")
+        self.vm_init_script(chain)
+        self.sysf.clear()                                 # 0x453D76 0x45AF10(0x56CC84,0)
+        self.replay_mode = True                           # 0x453B35 [0x56CCB5]=0 但页14
+        # 0x453D80：VM 先跑一帧；0x453D8B 计时器建立（失败 → 旗标 0x40）
+        self.vm_step_frame()
+        if not self.timer.set_period(0):                  # 0x453D8B 0x45A490(0)
+            self.flags.set(0x40)
+        self.p14_ptr = (160, 120)                         # 虚拟指针（0x4AB59C/A0 等价）
+
+    def _p4_boolset(self, mask: int, b: bool) -> None:
+        """`0x45B0A0(0x4AB5B0, mask, b)`：按布尔置/清 keys.bits 的指定位。"""
+        if b:
+            self.keys.bits = (self.keys.bits | mask) & 0xFFFFFFFF
+        else:
+            self.keys.bits = (self.keys.bits & (~mask & 0xFFFFFFFF)) & 0xFFFFFFFF
 
     def page14_step(self) -> bool:
-        """`0x453EA0`：播放 OP 动画帧。"""
-        self.begin_frame()
-        self.draw()
-        return not self.flags.is_empty()              # 旗标非空 → 离页
+        """`0x453EA0`：泵 → VM 帧（耗尽→0x10000）→ 回放帧→输入记录 →
+        e0/e1→0x200（跳过演示）→ 键命令 → 帧计数/色带 → 三组碰撞 → 行为 → 合成。"""
+        self.p4_pump(1)                                   # 0x453EBC 0x458B80
+        if self.vm.step():                                # 0x453ECD 0x460350
+            self.flags.set(0x10000)                       # 0x453ED6 链耗尽 → 离页
+        rec = self.inp.rec
+        # 跳过检测（0x453F0D byte[0x4AB596/97]）只能来自**真机**按下沿：
+        # 内置回放里录到的攻击沿（res_90 在 f180 就有 11 处）不能当"用户跳过"，
+        # 否则原作的 attract 播不到头。这里在回放覆盖 rec 之前先取真机边沿。
+        real_skip = bool(rec is not None and (rec.e0 or rec.e1))
+        self.replay_play()                                # 0x453EEF 0x45D2B0
+        if real_skip:                                     # 0x453F1F → 旗标 0x200
+            self.flags.set(0x200)
+        # 0x44EB60 的回放分支：tmp 的 dx/dy 累加进虚拟指针并镜像 0x56CC8C/90
+        if rec is not None and (rec.dx or rec.dy):
+            x = max(0, min(640, int(self.inp.x) + rec.dx))
+            y = max(0, min(480, int(self.inp.y) + rec.dy))
+            self.inp.x, self.inp.y = x, y
+            self.p4_player_pos = (x, y)
+        if rec is not None and rec.key:
+            self.key_command(rec.key)                     # 0x453F84 0x458FD0
+        self.p4_frames += 1                               # 0x453F93 [0x56CCA8]++
+        self.band_draw()                                  # 0x453F99 0x4562A0
+        if self.p4_collide() is not None:                 # 0x453FA2 三组碰撞
+            self.p4_collide_pair(self._p4_q("ui40c"), self.p4_q43c)
+            self.p4_43c060(self._p4_q("ui46c"), self.p4_q43c)
+            self.p4_43c0f0(self._p4_q("ui49c"), self._p4_q("ui40c"))
+        self.p4_bg_update()                               # 0x453FEA 0x458E75→0x457BD0
+        self.p4_dispatch()                                # 0x453FF3 0x458E70
+        self.draw()                                       # 0x453FF8 0x458EF0(App,1)
+        self.band_advance()
+        return self.flags.is_empty()                      # 0x453FFF 0x45AFF0(0x4AB5C0,0)：旗标空 = 继续
 
     def page14_finish(self) -> None:
         self.canvas.fill(0xB4); self.present()
         self.canvas.fill(0xB4); self.present()
         self.layers.free_all()
-        self.page = 3                                 # OP 完 → 回页3
+        self.replay_mode = False
+        # 0x4540A0 收尾：0x10000 → 页2（attract 循环），0x200 → 页3
+        self.page = 2 if self.flags.bits & 0x10000 else 3
 
     def _load_pal(self, idx: int):
         """加载第 idx 号调色板（从 pages_data.json 的 palettes）。"""
@@ -3585,6 +3683,26 @@ class Pages(Page4Mixin):
                 e.d32(0x18, 0xFFFFFFFF)                   # 0x42D8E4
                 e.raw[0x10] = 0                           # 0x42D8CD
                 e.disp = DisplayNode(1, [0xA0, 0xD0, 0xAF, 0xDF],
+                                     [int(x) - 8, int(y) - 8])
+            elif type_word == 0x100D1211:
+                # 0x42DDAB（0x42D780 的 0x10 族默认分支之一）：0x6E000100 开火控制器的
+                # 僚机瞄准弹。半径 12、HP 1、参与碰撞；速度 = rec[3] 低/高 16 位（8.8）
+                # **×10**（movsx + lea×5 + shl1）；[+0x24/0x28] = 位置 8.8；层 1
+                # （bm_cm32）rect (0xC0,0xC0,0xCF,0xCF)、dst=(x-8,y-8)；行为 0x401C1C→0x42F8C0。
+                e.beh = 0x42F8C0
+                e.d32(0x0C, 0xC)                          # 0x42DDB7
+                e.raw[0x10] = 1                           # 0x42DDBE
+                _vel = int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0
+                _vx = _vel & 0xFFFF
+                _vx = _vx - 0x10000 if _vx & 0x8000 else _vx
+                _vy = (_vel >> 16) & 0xFFFF
+                _vy = _vy - 0x10000 if _vy & 0x8000 else _vy
+                e.d32(0x1C, (_vx * 10) & 0xFFFFFFFF)      # 0x42DDCA
+                e.d32(0x20, (_vy * 10) & 0xFFFFFFFF)      # 0x42DDD6
+                e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)   # 0x42DDDE
+                e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)   # 0x42DDE7
+                e.d32(0x18, 1)                            # 0x42DE06 HP
+                e.disp = DisplayNode(1, [0xC0, 0xC0, 0xCF, 0xCF],
                                      [int(x) - 8, int(y) - 8])
             else:
                 e.beh = "default"
@@ -6551,7 +6669,7 @@ class Pages(Page4Mixin):
                 _h, _w = _b.shape[:2]
                 _nz = int((_b[::4, ::4] != 0).sum())
                 print(f"[layer] {_i} {_w}x{_h} nz/16={_nz} id={getattr(_l,'bind_id',None)}")
-        if getattr(self, "p4_bg", None) and self.page in (4, 8, 9, 0x0A):
+        if getattr(self, "p4_bg", None) and self.page in (4, 8, 9, 0x0A, 14):
             # 0x458EF5 → 0x457CB0（12 槽，最先绘制）。⚠ 页4 专属：共享 draw() 原本
             # 无条件执行，ESC 页4→页3 / 页3→页4 时页4 的地面字块/HUD 会画进别的页
             # （2026-10-31 修，页1-3 金标时这些路径本就是空操作，加门不改哈希）。
@@ -6559,7 +6677,7 @@ class Pages(Page4Mixin):
             self.p4_bg_draw()
         # 0x458EF0 的六条队列顺序：ui4cc → ui43c → ui49c → 0x4AD40C → ui46c → ui4fc
         # ⚠ 页4 专属渲染遍（同 p4_bg_draw：加 page 门防跨页污染，2026-10-31）
-        if self.page == 4:
+        if self.page in (4, 14):
             if getattr(self, "p4_q4cc", None) is None:
                 self.p4_q4cc = self._p4_q("ui4cc")
             self._render_queue(c, self.p4_q4cc)         # 0x4AD4CC 页4 4CC 队列
@@ -6581,7 +6699,7 @@ class Pages(Page4Mixin):
         if DRAW_DISPLAY_NODES:
             self._render_queue(c, self.ui4fc)
         # 0x458F3C if (arg) { 0x45EED0(0x4CD4A0); 0x460A90(0x4CD590) }：HUD 渲染（页4 专属）
-        if getattr(self, "p4_bg", None) is not None and self.page == 4:
+        if getattr(self, "p4_bg", None) is not None and self.page in (4, 14):
             self.p4_hud_draw()
         # 0x451316：页4 回放进度文字（`0x44D330`）画在 present 之前 ⇒ 叠在最上层。
         # 只在 `p4_debug_text()` 真的产出内容时才有值（门 `[0x56CCC9]`&`[0x56CCB5]`）。

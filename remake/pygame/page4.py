@@ -12996,7 +12996,7 @@ def _beh_447640(self, e) -> bool:
         return False                                     # 0x4477FB xor al,al：爆发后自灭
     if sub.g32(0x34) == 0:                               # 0x44772B
         self._p4_447640_spawn(e)
-        return True
+        return False                                     # 0x4477FB：爆发后自灭（同相位 0）
     if self.p4_stat.get(0x56CCB3, 0):                    # 0x44780B
         d = (e.g32(0x2C) - 1) & 0xFFFFFFFF               # 0x447814 dec
         e.d32(0x2C, d)                                   # 0x447817
@@ -13169,6 +13169,490 @@ def _p4_447640_orbit(self, e) -> None:
     node = e.node
     if node is not None:                                  # 0x447D66..0x447D80
         node.d32(0x14, e.s32(0x08) - r)
+
+
+# ---------------------------------------------------------------------------
+# 0x6E 族：捕获僚机（type 6）的武器控制器（2026-11-18 逐字节落地）
+#
+# type6 ctor 0x445CE7 会向 0x4AD52C 连发至多三个 0x6E 控制器（0x430400 记录
+# {0,0,type,param}，param = **僚机指针**；第 1 个 spawn 只压 4 个参数，rec[3] 是
+# 栈残留——原件 UB，实战读到的正是刚建好的僚机指针，复刻按僚机传）：
+#   0x6E000000|(wt&0xF)   → 移动风格（ctor 0x4277D0 主跳表 0x427A88，8 项）
+#   0x6E000000|(wt&0xF0)  → 瞄准风格（byte 表 0x427AC4 + 跳表 0x427AA8）
+#   0x6E000000|(wt&0xF00) → **开火控制器** 0x6E000100（[+0x20]=6）
+# wt = 0x45FAD0(type) 的返回值（计分表项高 16 位）。
+# 控制器字段：[+0x1C]=僚机指针（0x4277D0 读 rec[3]）、僚机 [+0x1C]=玩家、
+# 僚机 [+0x24] = 瞄准速度 dword（低16=vx 8.8、高16=vy），开火者读它造
+# 0x100D1211（速度 ×10、伤害 0xD1、层1 bm_cm32 (0xC0,0xC0,0xCF,0xCF) 16×16）。
+# ---------------------------------------------------------------------------
+
+P4_6E_MOV_BEH = (0x427EF0, 0x427F40, 0x428020, 0x4280F0,
+                 0x428260, 0x428340, 0x428430, 0x4284B0)   # 0x427A88 主跳表
+P4_6E_AIM_BEH = {0x20: 0x4285F0, 0x30: 0x428610, 0x40: 0x428650,
+                 0x50: 0x4286F0, 0x60: 0x428760, 0x70: 0x4287F0}  # byte 表 0x427AC4 值→case
+
+
+def p4_6e_ctor(self, typ: int, wingman) -> "Ent":
+    """`0x4277D0`（0x6E 族 ctor，ecx=实体、arg=记录）：按 type 分派行为与初值。"""
+    e = Ent(0, 0, typ, 0)
+    e.d32(0x14, typ & 0xFFFFFFFF)
+    e.d32(0x1C, id(wingman) & 0x7FFFFFFF if wingman is not None else 0)  # 0x4277DE rec[3]
+    sub = typ & 0xFFFF
+    if sub <= 7:                                           # 0x4277F6 add ecx,0x91ffffff / cmp 7
+        e.beh = P4_6E_MOV_BEH[sub]                         # 0x427A88 jmp [ecx*4+0x427a88]
+        if sub == 1:                                       # 0x427818
+            e.d32(0x20, 0)
+        elif sub == 2:                                     # 0x42782B
+            wx, wy = wingman.s32(0x04), wingman.s32(0x08)
+            px, py = _p4_6e_player(wingman)
+            e.d32(0x20, ((wx << 5)) & 0xFFFFFFFF)
+            e.d32(0x24, ((wy << 5)) & 0xFFFFFFFF)
+            inv = page4_45aa80(wx - px, wy - py)              # 0x427856 0x40231F→0x45AA80
+            e.d32(0x28, _idiv_trunc(0x20000, inv if inv else 1) & 0xFFFFFFFF)
+        elif sub == 3:                                     # 0x427870
+            wx, wy = wingman.s32(0x04), wingman.s32(0x08)
+            px, py = _p4_6e_player(wingman)
+            e.d32(0x20, px & 0xFFFFFFFF)
+            e.d32(0x24, py & 0xFFFFFFFF)
+            e.d32(0x28, wx & 0xFFFFFFFF)
+            e.d32(0x2C, wy & 0xFFFFFFFF)
+            inv = page4_45aa80(wx - px, wy - py)
+            e.d32(0x30, _idiv_trunc(0x1000, inv if inv else 1) & 0xFFFFFFFF)
+        elif sub == 5:                                     # 0x4278C0
+            e.d32(0x20, (wingman.s32(0x04) << 4) & 0xFFFFFFFF)
+            e.d32(0x24, (wingman.s32(0x08) << 4) & 0xFFFFFFFF)
+            e.d32(0x28, 0xFFFFFF00)                        # 0x4278D9 速度 -0x100
+            e.d32(0x2C, 0)
+        elif sub == 7:                                     # 0x4278F8
+            wingman.m[0x10] = 0                            # 0x427902 byte[僚机+0x10]=0
+    elif sub == 0x10:                                      # 0x4277EA je 0x42792F
+        e.beh = 0x428550
+        e.d32(0x20, 0)
+    elif sub == 0x20:                                      # byte 表值 0
+        e.beh = 0x4285F0
+    elif sub == 0x30:                                      # 值 1
+        e.beh = 0x428610
+    elif sub == 0x40:                                      # 值 2：[0x20..0x30] = 快照 (wy<<16)|wx
+        wx, wy = wingman.s32(0x04), wingman.s32(0x08)
+        packed = (((wy & 0xFFFF) << 16) | (wx & 0xFFFF)) & 0xFFFFFFFF   # 0x42798A..0x4279B2
+        for off in (0x20, 0x24, 0x28, 0x2C, 0x30):
+            e.d32(off, packed)
+        e.beh = 0x428650
+    elif sub == 0x50:                                      # 值 3
+        e.beh = 0x4286F0
+        e.d32(0x20, 1)                                     # 0x4279C0
+    elif sub == 0x60:                                      # 值 4
+        e.beh = 0x428760
+    elif sub == 0x70:                                      # 值 5
+        e.beh = 0x4287F0
+        e.d32(0x20, 0)                                     # 0x4279E1
+        e.d32(0x24, 0)                                     # 0x4279E4
+    elif sub == 0x100:                                     # 0x4279EC：开火控制器
+        e.beh = 0x428860
+        e.d32(0x20, 6)                                     # 0x4279F3
+    else:                                                  # 0x4279FF/0x427A83 → 默认尾
+        e.beh = 0                                          # 0x43DA4F：无行为（只有存活链）
+    self._p4_q("ui52c").append(e)                          # 0x40201D→0x445AA0
+    return e
+
+
+def _p4_6e_player(wingman):
+    """僚机 [+0x1C] 的玩家实体（0x427C00/各移动行为都经它取自机坐标）。"""
+    return (wingman.s32(0x04), wingman.s32(0x08)) if wingman is None else \
+        _p4_6e_player_obj(wingman)
+
+
+def _p4_6e_player_obj(wingman):
+    p = wingman.p.get("sub")
+    if p is None:
+        return (wingman.s32(0x04), wingman.s32(0x08))
+    return (p.s32(0x04), p.s32(0x08))
+
+
+def _p4_6e_alive(self, e) -> bool:
+    """`0x427C00`（thunk 0x402437）：byte[0x56CCB3]==0 且僚机存活且玩家存活。"""
+    if self.p4_stat.get(0x56CCB3, 0):
+        return False                                       # 0x427C09 jne → 0
+    wm = e.p.get("wingman")
+    if wm is None or wm.g32(0x34) == 0:                    # 0x427C0D
+        return False
+    pl = wm.p.get("sub")
+    if pl is None or pl.g32(0x34) == 0:                    # 0x427C17
+        return False
+    return True
+
+
+def p4_6e_aim(dx: int, dy: int) -> int:
+    """`0x427C40`（thunk 0x401703）：把偏移 (dx,dy) 归一成 8.8 速度 dword。
+
+    ```
+    dx==0 && dy==0 → (vy<<16)|vx = 0x00000100（vx=1px/帧、vy=0）
+    inv = 0x45AA80(dx,dy)（=4096/√(dx²+dy²)）
+    vx = (inv*dx)>>4、vy = (inv*dy)>>4   ⇒ 模长 ≈ 1024/256 = 4 px/帧（8.8 = 0x400）
+    ```
+    """
+    if dx == 0 and dy == 0:
+        return 0x00000100                                  # 0x427C52
+    inv = page4_45aa80(dx, dy)                                # 0x427C6B
+    vx = (inv * dx) >> 4                                   # 0x427C75 sar 4
+    vy = (inv * dy) >> 4                                   # 0x427C7E
+    return (((vy & 0xFFFF) << 16) | (vx & 0xFFFF)) & 0xFFFFFFFF
+
+
+def _p4_6e_fire(self, e, typ: int = 0x100D1211) -> None:
+    """`0x427CC0`（thunk 0x4022CF）：按住攻击键时从僚机位置发 0x100D1211。"""
+    if not getattr(self.inp.rec, "b0", 0):                 # 0x427CC0 byte[0x4AB594]
+        return
+    wm = e.p.get("wingman")
+    if wm is None:
+        return
+    self.spawn(self._p4_q("ui46c"), typ,
+               wm.s32(0x04), wm.s32(0x08), wm.g32(0x24))   # 0x427CEA rec={x,y,type,vel}
+    e.d32(0x20, 0)                                         # 0x427D0E 计数清零
+
+
+def _beh_427EF0(self, e) -> bool:
+    """`0x427EF0`（0x6E000000 追随）：僚机向玩家位置靠拢（x 步幅 (dx+0x97)>>4、y (dy+0xF)>>5）。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    esi = ((px - wm.s32(0x04) + 0x97) >> 4)                # 0x427F09 add 0x97 / sar 4
+    edx = ((py - wm.s32(0x08) + 0xF) >> 5)                 # 0x427F0F add 0xF / sar 5
+    wm.d32(0x04, (wm.s32(0x04) + esi) & 0xFFFFFFFF)
+    wm.d32(0x08, (wm.s32(0x08) + edx) & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_427F40(self, e) -> bool:
+    """`0x427F40`（0x6E000001 悬停摆动）：t 循环 0..0x7C，绕玩家 + 3·cos/sin(29t)>>3 摆动，步幅 /8。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    t = e.g32(0x20)
+    t = t + 1 if t < 0x7D else t - 0x7D                    # 0x427F4F neg/sbb/and 0x7e/add -0x7d
+    e.d32(0x20, t & 0xFFFFFFFF)
+    ang = (29 * t) & 0xFFFFFFFF                            # 0x427F64 eax*29（lea 链）
+    tx = px + ((3 * p4_sin_q(ang, "cos")) >> 3)            # 0x427F79..0x427F85
+    ty = py + ((3 * p4_sin_q(ang, "sin")) >> 3)            # 0x427FA2..0x427FAB
+    dx = tx - wm.s32(0x04)
+    dy = ty - wm.s32(0x08)
+    dx = dx + 7 if dx >= 0 else dx                         # 0x427FB6 jl / add 7（正数向上取整）
+    dy = dy + 7 if dy >= 0 else dy
+    wm.d32(0x04, (wm.s32(0x04) + (dx >> 3)) & 0xFFFFFFFF)  # 0x427FC0 sar 3
+    wm.d32(0x08, (wm.s32(0x08) + (dy >> 3)) & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428020(self, e) -> bool:
+    """`0x428020`（0x6E000002 环绕）：绕玩家转圈——角度累加器 [+0x20]/[+0x24]（×32 定点）。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    ax = e.s32(0x20) - (px << 5)                           # 0x42803A shl 5 / sub
+    ay = e.s32(0x24) - (py << 5)
+    ang = p4_45a9a0(ay, ax)                                # 0x428049 0x401091→0x45A9A0
+    spd = e.s32(0x28)
+    nx = (px << 5) + ((p4_sin_q(ang, "cos") * spd) >> 8)   # 0x428056..0x428066
+    ny = (py << 5) + ((p4_sin_q(ang, "sin") * spd) >> 8)   # 0x42806C..0x428080
+    spd = 0xC00 if spd < 0xD00 else spd - 0x100            # 0x428082 cmp 0xd00 / lea -0x100
+    e.d32(0x20, nx & 0xFFFFFFFF)
+    e.d32(0x24, ny & 0xFFFFFFFF)
+    e.d32(0x28, spd & 0xFFFFFFFF)
+    wm.d32(0x04, ((nx >> 5)) & 0xFFFFFFFF)                 # 0x4280A2 sar 5 → 僚机 x
+    wm.d32(0x08, ((ny >> 5)) & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_4280F0(self, e) -> bool:
+    """`0x4280F0`（0x6E000003 追近）：朝玩家加速——速度 [+0x28]/[+0x2C] 每帧加 (玩家-僚机)，
+    距离超 0x1000/inv（=act 阈值）时按 [+0x30] 系数收敛；[+0x30] 每帧 -3 钳 0x80。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    vx = e.s32(0x28) + (px - wm.s32(0x04))                 # 0x42810A..0x42810D
+    vy = e.s32(0x2C) + (py - wm.s32(0x08))
+    dx = px - wm.s32(0x04)
+    dy = py - wm.s32(0x08)
+    e.d32(0x28, vx & 0xFFFFFFFF)
+    e.d32(0x2C, vy & 0xFFFFFFFF)
+    e.d32(0x20, px & 0xFFFFFFFF)                           # 0x42811F..0x42812F
+    e.d32(0x24, py & 0xFFFFFFFF)
+    inv = page4_45aa80(dx, dy)
+    dist_term = _idiv_trunc(0x1000, inv if inv else 1)  # 0x42813D idiv
+    if dist_term > e.s32(0x30):                            # 0x42814B jle
+        vx = px + (((inv * dx) * e.s32(0x30)) >> 12)       # 0x428151..0x428164 sar 0xc
+        vy = py + (((inv * dy) * e.s32(0x30)) >> 12)
+        e.d32(0x28, vx & 0xFFFFFFFF)
+        e.d32(0x2C, vy & 0xFFFFFFFF)
+    elif dist_term < 0x40:                                 # 0x428186 cmp 0x40 / jge
+        dx2 = dx + (0x10 if dx < 0 else -0x10)             # 0x42818B jge/add ±0x10
+        dy2 = dy + (0x10 if dy < 0 else -0x10)
+        e.d32(0x28, (e.s32(0x28) + _idiv_trunc(0x50, dx2)) & 0xFFFFFFFF)   # 0x428197 idiv
+        e.d32(0x2C, (e.s32(0x2C) + _idiv_trunc(0x50, dy2)) & 0xFFFFFFFF)
+    s30 = e.s32(0x30)                                      # 0x4281C3 cmp 0x80
+    if s30 > 0x80:
+        s30 = max(s30 - 3, 0x80)
+    else:
+        s30 = 0x80
+    e.d32(0x30, s30 & 0xFFFFFFFF)                          # 0x4281CD..0x4281E1
+    wm.d32(0x04, e.g32(0x28) & 0xFFFFFFFF)                 # 0x4281EF
+    wm.d32(0x08, e.g32(0x2C) & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428260(self, e) -> bool:
+    """`0x428260`（0x6E000004 保距）：远离→追近（(d+0x1F)>>5），太近（inv≤0x38）→后退 0x40/d。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    dx = px - wm.s32(0x04)
+    dy = py - wm.s32(0x08)
+    inv = page4_45aa80(dx, dy)
+    term = _idiv_trunc(0x1000, inv if inv else 1)
+    if term > 0x40:                                        # 0x428290 jle
+        sx = dx + 0x1F if dx >= 0 else dx                  # 0x428295 jl/add 0x1f
+        sy = dy + 0x1F if dy >= 0 else dy
+        wm.d32(0x04, (wm.s32(0x04) + (sx >> 5)) & 0xFFFFFFFF)
+        wm.d32(0x08, (wm.s32(0x08) + (sy >> 5)) & 0xFFFFFFFF)
+    elif term < 0x38:                                      # 0x4282C5 cmp 0x38 / jge
+        dx2 = dx - 8 if dx < 0 else dx + 8                 # 0x4282CE jl/add ±8
+        dy2 = dy - 8 if dy < 0 else dy + 8
+        wm.d32(0x04, (wm.s32(0x04) - _idiv_trunc(0x40, dx2)) & 0xFFFFFFFF)  # 0x4282D6 idiv
+        wm.d32(0x08, (wm.s32(0x08) - _idiv_trunc(0x40, dy2)) & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428340(self, e) -> bool:
+    """`0x428340`（0x6E000005 冲刺）：平时漂向玩家右 0x90；按攻击沿 → 速度 0x110 朝瞄准方向
+    冲刺（角度 = 0x45A9A0(僚机+0x24/0x26)），速度每帧 -8；位置累加器 ×16 定点。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    spd = e.s32(0x28)
+    if spd > 0xFFFFFF00:                                   # 0x42834A cmp 0xffffff00 / jle
+        ax = e.s32(0x20) + ((p4_sin_q(e.s32(0x2C), "cos") * spd) >> 8)
+        ay = e.s32(0x24) + ((p4_sin_q(e.s32(0x2C), "sin") * spd) >> 8)
+        e.d32(0x28, ((spd - 8)) & 0xFFFFFFFF)              # 0x428388 add -8
+        e.d32(0x20, ax & 0xFFFFFFFF)
+        e.d32(0x24, ay & 0xFFFFFFFF)
+    else:
+        if self.p4_btn0_edge():                            # 0x428394 byte[0x4AB596]（按下沿）
+            e.d32(0x28, 0x110)                             # 0x42839E
+            ang = p4_45a9a0(_p4_s16(wm.g32(0x24) >> 16), _p4_s16(wm.g32(0x24) & 0xFFFF))
+            e.d32(0x2C, ang & 0xFFFFFFFF)                  # 0x4283AF 0x401091→0x45A9A0
+        else:                                              # 0x4283BC
+            e.d32(0x20, (e.s32(0x20) + (px - wm.s32(0x04)) + 0x90) & 0xFFFFFFFF)
+            e.d32(0x24, (e.s32(0x24) + (py - wm.s32(0x08))) & 0xFFFFFFFF)
+    wm.d32(0x04, ((e.s32(0x20)) >> 4) & 0xFFFFFFFF)        # 0x4283E2 sar 4
+    wm.d32(0x08, ((e.s32(0x24)) >> 4) & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428430(self, e) -> bool:
+    """`0x428430`（0x6E000006 换侧跟随）：x 精确跟随（/16），y 停到玩家 ±0x48 的**另一侧**。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    wy, wx = wm.s32(0x08), wm.s32(0x04)
+    ebx = -0x48 if py >= wy else 0x48                      # 0x42844C setge/dec/and 0x90/add -0x48
+    ebx -= wy                                              # 0x428459 sub edi
+    dx = px - wx
+    dy = py + ebx - wy                                     # 0x42845B add esi, ebx → 目标-当前
+    wm.d32(0x04, (wx + ((dx + (0xF if dx >= 0 else 0)) >> 4)) & 0xFFFFFFFF)   # 0x42845D..0x428467
+    wm.d32(0x08, (wy + ((dy + (0xF if dy >= 0 else 0)) >> 4)) & 0xFFFFFFFF)   # 0x428469..0x428478
+    return _p4_6e_alive(self, e)
+
+
+def _beh_4284B0(self, e) -> bool:
+    """`0x4284B0`（0x6E000007 吸附+闪烁）：8 帧内插到玩家位置，然后每帧翻转僚机节点 active。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    t = e.s32(0x20)
+    if t != 0:                                             # 0x4284B9 je → 直接贴上
+        edi = t - 8
+        if edi <= 0:                                       # 0x4284CB setle/dec/and
+            edi = 0
+        dx = wm.s32(0x04) - px
+        dy = wm.s32(0x08) - py
+        wm.d32(0x04, (px + _idiv_trunc(dx * edi, t)) & 0xFFFFFFFF)   # 0x4284D6 imul/idiv
+        wm.d32(0x08, (py + _idiv_trunc(dy * edi, t)) & 0xFFFFFFFF)
+        e.d32(0x20, edi & 0xFFFFFFFF)
+    else:
+        wm.d32(0x04, px & 0xFFFFFFFF)                      # 0x4284FE
+        wm.d32(0x08, py & 0xFFFFFFFF)
+    nd = getattr(wm, "node", None)                         # 0x42850A [ent+0x38]=节点
+    if nd is not None:
+        nd.active = 0 if nd.active else 1                  # 0x42850D byte[node+0x1c] 取反
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428550(self, e) -> bool:
+    """`0x428550`（0x6E000010 扫描瞄准）：t 循环 0..0x3A，[僚机+0x24] = 朝角 6t°、
+    模长 sin/cos·100>>8 的合成方向（0x427C40 归一）。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    t = e.g32(0x20)
+    t = t + 1 if t < 0x3B else t - 0x3B                    # 0x42855C neg/sbb/and 0x3c
+    e.d32(0x20, t & 0xFFFFFFFF)
+    ang = (t * 60) & 0xFFFFFFFF                            # 0x42856E ×60（lea×3、×5、shl2）
+    dy = (p4_sin_q(ang, "sin") * 100) >> 8                 # 0x428577..0x428589 ×25×4 = ×100
+    dx = (p4_sin_q(ang, "cos") * 100) >> 8                 # 0x42859A..0x4285AD
+    wm.d32(0x24, p4_6e_aim(dx, dy) & 0xFFFFFFFF)           # 0x4285B1 0x401703
+    return _p4_6e_alive(self, e)
+
+
+def _beh_4285F0(self, e) -> bool:
+    """`0x4285F0`（0x6E000020 平射瞄准）：[僚机+0x24] = 0x100（水平 1px/帧 → 弹速 ×10）。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    wm.d32(0x24, 0x100)                                    # 0x4285F3
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428610(self, e) -> bool:
+    """`0x428610`（0x6E000030 背向瞄准）：[僚机+0x24] = 朝 (僚机-玩家) 方向。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    dx = wm.s32(0x04) - px                                 # 0x42861D..0x428629
+    dy = wm.s32(0x08) - py
+    wm.d32(0x24, p4_6e_aim(dx, dy) & 0xFFFFFFFF)           # 0x42862E 0x401703
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428650(self, e) -> bool:
+    """`0x428650`（0x6E000040 快照瞄准）：|Δx|+|Δy|>2 时把旧快照轮转进历史队，
+    快照刷新为僚机当前位置；[僚机+0x24] = 朝最旧快照方向。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    wx, wy = wm.s32(0x04), wm.s32(0x08)
+    dx = _p4_s16(e.g32(0x20) & 0xFFFF) - wx                # 0x428657 movsx word[+0x20]
+    dy = _p4_s16((e.g32(0x20) >> 16) & 0xFFFF) - wy        # 0x42865B movsx word[+0x22]
+    if abs(dx) + abs(dy) > 2:                              # 0x428675 jle
+        h30, h2c, h28, h24 = e.g32(0x2C), e.g32(0x28), e.g32(0x24), e.g32(0x20)
+        e.d32(0x30, h30 & 0xFFFFFFFF)                      # 0x428683
+        e.d32(0x2C, h28 & 0xFFFFFFFF)                      # 0x428689
+        e.d32(0x28, h24 & 0xFFFFFFFF)                      # 0x42868C
+        e.d32(0x24, h2c & 0xFFFFFFFF)                      # 0x42868F  ← 旧 [0x20]
+        e.d32(0x20, (((wy & 0xFFFF) << 16) | (wx & 0xFFFF)) & 0xFFFFFFFF)  # 0x4286A3
+    sx = _p4_s16(e.g32(0x30) & 0xFFFF)                     # 0x4286AD movsx word[+0x30]
+    sy = _p4_s16((e.g32(0x30) >> 16) & 0xFFFF)             # 0x4286A6 movsx word[+0x32]
+    wm.d32(0x24, p4_6e_aim(sx - wx, sy - wy) & 0xFFFFFFFF)  # 0x4286BC 0x401703
+    return _p4_6e_alive(self, e)
+
+
+def _beh_4286F0(self, e) -> bool:
+    """`0x4286F0`（0x6E000050 斜射瞄准）：t&4 交替把 (僚机-玩家) 旋转 ±45° 后归一。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    dx = wm.s32(0x04) - px
+    dy = wm.s32(0x08) - py
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)                                         # 0x42870E inc
+    if t & 4:                                              # 0x42870F test dl,4
+        aim = p4_6e_aim(dx + dy, dy - dx)                  # 0x428717：dx'=dx+dy、dy'=dy-dx
+    else:
+        aim = p4_6e_aim(dx - dy, dx + dy)                  # 0x428721：dx'=dx-dy、dy'=dx+dy
+    wm.d32(0x24, aim & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428760(self, e) -> bool:
+    """`0x428760`（0x6E000060 索敌瞄准）：朝最近敌机（0x43BCE0），无目标 → (0xC,0)。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    pt = _p4_11_nearest(self, wm.s32(0x04), wm.s32(0x08))
+    if pt is None:                                         # 0x42878E je → (0xC, 0)
+        aim = p4_6e_aim(0xC, 0)
+    else:
+        aim = p4_6e_aim(pt[0] - wm.s32(0x04), pt[1] - wm.s32(0x08))
+    wm.d32(0x24, aim & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_4287F0(self, e) -> bool:
+    """`0x4287F0`（0x6E000070 记忆瞄准）：非攻击时记忆 (僚机-玩家) 偏移；[僚机+0x24]
+    = 0x427C40([+0x20]=0, [+0x24]=记忆偏移)。"""
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    px, py = _p4_6e_player_obj(wm)
+    if not getattr(self.inp.rec, "b0", 0):                 # 0x4287F3 byte[0x4AB594]==0
+        e.d32(0x24, (wm.s32(0x04) - px) & 0xFFFFFFFF)      # 0x428804..0x428815
+        e.d32(0x28, (wm.s32(0x08) - py) & 0xFFFFFFFF)
+    aim = p4_6e_aim(e.s32(0x20), e.s32(0x24))              # 0x428818..0x428822（dx=[0x20]=0）
+    wm.d32(0x24, aim & 0xFFFFFFFF)
+    return _p4_6e_alive(self, e)
+
+
+def _beh_428860(self, e) -> bool:
+    """`0x428860`（0x6E000100 开火控制器）：[+0x20]++ 每 4 帧一次；
+    僚机 [+0x2C]≥0 → 0x427CC0（按住攻击发 0x100D1211），<0 → 0x427D40（自动连射）。"""
+    t = (e.s32(0x20) + 1) & 0xFFFFFFFF
+    e.d32(0x20, t)                                         # 0x428869 inc
+    if t <= 3:                                             # 0x42886F cmp 3 / jle
+        return _p4_6e_alive(self, e)
+    wm = e.p.get("wingman")
+    if wm is None:
+        return False
+    if wm.s32(0x2C) >= 0:                                  # 0x42887F test / jl
+        _p4_6e_fire(self, e, 0x100D1211)                   # 0x428885 0x4022CF
+    else:
+        _p4_6e_autofire(self, e, wm, 0x100D1211)           # 0x428893 0x4016C2→0x427D40
+    return _p4_6e_alive(self, e)
+
+
+def _p4_6e_autofire(self, e, wm, typ: int) -> None:
+    """`0x427D40`（thunk 0x4016C2）：僚机 [+0x2C]<0 时的自动连射，按瞄准风格 ([wm+0x28]&0xF0) 分派。"""
+    vel = wm.g32(0x24)                                     # 0x427D4F
+    vx = _p4_s16(vel & 0xFFFF)
+    vy = _p4_s16((vel >> 16) & 0xFFFF)
+    vx8 = (vx + (7 if vx < 0 else 0)) >> 3                 # 0x427D7E cdq/and 7/add/sar
+    vy8 = (vy + (7 if vy < 0 else 0)) >> 3
+    kind = wm.g32(0x28) & 0xF0                             # 0x427D55 and 0xf0
+    if kind == 0x10:                                       # 0x427D5E je 0x427e61
+        _p4_6e_fire(self, e, typ)                          # 0x427E68
+        wm.d32(0x24, ((~vel) & 0xFFFFFFFF))                # 0x427E71 not eax
+        _p4_6e_fire(self, e, typ)                          # 0x427E78
+        wm.d32(0x24, vel & 0xFFFFFFFF)                     # 0x427E7D 还原
+    elif kind == 0x50:                                     # 0x427D6B je 0x427e22
+        px, py = _p4_6e_player_obj(wm)
+        dx = wm.s32(0x04) - px
+        dy = wm.s32(0x08) - py
+        wm.d32(0x24, p4_6e_aim(dx + dy, dy - dx) & 0xFFFFFFFF)   # 0x427E34..0x427E41
+        _p4_6e_fire(self, e, typ)                          # 0x427E50
+        wm.d32(0x24, p4_6e_aim(dx - dy, dx + dy) & 0xFFFFFFFF)   # 0x427DC4（jmp 共用尾）
+        _p4_6e_fire(self, e, typ)                          # 0x427DD6
+        wm.d32(0x24, vel & 0xFFFFFFFF)                     # 0x427DE0
+    elif kind == 0x60:                                     # 0x427D74 je 0x427dec
+        if typ != 0x10072218:                              # 0x427DF0 je 0x427e0d
+            nvx = (_p4_s16(vel & 0xFFFF) << 1) & 0xFFFF
+            nvy = (_p4_s16((vel >> 16) & 0xFFFF) << 1) & 0xFFFF
+            wm.d32(0x24, ((nvy << 16) | nvx) & 0xFFFFFFFF)  # 0x427DF7..0x427E09 ×2
+        _p4_6e_fire(self, e, typ)                          # 0x427E10
+        wm.d32(0x24, vel & 0xFFFFFFFF)                     # 0x427E15
+    else:                                                  # 0x427D76 默认：十字双发
+        wm.d32(0x24, p4_6e_aim(vy8 + vx, vy - vx8) & 0xFFFFFFFF)   # 0x427D9E
+        _p4_6e_fire(self, e, typ)                          # 0x427DB1
+        wm.d32(0x24, p4_6e_aim(vx - vy8, vy + vx8) & 0xFFFFFFFF)   # 0x427DC4
+        _p4_6e_fire(self, e, typ)                          # 0x427DD6
+        wm.d32(0x24, vel & 0xFFFFFFFF)                     # 0x427DE0
 
 
 # `0x448230` 三张相位表（跳表 0x448A30 / 0x448A40 / 0x448A50），每项 = (模数, type, vel…)
@@ -16256,6 +16740,27 @@ def _beh_42F570(self, e) -> bool:
     return True
 
 
+def _beh_42F8C0(self, e) -> bool:
+    """`0x42F8C0`（0x100D1211 僚机瞄准弹，thunk 0x401C1C）：8.8 直线弹。
+
+    ```
+    0x42F8C3 [+0x24] += [+0x1C]（vx dword）；[+0x28] += [+0x20]（vy dword）
+    0x42F8DD x/y = 累加器 >>8 → [e+4]/[e+8]
+    0x42F8EF 节点 dst = (x-8, y-8)
+    0x42F906 0x4305F0(e, 8) 可见 且 [e+0x18]!=0 → 存活；否则自灭
+    ```
+    """
+    e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+    e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+    x = e.s32(0x24) >> 8
+    y = e.s32(0x28) >> 8
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
+    if e.node is not None:
+        e.node.dst = ((x - 8) & 0xFFFFFFFF, (y - 8) & 0xFFFFFFFF)   # 0x42F8E9 add -8
+    return self.p4_4305f0(e, 8) and e.g32(0x18) != 0
+
+
 def _beh_42A370(self, e) -> bool:
     """`0x42A370`（0x4100000C 的渐扩/渐缩动画）：节点矩形按帧生长、同时上移。
 
@@ -16384,6 +16889,25 @@ P4_BEH: dict[int, object] = {
     0x425CD0: _beh_425CD0,                          # 0x5F 3 值窗
     0x438B20: _beh_438B20,                          # 0x49000005 大爆炸
     0x42F570: _beh_42F570,                          # 0x10008431 捕获弹
+    0x42F8C0: _beh_42F8C0,                          # 0x100D1211 僚机瞄准弹
+    # 0x429D40（0x41000004 命中火花）为 Pages 类方法，走 getattr 回退分派。
+    # —— 0x6E 族（捕获僚机武器控制器，0x4277D0 ctor）——
+    0x427EF0: _beh_427EF0,                          # 0x6E000000 追随
+    0x427F40: _beh_427F40,                          # 0x6E000001 悬停摆动
+    0x428020: _beh_428020,                          # 0x6E000002 环绕
+    0x4280F0: _beh_4280F0,                          # 0x6E000003 追近
+    0x428260: _beh_428260,                          # 0x6E000004 保距
+    0x428340: _beh_428340,                          # 0x6E000005 冲刺
+    0x428430: _beh_428430,                          # 0x6E000006 换侧跟随
+    0x4284B0: _beh_4284B0,                          # 0x6E000007 吸附+闪烁
+    0x428550: _beh_428550,                          # 0x6E000010 扫描瞄准
+    0x4285F0: _beh_4285F0,                          # 0x6E000020 平射瞄准
+    0x428610: _beh_428610,                          # 0x6E000030 背向瞄准
+    0x428650: _beh_428650,                          # 0x6E000040 快照瞄准
+    0x4286F0: _beh_4286F0,                          # 0x6E000050 斜射瞄准
+    0x428760: _beh_428760,                          # 0x6E000060 索敌瞄准
+    0x4287F0: _beh_4287F0,                          # 0x6E000070 记忆瞄准
+    0x428860: _beh_428860,                          # 0x6E000100 开火控制器
     0x42A370: _beh_42A370,                          # 0x4100000C 渐扩动画
     0x42A400: _beh_42A400,                          # 0x4100000D/0E 螺旋追踪
     0x42AAA0: _beh_42AAA0,                          # 0x11FFA321 螺旋扩散弹
@@ -17492,6 +18016,77 @@ class Page4Mixin:
             else:
                 st["45d3a0_flush"] = st.get("45d3a0_flush", 0) + 1
 
+    def p4_45d930(self) -> "bytearray | None":
+        """`0x45D930(0x4CD5D8)`：**内置回放装载**（页14 attract 的输入源，资源 90..97）。
+
+        ```
+        0x45D95F eax = 0x45AFC0(0x4AB5B0, 0x80000000)        ; bit31 = 二周目
+        0x45D96B..   rid = 0x45AFC0(0x4AB5B0, 0xC000) + (bit31 ? 0x5E : 0x5A)
+        0x45D98A eax = 0x45DDA0(rid)                          ; 资源指针（GRPD099F）
+        0x45D991 memcpy(mgr+4, res, 0x2C)                     ; 11 dword 头
+        0x45D9B8 alloc(frames*3+1)；0x45D9F5 memcpy(res+0x20, comp) → LZ 解压 → 三平面
+        ```
+        资源布局：`'GRPD099F'(8) + frames + compsize + B[0x10..0x2B]（参数块，
+        与 p4_block 同布局：+0x10=链号|高字、+0x14=倍率 word、+0x18b0=选机、
+        +0x19=继续门、+0x1A=残机、+0x1B=調整XOR位、+0x1C=鍛錬 dword）+ LZ 负载`。
+        """
+        import struct as _st
+        from pathlib import Path as _Path
+        bit31 = bool(self.keys.bits & 0x80000000)              # 0x45D95F
+        rid = (0x5E if bit31 else 0x5A) + (self.keys.field(0xC000) & 0xFFFF)
+        p = _Path(__file__).resolve().parents[2] / "extracted" / "replay" / f"res_{rid}.bin"
+        if not p.is_file():
+            self.log(f"p4_45d930: res_{rid} 缺失")
+            return None
+        data = p.read_bytes()
+        if data[:8] != b"GRPD099F":
+            self.log(f"p4_45d930: res_{rid} magic 异常 {data[:8]!r}")
+            return None
+        hdr = bytearray(data[:0x2C])                            # 11 dword 头
+        frames = _st.unpack_from("<I", hdr, 0x08)[0]            # dword2
+        comp = _st.unpack_from("<I", hdr, 0x0C)[0]              # dword3
+        if frames == 0 or frames > 0x34BC0:
+            return None
+        payload = data[0x20:0x20 + comp]                        # 0x45D9F5 res+0x20
+        # 内置回放的 LZ 是**裸流**（无 GROD 魔数）：0x45B6E0 经 LZ 对象
+        # （vtable 0x4993B8）直接吃 token——marker = payload[1]、token 从 +2 起。
+        # 已用 res_90 验证：6541=frames*3+1 全解、2445 字节恰好耗尽。
+        n = frames * 3 + 1
+        out = bytearray(n)
+        marker = payload[1]
+        i, o = 2, 0
+        while i < len(payload) and o < n:
+            al = payload[i]
+            if al == marker:
+                cnt = payload[i + 1]
+                i += 2
+                if cnt == 0:
+                    out[o] = marker
+                    o += 1
+                else:
+                    dist = cnt >> 3
+                    length = (cnt & 7) * 4 + 4
+                    spos = o - dist
+                    for k in range(length):
+                        if o >= n:
+                            break
+                        out[o] = out[spos + k]
+                        o += 1
+            else:
+                out[o] = al
+                o += 1
+                i += 1
+        planes = getattr(self, "p4_replay_planes", None)
+        if planes is None:
+            return None
+        for k in range(3):
+            planes[k][:frames] = out[k * frames:(k + 1) * frames]
+        self.p4_stat[0x4CD5D8 + 0x9E37C] = frames               # 帧计数
+        self.p4_stat[0x4CD5D8 + 0x9E380] = 0                    # 播放游标
+        self.p4_stat[0x4CD5D8 + 0x9E378] = 0
+        self.p4_stat[0x4CD5D8 + 0x9E379] = 0
+        return hdr
+
     def p4_45d460(self, slot: int, score: int, name_ptr) -> None:
         """`0x45D460(0x4CD5D8, slot=rec_mode+8, score, &name)`：**新条目 + 回放落盘**。
 
@@ -18156,6 +18751,16 @@ class Page4Mixin:
         e.d32(0x28, 0)
         e.d32(0x2C, 0)
         e.d32(0x18, 1)
+        if typ == 0x41000004:
+            # ctor 0x428D59：[+0x2C]=0x14（寿命，t&3==0 且 t==0 才灭）、
+            # [+0x24/0x28]=x<<2/y<<2（8.8÷4 累加器）、[+0x1C/0x20]=来源弹速度（param 未传时 0）。
+            e.d32(0x2C, 0x14)                              # 0x428DA8
+            e.d32(0x24, (int(x) << 2) & 0xFFFFFFFF)        # 0x428D8F..0x428DA2
+            e.d32(0x28, (int(y) << 2) & 0xFFFFFFFF)
+            if isinstance(rec, tuple) and len(rec) >= 2 and isinstance(rec[1], tuple):
+                vx, vy = rec[1]
+                e.d32(0x1C, int(vx) & 0xFFFFFFFF)
+                e.d32(0x20, int(vy) & 0xFFFFFFFF)
         e.m[0x10] = 1                                  # 0x41000004 参与碰撞（0x43C460 效果分配）
         e.node = DNode(layer, l, t)
         e.node.rect = (l, t, r, b)
@@ -18390,6 +18995,38 @@ class Page4Mixin:
             return False
         if not sub.alive or not getattr(own2, "alive", True):
             return False                            # 0x429EC4 / 0x429ECB
+        return True
+
+    def _beh_429D40(self, e) -> bool:
+        """`0x429D40`（0x41000004 命中火花，thunk 0x40200E / ctor 0x428D59）。
+
+        ```
+        0x429D43 [+0x24] += [+0x1C]（vx dword）；[+0x28] += [+0x20]（vy）
+        0x429D5D x/y = 累加器 >>2 → [+4]/[+8]；节点 dst = (x-0x10, y-0x10)
+        0x429D82 t = --[+0x2C]；t&3==0 时：t!=0 → 0x45A790(node+4,0x20,0,0x20,0)（rect 右滑 0x20）
+                 t==0 → return 0（自灭）
+        0x429DAA return 1
+        ```
+        ctor 0x428D59：`[+0xC]=0x10、[+0x2C]=0x14、[+0x18]=1、层1 rect (0xA0,0,0xBF,0x1F)、
+        dst=(x-0x10,y-0x10)；[+0x1C/0x20]=来源弹速度、[+0x24/0x28]=x<<2/y<<2。
+        （此前未实现 ⇒ 火花永不消亡，回放页每帧积压十几枚。）"""
+        e.d32(0x24, (e.s32(0x24) + e.s32(0x1C)) & 0xFFFFFFFF)
+        e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
+        x = e.s32(0x24) >> 2
+        y = e.s32(0x28) >> 2
+        e.d32(0x04, x & 0xFFFFFFFF)
+        e.d32(0x08, y & 0xFFFFFFFF)
+        if e.node is not None:
+            e.node.dst = ((x - 0x10) & 0xFFFFFFFF, (y - 0x10) & 0xFFFFFFFF)
+        t = (e.s32(0x2C) - 1) & 0xFFFFFFFF
+        e.d32(0x2C, t)
+        if (t & 3) != 0:
+            return True
+        if t == 0:
+            return False
+        nd = e.node
+        if nd is not None:
+            nd.rect = (nd.rect[0] + 0x20, nd.rect[1], nd.rect[2] + 0x20, nd.rect[3])
         return True
 
     def _beh_429DE0(self, e) -> bool:
@@ -20129,6 +20766,16 @@ class Page4Mixin:
                              hit & 0xFFFFFFFF))
         _e6.node = _e6.node or DNode(2, 0, 0)
         self._p4_q("ui40c").append(_e6)                           # 0x4AD40C
+        # 0x445D70..0x445E3D：ctor 尾部向 0x4AD52C 连发 0x6E 武器控制器
+        # （0x6E000000|(wt&0xF) 移动 / (wt&0xF0) 瞄准 / (wt&0xF00) 开火 0x6E000100）。
+        # 第 1 个 spawn 的 rec[3] 在原件是栈残留（UB）——实战读到的正是刚建好的
+        # 僚机指针（否则 0x427EF0 一族立刻解引用崩溃），复刻按僚机传。
+        wt = hit & 0xFFFFFFFF
+        self.p4_6e_ctor(0x6E000000 | (wt & 0xF), _e6)             # 0x445D89
+        if wt & 0xF0:                                             # 0x445DB9 je
+            self.p4_6e_ctor(0x6E000000 | (wt & 0xF0), _e6)        # 0x445DC0
+        if wt & 0xF00:                                            # 0x445E01 je
+            self.p4_6e_ctor(0x6E000000 | (wt & 0xF00), _e6)       # 0x445E0D
         self.p4_45eff0(ta, 0x10008431, a.s32(0x04), a.s32(0x08))   # 0x43C61D
         a.d32(0x18, 0)                                          # 0x43C612
         a.d32(0x10, 0)                                          # 0x43C619
@@ -20329,7 +20976,10 @@ class Page4Mixin:
             p.d32(0x18, lt)                                    # 0x43C9DB
         if p.g32(0x18) == 0:                                   # 0x43C9E1
             p.d32(0x10, 0)                                     # 0x43C9E5
-        if a.s32(0x18) > k:                                    # 0x43C9EE ja
+        # 0x43C9EE 是 **ja（无符号）**：HP=-1（0xFFFFFFFF）必走这条"还硬"分支。
+        # 旧实现按有符号比较 ⇒ HP=-1 的尸体（如 0x23000013 胴被击破后滑格变
+        # 无敌青胴）被判成"再次击破"，rect 每次 +0x30 一路滑出图集 → 乱码。
+        if a.g32(0x18) > k:                                    # 0x43C9EE ja（无符号）
             if a.g32(0x18) != 0xFFFFFFFF:                      # 0x43CACF
                 a.d32(0x18, (a.g32(0x18) - k) & 0xFFFFFFFF)    # 0x43CAD4
             if p.g32(0x14) == 0x10FF0053:                      # 0x43CAD9
@@ -20348,6 +20998,7 @@ class Page4Mixin:
         a.d32(0x18, 0)                                         # 0x43CA9F
         a.d32(0x10, 0)                                         # 0x43CAA6
         self.p4_45eff0(ta, p.g32(0x14), a.s32(0x04), a.s32(0x08))   # 0x43CAB9
+        self.p4_se_pan(4, (a.s32(0x04) - 0x140) << 4)          # 0x43CACB push 4 → 音效槽 4
 
     def _p4_43c460_dispatch(self, p, a, t: int) -> None:
         """`0x43C508..0x43C9C2`：按**完整类型**做**无符号**二叉查找式的 cmp 链。
