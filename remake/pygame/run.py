@@ -288,6 +288,7 @@ def main(argv: list[str] | None = None) -> int:
             # 非到期帧也调用会把按下沿（e0/e1）吃掉，导致"按 C 没反应"。
             _build_record()
             pages.advance()
+            aud.poll()          # BGM 后台渲染完成 → 主线程开始播放（不阻塞切曲帧）
             frame += 1
             # 活体指示：窗口模式每秒报一次帧率（不是原作内容，只用于排查"看着像卡住"）
             if not args.headless and frame % 30 == 0:

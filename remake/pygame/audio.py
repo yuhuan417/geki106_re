@@ -19,9 +19,12 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
+import time
+import threading
 import wave
 from pathlib import Path
 
@@ -188,6 +191,25 @@ class Audio:
             self._pg = pygame
             self.enabled = True
             self.reason = f"mixer {pygame.mixer.get_init()} driver={self._driver(pygame)}"
+            # BGM 离线渲染放到后台线程：fluidsynth 渲一首 40–300s 的曲子要 6–20s，
+            # 原来在 bgm() 里同步跑 ⇒ 切 BGM 的那一帧整局卡住（用户实测：一面 boss
+            # 出现前、击破后各卡几秒——正好是脚本两次 0x0C 切曲）。
+            self._bgm_cond = threading.Condition()
+            self._bgm_req: tuple[int, int] | None = None   # (track, token)
+            self._bgm_done: dict[int, tuple[object, int]] = {}
+            self._bgm_pending: tuple[int, bool, int] | None = None
+            self._bgm_token = 0
+            self._bgm_closing = False
+            # 空闲时预渲染：优先下一首 boss/下一关，避免第一次切曲等 5–20s。
+            self._bgm_prefetch = ([] if os.environ.get("GEKI_NO_BGM_PREFETCH") == "1"
+                                  else [8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13,
+                                        6, 14, 7, 15, 16, 17, 18, 19, 20])
+            self._bgm_prefetch_i = 0
+            self._bgm_started = time.monotonic()
+            self.bgm_vol = 127
+            self._bgm_worker = threading.Thread(
+                target=self._bgm_worker_loop, name="bgm-render", daemon=True)
+            self._bgm_worker.start()
         except Exception as exc:                     # 无声卡/驱动异常 → 静音降级
             self.reason = f"disabled: {exc}"
 
@@ -260,18 +282,50 @@ class Audio:
     # ---------------------------------------------------------------- BGM
     def bgm(self, track: int, loop: bool = True) -> bool:
         """`0x44F600(0x4AB514, loop, id)`：播 BGM #track（1..20）。
-        0x44F640：byte[0x50]（音楽开关，調整行 2 写入）为 0 ⇒ 不播放。"""
+        0x44F640：byte[0x50]（音楽开关，調整行 2 写入）为 0 ⇒ 不播放。
+
+        渲染未命中缓存时**立即返回**，后台线程渲完由 `poll()` 在主线程上开始播放；
+        这样切曲帧不会阻塞游戏。"""
         if not self.bgm_byte50:
             return True                             # 0x44F645 je 0x44F860：音楽 OFF
         if not self.enabled:
             self._say(f"BGM #{track}（静音模式）")
             return True
-        path = self._resolve_bgm(track)
+        path = self._cached_bgm(track)
+        if path is not None:
+            return self._play_bgm(path, track, loop)
+        with self._bgm_cond:
+            self._bgm_token += 1
+            token = self._bgm_token
+            self._bgm_pending = (int(track), bool(loop), token)
+            self._bgm_req = (int(track), token)
+            self._bgm_cond.notify_all()
+        self._say(f"BGM #{track}：后台渲染中…")
+        return True
+
+    def poll(self) -> None:
+        """主线程每帧调用：后台渲染完成 → 真正 `music.load/play`。"""
+        if not self.enabled:
+            return
+        with self._bgm_cond:
+            pending = self._bgm_pending
+            if pending is None:
+                return
+            track, loop, token = pending
+            done = self._bgm_done.get(track)
+            if done is None or done[1] != token:
+                return
+            path, _ = done
+            self._bgm_pending = None
         if path is None:
-            return False
+            self._say(f"BGM #{track}：渲染失败，保持静音")
+            return
+        self._play_bgm(path, track, loop)
+
+    def _play_bgm(self, path, track: int, loop: bool) -> bool:
         try:
             self._pg.mixer.music.load(str(path))
-            self._pg.mixer.music.set_volume(0.45)
+            self._pg.mixer.music.set_volume(0.45 * self.bgm_vol / 127.0)
             self._pg.mixer.music.play(-1 if loop else 0)
             self.bgm_id = track
             self._say(f"BGM #{track} ← {path.name}")
@@ -280,11 +334,43 @@ class Audio:
             self._say(f"BGM #{track} 播放失败：{exc}")
             return False
 
+    def _bgm_worker_loop(self) -> None:
+        while True:
+            job = None
+            with self._bgm_cond:
+                if self._bgm_req is not None:
+                    job = self._bgm_req
+                    self._bgm_req = None
+                elif (self._bgm_prefetch_i < len(self._bgm_prefetch)
+                      and self._bgm_pending is None
+                      and time.monotonic() - self._bgm_started > 3.0):
+                    track = self._bgm_prefetch[self._bgm_prefetch_i]
+                    self._bgm_prefetch_i += 1
+                    job = (track, -1)             # token −1 = 预渲染，不回报
+                elif self._bgm_closing:
+                    return
+                else:
+                    self._bgm_cond.wait(2.0)
+                    continue
+            track, token = job
+            if token == -1:
+                if self._cached_bgm(track) is None:
+                    self._resolve_bgm(track, nice=10)
+                continue
+            path = self._resolve_bgm(track)
+            with self._bgm_cond:
+                self._bgm_done[track] = (path, token)
+                self._bgm_cond.notify_all()
+
     def bgm_stop(self) -> None:
         """`0x44FDD0(0x4AB514)`：停 BGM。"""
         self.bgm_id = None
         if not self.enabled:
             return
+        with self._bgm_cond:
+            self._bgm_token += 1
+            self._bgm_pending = None
+            self._bgm_req = None
         try:
             self._pg.mixer.music.stop()
         except Exception:
@@ -304,36 +390,60 @@ class Audio:
         except Exception:
             pass
 
-    def _resolve_bgm(self, track: int):
-        """优先用编译好的 OGG；没有就用 fluidsynth 现渲（结果缓存在 /tmp）。
-
-        渲染链（2026-11-19 用户反馈后重做）：
-        1) 音色库优先 MuseScore General（`~/.local/share/geki106/soundfonts` 或系统），
-           其次 FluidR3；可用 `GEKI_SF2` 指定。FluidR3 在 -g 0.7 下实测有削波（0.09%），
-           这正是"听着很廉价"的一部分来源。
-        2) 48kHz / 512 复音 / 混响合唱打开，减少 GM 干硬感。
-        3) **裁掉尾部纯数字静音**后再循环：MIDI 的 EOT 带数秒静音（#8 有 9s），
-           不裁的话每圈都会静音一段，正是用户报的"放完没声音，过一会才续"。
-        """
+    def _bgm_out(self, track: int):
+        """返回 ("ogg", ogg, None, None) 或 ("midi", mid, sf2, out) 或 None。"""
         ogg = bgm_path(track)
         if ogg.exists():
-            return ogg
+            return ("ogg", ogg, None, None)
         mid = midi_path(track)
         if not mid.exists():
-            self._say(f"BGM #{track}：既无 OGG 也无 MIDI")
             return None
         sf2 = _find_soundfont()
-        exe = shutil.which("fluidsynth")
-        if not sf2 or not exe:
-            self._say(f"BGM #{track}：缺 fluidsynth/音色库，无法渲染")
+        if not sf2:
             return None
         tag = hashlib.sha1(
             f"{mid.stat().st_mtime}:{sf2.stat().st_mtime}:{BGM_SETTINGS_VERSION}".encode()
         ).hexdigest()[:10]
         out = Path(tempfile.gettempdir()) / f"geki_bgm_{track:02d}_{tag}.wav"
-        if out.exists() and out.stat().st_mtime >= mid.stat().st_mtime:
+        return ("midi", mid, sf2, out)
+
+    def _cached_bgm(self, track: int):
+        """不渲染，只查现成 OGG / 缓存 WAV。"""
+        info = self._bgm_out(track)
+        if info is None:
+            return None
+        kind, _mid, _sf2, out = info
+        if kind == "ogg":
+            return _mid
+        if out.exists():
             return out
+        return None
+
+    def _resolve_bgm(self, track: int, nice: int = 0):
+        """优先用编译好的 OGG；没有就用 fluidsynth 现渲（结果缓存在 /tmp）。
+
+        渲染链（2026-11-19 用户反馈后重做）：
+        1) 音色库优先 MuseScore General（`~/.local/share/geki106/soundfonts` 或系统），
+           其次 FluidR3；可用 `GEKI_SF2` 指定。FluidR3 在 -g 0.7 下实测有削波（0.09%）。
+        2) 44.1kHz / 512 复音 / 混响合唱打开。
+        3) 裁掉首尾数字静音后再循环，消除 MIDI EOT 静音造成的循环空档。
+        4) **只允许在后台线程调用**：fluidsynth 本身是同步阻塞的。
+        """
+        info = self._bgm_out(track)
+        if info is None:
+            self._say(f"BGM #{track}：既无 OGG/MIDI，也无音色库")
+            return None
+        kind, mid, sf2, out = info
+        if kind == "ogg":
+            return mid
+        if out.exists():                              # 别的进程已渲好
+            return out
+        exe = shutil.which("fluidsynth")
+        if not exe:
+            self._say(f"BGM #{track}：缺 fluidsynth")
+            return None
         tmp = out.with_suffix(".raw.wav")
+        pre = (lambda: os.nice(nice)) if (nice and hasattr(os, "nice")) else None
         try:
             subprocess.run(
                 [exe, "-ni", "-q", "-g", "0.62", "-r", str(BGM_RATE),
@@ -343,7 +453,8 @@ class Audio:
                  "-o", "synth.reverb.level=0.75",
                  "-o", "synth.chorus.active=1",
                  "-F", str(tmp), str(sf2), str(mid)],
-                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                preexec_fn=pre)
             _trim_trailing_silence(tmp, out)
             self._say(f"BGM #{track} ← {sf2.name} → {out.name}")
             return out
@@ -359,6 +470,13 @@ class Audio:
     def close(self) -> None:
         self.bgm_stop()
         if self.enabled:
+            try:
+                with self._bgm_cond:
+                    self._bgm_closing = True
+                    self._bgm_cond.notify_all()
+                self._bgm_worker.join(timeout=0.5)
+            except Exception:
+                pass
             try:
                 self._pg.mixer.quit()
             except Exception:
