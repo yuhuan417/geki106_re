@@ -973,7 +973,15 @@ class Ent:
             if True:
                 self.d32(0x0C, prop[0])           # 半径
                 self.d32(0x18, prop[1])           # 存活门
-                self.d32(0x58, prop[2])
+                # 0x43AC6D `movsx eax, word ptr [edi+4]`：属性表第 5 字段是**有符号
+                # 16 位**，落 +0x58 时必须符号扩展到 dword（0xFE00 → 0xFFFFFE00 = −512）。
+                # 旧实现把 ENT_PROP 的 0xFE00 当正数存 ⇒ `0x43AF90` 的 `arg<0` 分支失效、
+                # 按正数参与生命值门控，且 `arg>>4` 得到 0xFE0 级速度 ⇒ 0x23000010 到达
+                # 左端后的 8 向环以十几倍速飞出屏幕（用户实测"爆炸后不释放子弹"）。
+                _v58 = prop[2] & 0xFFFF
+                if _v58 & 0x8000:
+                    _v58 -= 0x10000
+                self.d32(0x58, _v58 & 0xFFFFFFFF)
                 self.m[0x10] = 1                  # 0x43ACC0 参与碰撞
                 self.node = DNode(2, prop[3], prop[4])   # 0x43ACC3 层号恒 2
                 # 0x43AC8C..0x43AC95：矩形 = {srcx, srcy, srcx+2r-1, srcy+2r-1}
@@ -22450,8 +22458,11 @@ class Page4Mixin:
         """
         if arg == 0:
             arg = e.s32(0x58)
-        # 0x43AFBA test esi,esi：实参按有符号解释；复刻调用点常 & 0xFFFFFFFF
-        # 掩成大正数 → 在此还原符号（一次性修所有调用点）
+        # 0x43AFBA test esi,esi：实参按有符号解释。调用点既有 `& 0xFFFFFFFF` 掩过的大正数，
+        # 也有 `[+0x58]` 的**真负数**；必须先规约到 32 位再判符号，否则 Python 里
+        # `-512 & 0x80000000` 仍为真，会再减 0x100000000，把 −512 变成 −0x100000200，
+        # 于是 `life - arg` 返回 0x100000200 ⇒ 0x43B290 的 `>>4` 得巨大速度，子弹瞬飞。
+        arg &= 0xFFFFFFFF
         if arg & 0x80000000:
             arg -= 0x100000000
         if self.keys.field(0xC000) == 3:                 # 0x43AFAC

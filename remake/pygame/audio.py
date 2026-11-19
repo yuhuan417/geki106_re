@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import shutil
 import subprocess
 import tempfile
 import wave
@@ -38,7 +40,19 @@ FREQ_TABLE = bytes([
     0xCC, 0xCC, 0xAC, 0x90, 0x83, 0x6B, 0x56, 0x3B, 0x4C, 0x56,
 ])                        # 表尾 0x498FEC+40 处是 0x00
 
+# BGM 渲染设置。原作是 DirectMusic + 系统 GM 合成器；复刻侧用 fluidsynth 离线渲染成
+# 波形后交给 pygame.mixer.music 无限循环。曲目 MIDI 的 EOT 常带数秒**数字静音**尾
+# （bgm_08 有 9s、bgm_20 有 8s），直接整段循环会在每圈末尾静音一段——用户实测
+# "音乐放完没声音，过一会才继续"。渲染后裁掉尾部纯静音即可无缝循环。
+BGM_RATE = 48000
+BGM_SETTINGS_VERSION = 2
+SF2_ENV = "GEKI_SF2"
 SF2_CANDIDATES = (
+    # 用户自备/本仓库脚本装到用户目录的高质量音色库优先（MuseScore General）。
+    str(Path.home() / ".local/share/geki106/soundfonts/MuseScore_General_Full.sf3"),
+    "/usr/share/sounds/sf3/MuseScore_General_Full.sf3",
+    "/usr/share/sounds/sf2/MuseScore_General.sf2",
+    # 系统 GM 音色库：FluidR3 比 TimGM6mb 好，放最后兜底。
     "/usr/share/sounds/sf2/FluidR3_GM.sf2",
     "/usr/share/sounds/sf2/default-GM.sf2",
     "/usr/share/sounds/sf2/TimGM6mb.sf2",
@@ -67,6 +81,73 @@ def _resample(x: np.ndarray, factor: float) -> np.ndarray:
     src = np.arange(n, dtype=np.float64)
     dst = np.linspace(0.0, n - 1, m)
     return np.interp(dst, src, x).astype(np.float32)
+
+
+def _find_soundfont() -> Path | None:
+    """按优先级找可用音色库；`GEKI_SF2` 可强制指定。"""
+    import os
+    env = os.environ.get(SF2_ENV)
+    if env:
+        p = Path(env).expanduser()
+        if p.exists():
+            return p
+    user_dir = Path.home() / ".local/share/geki106/soundfonts"
+    for pat in ("*.sf3", "*.sf2"):
+        for p in sorted(user_dir.glob(pat)):
+            return p
+    for name in SF2_CANDIDATES:
+        p = Path(name).expanduser()
+        if p.exists():
+            return p
+    return None
+
+
+def _trim_trailing_silence(src: Path, dst: Path) -> None:
+    """把 fluid 渲染出的 WAV 尾部**纯数字静音**裁掉，保留 80ms 余量。
+
+    只裁 `sample == 0` 的尾巴（不含混响衰减），因此不会吃掉真实的弱音尾；
+    裁完的波形让 `mixer.music.play(-1)` 的循环点贴住最后一个发声样本，
+    消除 MIDI EOT 多余静音造成的循环空档。顺带把整体峰值归一到 0.89，
+    避免不同曲目音量差过大（原件由系统合成器统一增益）。
+    """
+    try:
+        with wave.open(str(src), "rb") as w:
+            ch, sw, rate, n = (w.getnchannels(), w.getsampwidth(),
+                               w.getframerate(), w.getnframes())
+            raw = w.readframes(n)
+    except Exception:
+        shutil.copyfile(src, dst)
+        return
+    if sw != 2 or ch < 1 or not raw:
+        shutil.copyfile(src, dst)
+        return
+    a = np.frombuffer(raw, dtype="<i2")
+    frames = a.reshape(-1, ch)
+    # 从尾部按块找最后一个**可闻**样本（整段 300s 也不会爆内存）。
+    # 不能判 `!= 0`：MuseScore 音色库渲染尾部有 -90dB 级的稀疏抖动样本，
+    # 会把 9s 静音误当成"还有声音"，循环空档依旧。
+    last = -1
+    block = 1 << 20
+    for end in range(len(frames), 0, -block):
+        start = max(0, end - block)
+        nz = np.flatnonzero(np.any(np.abs(frames[start:end].astype(np.int32)) > 3, axis=1))
+        if nz.size:
+            last = start + int(nz[-1])
+            break
+    if last < 0:
+        shutil.copyfile(src, dst)
+        return
+    keep = min(len(frames), last + 1 + int(0.15 * rate))
+    out = frames[:keep].astype(np.float32)
+    peak = float(np.abs(out).max()) / 32768.0
+    if peak > 0.0:
+        out *= min(1.0, 0.89 / peak)
+    pcm = np.clip(out, -32768, 32767).astype("<i2")
+    with wave.open(str(dst), "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm.tobytes())
 
 
 class Audio:
@@ -215,7 +296,16 @@ class Audio:
             pass
 
     def _resolve_bgm(self, track: int):
-        """优先用编译好的 OGG；没有就用 fluidsynth 现渲（结果缓存在 /tmp）。"""
+        """优先用编译好的 OGG；没有就用 fluidsynth 现渲（结果缓存在 /tmp）。
+
+        渲染链（2026-11-19 用户反馈后重做）：
+        1) 音色库优先 MuseScore General（`~/.local/share/geki106/soundfonts` 或系统），
+           其次 FluidR3；可用 `GEKI_SF2` 指定。FluidR3 在 -g 0.7 下实测有削波（0.09%），
+           这正是"听着很廉价"的一部分来源。
+        2) 48kHz / 512 复音 / 混响合唱打开，减少 GM 干硬感。
+        3) **裁掉尾部纯数字静音**后再循环：MIDI 的 EOT 带数秒静音（#8 有 9s），
+           不裁的话每圈都会静音一段，正是用户报的"放完没声音，过一会才续"。
+        """
         ogg = bgm_path(track)
         if ogg.exists():
             return ogg
@@ -223,23 +313,39 @@ class Audio:
         if not mid.exists():
             self._say(f"BGM #{track}：既无 OGG 也无 MIDI")
             return None
-        sf2 = next((p for p in SF2_CANDIDATES if Path(p).exists()), None)
-        import shutil
-
+        sf2 = _find_soundfont()
         exe = shutil.which("fluidsynth")
         if not sf2 or not exe:
             self._say(f"BGM #{track}：缺 fluidsynth/音色库，无法渲染")
             return None
-        out = Path(tempfile.gettempdir()) / f"geki_bgm_{track:02d}.wav"
-        if not out.exists() or out.stat().st_mtime < mid.stat().st_mtime:
+        tag = hashlib.sha1(
+            f"{mid.stat().st_mtime}:{sf2.stat().st_mtime}:{BGM_SETTINGS_VERSION}".encode()
+        ).hexdigest()[:10]
+        out = Path(tempfile.gettempdir()) / f"geki_bgm_{track:02d}_{tag}.wav"
+        if out.exists() and out.stat().st_mtime >= mid.stat().st_mtime:
+            return out
+        tmp = out.with_suffix(".raw.wav")
+        try:
+            subprocess.run(
+                [exe, "-ni", "-q", "-g", "0.62", "-r", str(BGM_RATE),
+                 "-o", "synth.polyphony=512",
+                 "-o", "synth.reverb.active=1",
+                 "-o", "synth.reverb.room-size=0.65",
+                 "-o", "synth.reverb.level=0.75",
+                 "-o", "synth.chorus.active=1",
+                 "-F", str(tmp), str(sf2), str(mid)],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _trim_trailing_silence(tmp, out)
+            self._say(f"BGM #{track} ← {sf2.name} → {out.name}")
+            return out
+        except Exception as exc:
+            self._say(f"BGM #{track} fluidsynth 渲染失败：{exc}")
+            return None
+        finally:
             try:
-                subprocess.run([exe, "-ni", "-g", "0.7", "-F", str(out), sf2, str(mid)],
-                               check=True, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL)
-            except Exception as exc:
-                self._say(f"BGM #{track} fluidsynth 渲染失败：{exc}")
-                return None
-        return out
+                tmp.unlink()
+            except OSError:
+                pass
 
     def close(self) -> None:
         self.bgm_stop()
