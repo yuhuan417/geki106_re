@@ -1259,6 +1259,9 @@ class Ent:
             self.d32(0x28, d & 0xFFFFFFFF)
             if self.node is not None:
                 self.node.rect = (0, 0x180, 0x2F, 0x1AF)
+                # 0x418F0D..0x418F2F：ctor 末尾无条件把 dst 覆写为 (x−0x18, y−0x18)
+                # （基构造器按半径 16 留下的是 x−0x10）。
+                self.node.dst = (a - 0x18, b - 0x18)
         if info.get("randpos"):                        # 0x413BA3..0x413BDB：屏幕右侧外随机落点
             import random as _r
             self.d32(0x04, ((_r.randrange(0x100) & 0xFF) +
@@ -1421,11 +1424,14 @@ class Ent:
             cond = (b > 0xF0) if cc == "g" else (b >= 0xF0)
             v = K if cond else (((-1) & N) + K)
             self.d32(off, v & 0xFFFFFFFF)
-        if "deref3_20_24" in info:                     # 0x4160A9：[0x20]=rec3[0x20]、[0x24]=rec3[0x24]?? —— rec3[0x20/0x24]
+        if "deref3_20_24" in info:
+            # 0x4160A9..0x4160B5：`[0x20]=rec3`（父实体原值，行为里直接当指针用）、
+            # `[0x24]=*(rec3+0x20)`（父的 [0x20]）。旧实现把 [0x20] 覆写成
+            # tgt.[0x20]，父链直接断掉。
+            self.d32(0x20, d & 0xFFFFFFFF)
             tgt = self._deref_link(d)
             if tgt is not None:
-                self.d32(0x20, tgt.g32(0x20))
-                self.d32(0x24, tgt.g32(0x24))
+                self.d32(0x24, tgt.g32(0x20))
         if "d_to_ptr" in info:                         # 0x416262：[0xC]=rec3[0xC]；拷父节点 src/dst；rec3=父句柄
             tgt = self._deref_link(d)
             if tgt is not None:
@@ -3367,10 +3373,8 @@ def _beh_416860(self, e) -> bool:
     """`0x416860`（0x27000005 ×57）：匀速左移 + 正弦纵摆 + x≤−0x18 碰撞开 +
     x==0x1D8 && 锁定 → 开火；渐进减速[0x20]+=[0x24]（cmpgate y≥F0）；尾调 0x416440。"""
     e.d32(4, (e.s32(4) + e.s32(0x1C)) & 0xFFFFFFFF)
-    vy = 2 if e.s32(8) >= 0xF0 else -2                           # 0x416878 setge/dec/and 2/dec
-    vy = -vy if vy == 2 else 2                                    # dec edx → 0 or −1 → and 2 → 0/2 → dec → −1/1
-    vy = -vy  # 再反：原版 add [0x24], edx（edx ∈ {−1,1}）
-    e.d32(0x24, (e.s32(0x24) + (1 if e.s32(8) >= 0xF0 else -1)) & 0xFFFFFFFF)
+    # 0x416878 setge/dec/and 2/dec：y>=0xF0 → −1，否则 +1
+    e.d32(0x24, (e.s32(0x24) + (-1 if e.s32(8) >= 0xF0 else 1)) & 0xFFFFFFFF)
     e.d32(0x20, (e.s32(0x20) + e.s32(0x24)) & 0xFFFFFFFF)
     e.d32(8, (e.s32(0x20) >> 3) & 0xFFFFFFFF)
     e.m[0x10] = 1 if e.s32(4) > -0x18 else 0
@@ -3390,9 +3394,8 @@ def _beh_4164B0(self, e) -> bool:
     if e.s32(4) < 0x133:
         cnt = e.s32(0x2C) + 1
         e.d32(0x2C, cnt & 0xFFFFFFFF)
-        vy = 2 if cnt > 0x30 else -2                             # 0x4164CB setg/dec/and 2/dec
-        vy = -vy  # 修正：and 2 → 0 or 2; dec → −1 or 1
-        e.d32(0x24, (e.s32(0x24) + (1 if cnt > 0x30 else -1)) & 0xFFFFFFFF)
+        # 0x4164CB setg/dec/and 2/dec：cnt>0x30 → −1，否则 +1
+        e.d32(0x24, (e.s32(0x24) + (-1 if cnt > 0x30 else 1)) & 0xFFFFFFFF)
         vx = 1 if cnt > 0x18 else -1                             # 0x4164DD setg/dec/and −2/dec
         e.d32(0x28, (e.s32(0x28) + vx) & 0xFFFFFFFF)
     sub_x = e.s32(0x1C)
@@ -6315,10 +6318,10 @@ def _beh_415200(self, e) -> bool:
         e.d32(0x04, (e.s32(0x04) + vy) & 0xFFFFFFFF)
         if e.s32(0x04) < -0xA0:
             e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
-            r = self.p4_rand() % 0x18
+            r = self.p4_rand() % 0x30
             e.d32(0x08, (r + 0x28) & 0xFFFFFFFF)
         if e.s32(0x04) > 0x320:
-            r = self.p4_rand() % 0x18
+            r = self.p4_rand() % 0x30
             e.d32(0x08, (r + 0x190) & 0xFFFFFFFF)
         y = e.s32(0x08)
         if y > 0xF0 and (t & 0x1F) == 0xF:
@@ -6902,8 +6905,10 @@ def _beh_417410(self, e) -> bool:
         e.d32(0x24, (((inv * dy) * 80) >> 12) & 0xFFFFFFFF)
         if e.node is not None:
             e.node.active = 1
+    # 0x4174F1..0x417508：esi=[0x2C]+[0x24] → [8]；edi=[0x28]+[0x20] → [4]。
+    # 旧实现第二行误用刚更新的 [0x28]（应为 Y 速度 [0x24]）。
     e.d32(0x28, (e.s32(0x28) + e.s32(0x20)) & 0xFFFFFFFF)
-    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x28)) & 0xFFFFFFFF)   # 0x406D4E [0x2C]+=[0x28]
+    e.d32(0x2C, (e.s32(0x2C) + e.s32(0x24)) & 0xFFFFFFFF)   # 0x406D4E [0x2C]+=[0x28]
     a28 = e.s32(0x28)
     a2c = e.s32(0x2C)
     x = (a28 - 0x100000000 if a28 & 0x80000000 else a28) >> 3
@@ -10148,12 +10153,15 @@ def _beh_414E40(self, e) -> bool:
     else:
         v = (e.s32(0x28) - 1) & 0xFFFFFFFF
         e.d32(0x28, v)
+        # 0x414EED 两条分支在 0x414EF4 合流：v==0 只把 [0x1C] 置 −0xB，但 **仍要**
+        # 重算 [0x20] 并清 [0x24]（0x414F1B/0x414F22）。旧实现把它们放进 else，
+        # v==0 时不再回漂移段，[0x28] 继续变负。
         if v == 0:
             e.d32(0x1C, -0xB & 0xFFFFFFFF)
         else:
             e.d32(0x1C, _idiv_trunc(self.p4_rand() % 0x280 - e.s32(0x04), 0x3C) & 0xFFFFFFFF)
-            e.d32(0x20, _idiv_trunc(self.p4_rand() % 0x1E0 - e.s32(0x08), 0x3C) & 0xFFFFFFFF)
-            e.d32(0x24, 0)
+        e.d32(0x20, _idiv_trunc(self.p4_rand() % 0x1E0 - e.s32(0x08), 0x3C) & 0xFFFFFFFF)
+        e.d32(0x24, 0)
     if (t2 & 3) == 3:
         self.p4_414010(e)
     if e.node is not None:
@@ -10230,21 +10238,22 @@ def _beh_416CF0(self, e) -> bool:
     """`0x416CF0`（0x2700000A）：**双圆轨摆动 + 计时爆散**。
 
     [0x24] += [0x30]（相位累积）；t=++[0x1C]；
-    [0x28] += (90*sin(30*[0x24]))>>8、[0x2C] += (90*cos(30*[0x24]))>>8；
+    [0x28] += (108*cos(30*[0x24]))>>8、[0x2C] += (108*sin(30*[0x24]))>>8
+    （0x416D18 jmp 0x45ABB0=cos，0x416D3D jmp 0x45AAF0=sin；系数 3×9×4=108）；
     (t+0x1E)%0x5A==0 → [0x30]=2；t%0x5A==0 → [0x30]=1；
     x=[0x28]>>4、y=[0x2C]>>4。
-    HP==0 → 0x45A790(node+4, 0x30, 0, 0x30, 0)、[0x24]−−、HP=−1、[0x10]=1；
-    HP>0x32 → HP=−1；链体（esi=[0x38]? 实为 [esi+0x24] 门）死或 HP==0 →
-    0x41000001 + 0x41000004 ×4（±rand&0x1F−0xF）@(x,y) 入 0x4AD4CC、return 0。
-    node dst 同步；return 1。"""
+    HP==0 → 0x45A790(node+4, 0x30, 0, 0x30, 0)、**父.[0x24]−−**、HP=−1、[0x10]=1；
+    HP>0x32 → HP=−1；**父实体**（[0x20] 指针的 [0x34]）死 →
+    0x41000001 + 0x41000004 ×4（±rand&0x1F−0xF）@(x,y) 入 0x4AD4CC、return 0。"""
     e.d32(0x24, (e.s32(0x24) + e.s32(0x30)) & 0xFFFFFFFF)
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
     a = (30 * e.s32(0x24)) & 0xFFFFFFFF
-    s_ = page4_sin(a)
+    # 0x416D18 = cos → [0x28]；0x416D3D = sin → [0x2C]；系数 108
     c = page4_cos(a)
-    e.d32(0x28, (e.s32(0x28) + ((90 * s_) >> 8)) & 0xFFFFFFFF)
-    e.d32(0x2C, (e.s32(0x2C) + ((90 * c) >> 8)) & 0xFFFFFFFF)
+    s_ = page4_sin(a)
+    e.d32(0x28, (e.s32(0x28) + ((108 * c) >> 8)) & 0xFFFFFFFF)
+    e.d32(0x2C, (e.s32(0x2C) + ((108 * s_) >> 8)) & 0xFFFFFFFF)
     if (t + 0x1E) % 0x5A == 0:
         e.d32(0x30, 2)
     elif t % 0x5A == 0:
@@ -10258,12 +10267,15 @@ def _beh_416CF0(self, e) -> bool:
         nd = e.node
         if nd is not None:                    # 0x45A790(node+4, 0x30, 0, 0x30, 0)
             nd.rect = (nd.rect[0] + 0x30, nd.rect[1], nd.rect[2] + 0x30, nd.rect[3])
-        e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
+        parent = self._deref_link(e.g32(0x20))
+        if parent is not None:                       # 0x416DC5 减的是父的 [0x24]
+            parent.d32(0x24, (parent.s32(0x24) - 1) & 0xFFFFFFFF)
         e.d32(0x18, -1 & 0xFFFFFFFF)
         e.m[0x10] = 1
     elif hp > 0x32:
         e.d32(0x18, -1 & 0xFFFFFFFF)
-    if e.m[0x34] == 0 or e.g32(0x18) == 0:
+    parent = self._deref_link(e.g32(0x20))
+    if parent is None or parent.m[0x34] == 0:
         self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
         for _ in range(4):
             jx = (self.p4_rand() & 0x1F) - 0xF
