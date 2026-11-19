@@ -5404,7 +5404,7 @@ def _beh_421FE0(self, e) -> bool:
         e.d32(0x2C, 1)
     v = e.s32(0x2C)
     e.d32(0x2C, (v - 1) & 0xFFFFFFFF)
-    return v != 1                                   # 0x422054 je（减前==1 → 死）
+    return v != 0                                   # 0x422054 je（test 减前值，==0 → 死）
 
 
 def _beh_422DD0(self, e) -> bool:
@@ -5454,21 +5454,23 @@ def _beh_4220A0(self, e) -> bool:
         return True
     v = e.s32(0x30)
     e.d32(0x30, (v - 1) & 0xFFFFFFFF)
-    return v != 1
+    return v != 0                                   # 0x422130 je（test 减前值，==0 → 死）
 
 
 def _beh_422170(self, e) -> bool:
     """`0x422170`（0x2900001B 隐形追踪卫星，thunk 0x40140B）：转向自机的 pod 播撒器。
 
-    m = (主态字>>0xF)&1 ? 5 : 3；t=[0x2C]。
-    t%m==0 → 生成两只 0x29000019：A{+0x20=(0xB4-t)/m-t+0xB5, +0x24=1, +0x2C=[0x20]}
-    与 B{+0x20 同-1, +0x2C=0}（rect 均 if 式、+0x28=主态字）。
-    移动：步长 s=(bl?13:8)：[0x28]&1 → [0x20]+= ([0x28]&2? -s:+s)；
-    否则 [0x24]+= ([0x28]&2? +s:-s)。方向修正（[0x30]<4，跳表 0x4223C0）：
+    bl=(主态字>>0xF)&1；m = bl?3:5（0x4221BB sbb→and 0xfe→+5）；t=[0x2C]。
+    t%m==0 → off=trunc((0xB4-t)/m)-t+0xB5，生成两只 0x29000019（p0={[0x20],[0x24]}、
+    p1={life,select}、+0x28=主态字）：
+      A{+0x2C=off,   select=1 → rect(180,F0,1AF,11F)}；B{+0x2C=off-1, select=0 → rect(180,120,1AF,14F)}。
+    移动：步长 s=(bl?13:8)（0x422261 neg/sbb/and 5/add 8）：[0x28]&1 →
+    [0x20]+= ([0x28]&2? -s:+s)；否则 [0x24]+= ([0x28]&2? +s:-s)。
+    方向修正（[0x30]<4，跳表 0x4223C0）：
       case0: y<py → dir = x≥px?3:1；case1: x>px → dir = y≥py?0:2；
       case2: y>py → dir = x≥px?3:1；case3: x<px → dir = y≥py?0:2（否则保持）。
       变向 → [0x28]=dir、[0x30]+=1。
-    每帧生成 C：pod {+0x20=1, +0x24=1, +0x2C=[0x20], rect=[0x24]→if}。
+    每帧生成 C（0x422314）：p0={[0x20],[0x24]}、p1={1,1} → +0x2C=1、小 rect。
     x=主.x+[0x20]、y=主.y+[0x24]（自身 node 隐藏不显示）。
     主死 → beh=0x401852 return 1；t≥0xB4 → return 0；否则 t+=1 return 1。"""
     main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
@@ -5477,21 +5479,21 @@ def _beh_422170(self, e) -> bool:
         return False
     st_m = main.g32(0x1C)
     bl = (st_m >> 0xF) & 1
-    m = 5 if bl else 3
+    m = 3 if bl else 5                                # 0x4221BB..0x4221D1（与步长同源但取 3/5）
     t = e.s32(0x2C)
     px = self.p4_stat.get(0x56CC8C, 0)
     py = self.p4_stat.get(0x56CC90, 0)
     if t % m == 0:                                    # 0x4221E4
         off = (0xB4 - t) // m - t + 0xB5              # 0x422209 divmod + 0x422213 链
-        for o2, life in ((off, e.s32(0x20)), (off - 1, 0)):   # A/B
+        for life, big in ((off, False), (off - 1, True)):     # A/B：p1={life,select}
             c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)
             self.p4_links[id(c) & 0x7FFFFFFF] = c
-            c.d32(0x20, o2 & 0xFFFFFFFF)
-            c.d32(0x24, 1)
+            c.d32(0x20, e.s32(0x20) & 0xFFFFFFFF)     # p0={[0x20],[0x24]}（0x4221FE/0x422204）
+            c.d32(0x24, e.s32(0x24) & 0xFFFFFFFF)
             c.d32(0x28, st_m)
             c.d32(0x2C, life & 0xFFFFFFFF)
             if c.node is not None:
-                c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
+                c.node.rect = (0x180, 0x120, 0x1AF, 0x14F) if big else (0x180, 0xF0, 0x1AF, 0x11F)
                 c.node.dst = (-0x30, -0x30)
     step = 13 if bl else 8                            # 0x42225E neg/sbb/and 5/add 8
     d = e.s32(0x28)
@@ -5520,13 +5522,13 @@ def _beh_422170(self, e) -> bool:
         if nd != d:
             e.d32(0x28, nd)
             e.d32(0x30, (e.s32(0x30) + 1) & 0xFFFFFFFF)
-    # 每帧 C（0x422330）：p0={1,1}、p1={[0x20],[0x24]}
+    # 每帧 C（0x422314）：p0={[0x20],[0x24]}、p1={1,1}
     c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)
     self.p4_links[id(c) & 0x7FFFFFFF] = c
-    c.d32(0x20, 1)
-    c.d32(0x24, 1)
+    c.d32(0x20, e.s32(0x20) & 0xFFFFFFFF)
+    c.d32(0x24, e.s32(0x24) & 0xFFFFFFFF)
     c.d32(0x28, st_m)
-    c.d32(0x2C, e.s32(0x20) & 0xFFFFFFFF)
+    c.d32(0x2C, 1)
     if c.node is not None:
         c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
         c.node.dst = (-0x30, -0x30)
@@ -5611,8 +5613,7 @@ def _beh_4225E0(self, e) -> bool:
     y = main.s32(0x08) + e.s32(0x24)
     e.d32(0x04, x & 0xFFFFFFFF)
     e.d32(0x08, y & 0xFFFFFFFF)
-    if e.node is not None:
-        e.node.dst = (x - 0x18, y - 0x18)
+    # 0x4225E0 不写自身 node dst（ctor 即 active=0 隐藏）
     c = self._p4_ent43c(0x29000019, 0, 0, id(main) & 0x7FFFFFFF)   # 0x4226DA 每帧 pod
     self.p4_links[id(c) & 0x7FFFFFFF] = c
     c.d32(0x20, e.g32(0x20))
