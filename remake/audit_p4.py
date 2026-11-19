@@ -2533,8 +2533,14 @@ def main():
     _bgslot = page4.BgSlot()
     (_bgslot.params[10], _bgslot.params[11], _bgslot.params[12],
      _bgslot.params[13], _bgslot.params[14], _bgslot.params[19]) = 3, 0, 100, 24, -6, 1
+    _bgslot.params[9] = 12
+    _bgslot.params[15:19] = [40, 960, 0, 0]
     _bgslot.grid = [[520, 726, 16], [30, 40, 0], [200, 50, 24]]
-    _bgbd = page4.BgBand(_bgslot, 2)
+    _bgp.replay_advance()
+    _bgbd = page4.BgBand(_bgslot, 2, _bgp.p4_rand)
+    check("0x45AD30 复位、0x457540 连续三次取 0x45AD00 的随机数",
+          (_bgbd.jit_x, _bgbd.jit_y, _bgbd.row, _bgp.rng_seed) ==
+          (0, 2, 1, 0x51CCF6E9), "")
     _bgbd.pos = 8                                   # tick 先 pos += step(−6) → 落在 2
     _bgv0 = _bgp._bg_band(_bgbd)
     _bgv1 = (_bgbd.visible, _bgbd.layer, _bgbd.src[2], _bgbd.src[3] - _bgbd.src[1],
@@ -2552,6 +2558,7 @@ def main():
     _bgslot2 = page4.BgSlot()
     (_bgslot2.params[10], _bgslot2.params[11], _bgslot2.params[12],
      _bgslot2.params[13], _bgslot2.params[14], _bgslot2.params[19]) = 110, 0, 100, 24, -6, 1
+    _bgslot2.params[15] = 1
     _bgslot2.active = 1
     _bgslot2.grid = [[100, 100, 16]] * 110
     for _bgi in range(10):

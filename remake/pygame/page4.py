@@ -761,29 +761,25 @@ class BgBand:
     __slots__ = ("slot", "pos", "jit_x", "jit_y", "kind", "w", "h", "row",
                  "layer", "src", "dst", "visible")
 
-    def __init__(self, slot, idx):
+    def __init__(self, slot, idx, rand):
         self.slot = slot
         self.pos = idx            # +0x0C 位置（格单位）
         prm = slot.params
-        self.jit_x = rng.randrange(prm[8] + 1) if prm[8] >= 0 else 0   # +0x14
-        self.jit_y = rng.randrange(prm[9] + 1) if prm[9] >= 0 else 0   # +0x18
+        self.jit_x = rand() % abs(_p4_s32(prm[8] + 1))  # 0x45756C idiv
+        self.jit_y = rand() % abs(_p4_s32(prm[9] + 1))  # 0x457585 idiv
         self.kind = -1            # +0x1C
         self.w = 0                # +0x20
         self.h = 0                # +0x24
         # +0x10 行号：param[0x3C]/[0x40]/[0x44]/[0x48]（块 dword 15..18）加权随机
-        wts = [max(0, prm[15]), max(0, prm[16]), max(0, prm[17]), max(0, prm[18])]
-        tot = sum(wts)
-        if tot > 0:
-            r = rng.randrange(tot)
-            acc = 0
-            self.row = 0
-            for i, wv in enumerate(wts):
-                acc += wv
-                if r < acc:
-                    self.row = i
-                    break
-        else:
-            self.row = 0
+        weights = prm[15:19]
+        r = rand() % (sum(weights) & 0xFFFFFFFF)      # 0x457610 div
+        cumulative = 0
+        self.row = 0
+        for i, weight in enumerate(weights):
+            cumulative = (cumulative + weight) & 0xFFFFFFFF
+            if r < cumulative:
+                self.row = i
+                break
         self.layer = 0            # 节点 [+0]
         self.src = (0, 0, 0, 0)   # 节点 [+4..]
         self.dst = (0, 0)         # 节点 [+0x14]/[+0x18]
@@ -18587,8 +18583,8 @@ class Page4Mixin:
 
     def p4_rand(self) -> int:
         """`0x45AD00`：LCG，状态 `[0x5D3E38]`；`st = (st*0x19660D + 0x3C6EF35F) & 0x7FFFFFFF`。"""
-        st = (int(getattr(self, "_p4_rand_st", 0x12345678)) * 0x19660D + 0x3C6EF35F) & 0x7FFFFFFF
-        self._p4_rand_st = st
+        st = (int(getattr(self, "rng_seed", 0)) * 0x19660D + 0x3C6EF35F) & 0x7FFFFFFF
+        self.rng_seed = st
         return st
 
     def p4_rand_mod(self, m: int) -> tuple[int, int]:
@@ -21425,7 +21421,7 @@ class Page4Mixin:
             return
         if len(slot.bands) >= 890:
             return
-        slot.bands.append(BgBand(slot, idx))
+        slot.bands.append(BgBand(slot, idx, self.p4_rand))
 
     @staticmethod
     def p4_4511_ta(prev_b: int, b: int, prev_a: int, a: int, old_ta: int):
@@ -23509,8 +23505,8 @@ class Page4Mixin:
         return
 
     def replay_advance(self) -> None:
-        """0x458DE2 → `0x45D110(0x4CD5D8)`。"""
-        return
+        """0x458DE2 → `0x45D110(0x4CD5D8)`；`0x45AD30` 清游戏共用的随机数种子。"""
+        self.rng_seed = 0                         # 0x45D13A → 0x45AD30
 
     # ---- 回放管理器 0x4CD5D8（2026-11-18 落地）---------------------------
     # 字节平面：+0x30/+0x34BF0/+0x697B0（步距 0x34BC0 = 216000 帧）、

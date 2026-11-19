@@ -4940,8 +4940,7 @@ class Pages(Page4Mixin):
     def _rng(self) -> int:
         """`0x401393`→`0x45AD00`：`seed = seed*0x19660D + 0x3C6EF35F & 0x7FFFFFFF`，
         调用点再 `and eax,0xffff`，故返回 seed & 0xFFFF。"""
-        self.rng_seed = (self.rng_seed * 0x19660D + 0x3C6EF35F) & 0x7FFFFFFF
-        return self.rng_seed & 0xFFFF
+        return self.p4_rand() & 0xFFFF
 
     @staticmethod
     def _magic_neg26(y: int) -> int:
