@@ -1677,14 +1677,9 @@ class Pages(Page4Mixin):
             self.pal_now = self.pal
         self.inp.x, self.inp.y = 0, 0
         self.screen_fill = -1                       # 页2 的底色来自色带，不是 0x44D200
-        # 0x458D60 → 0x456180：色带表重置为单条 {0xB4, 0x200}
-        self.band_table = [[0xB4, 0x200]]
-        self.band_count, self.band_start, self.band_scroll = 1, 0, 0
-        self.band_speed = self.band_frames = 0
+        # 0x452D04 → 0x458D60：与所有游戏场景入口相同的完整场景重置。
+        self.scene_reset()
         self.sky_color = 0xB4
-        # 0x458D60 → 0x4301F0：场景重置会清空**全部**队列（4CC/4FC/52C），
-        # 漏清 4CC 会让页1 的擦入节点（层13=bm_tilg）残留到页2 前几帧 ⇒ 玩家看到的"小红撃"闪现。
-        self.ui46c.clear(); self.ui4fc.clear(); self.ui52c.clear()
         self.p2_loaded.clear(); self.p2_sky.clear()
         # 0x452D3E：0x459C90(0x56B95C, cfg) —— CHANGEDISPLAY==0 或 OPMOVIE!=0 时挂上资源 77 记录流
         self.p2_stream = None
@@ -1848,6 +1843,8 @@ class Pages(Page4Mixin):
         #   （2026-11-15 用户实测"esc 返回 page3 后页面被破坏"根因））
         self.ui4fc.clear()                             # 0x4AD4FC
         self.ui52c.clear()                             # 0x4AD52C
+        self.p2_blits = []
+        self.spark4cc.clear()
         # 0x6F000007 的整屏人像/擦切是页13 队列实体的画布镜像：实体随队列清除，
         # 镜像也要清——否则 页13(飞行员画面)→页4 每帧把人像贴回来（2026-10-31 修）。
         self.p13_portrait_arr = None
@@ -1870,6 +1867,7 @@ class Pages(Page4Mixin):
         self.band_frames = 0
         self.stream_cursor = 0          # 0x56B95C 记录流复位
         self.replay_pos = 0             # 0x4CD5D8 回放复位
+        self.sysf.clear()                              # 0x458E1C [0x56CC84]=0
 
     def page3_step(self) -> bool:
         """0x452220：0x458B80 → 0x458CB0 → 0x44EB60 → SetCursorPos → 0x458FD0
