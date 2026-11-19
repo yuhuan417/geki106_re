@@ -2458,10 +2458,9 @@ class Pages(Page4Mixin):
             self.flags.set(0x10000)
             return
         # 0x453A9F..0x453AE9：头参数 → 0x4AB5B0 / 0x56CCB0
-        d7 = int.from_bytes(hdr[0x1C:0x20], "little")
-        self._p4_boolset(1, bool(d7))                     # 0x45B0A0(obj,1,d7) 鍛錬
+        self._p4_boolset(1, hdr[0x1C] != 0)               # 0x45B0A0 只读低字节
         self._p4_boolset(2, hdr[0x1D] != 0)               # mask2（操作器）
-        self.p4_45b0e0_set(0xC000, 0xC000, hdr[0x18])     # 选机 ← byte d6 b0（0x453AC1）
+        self.keys.set_field(0xC000, hdr[0x18])            # 0x453AC1 / 0x45B0E0
         self._p4_boolset(0x200, hdr[0x1B] != 0)           # 調整 XOR 位
         import struct as _st
         self.p4_stat[0x56CCB0] = _st.unpack_from("<H", hdr, 0x12)[0]   # 0x453B1B
@@ -2470,25 +2469,26 @@ class Pages(Page4Mixin):
             self.p4_stat[a] = 0
         for a in (0x56CCB2, 0x56CCB3, 0x56CCB4, 0x56CCB5):
             self.p4_stat[a] = 0
-        self.p4_stat[0x56CCB8] = 0                        # 0x401AAA → 0x45AF10 直接赋值
+        self._p4_sys = 0                                  # 0x453B3A
+        self.p4_frames = 0                                # 0x453B15
         self.p4_ccc8 = 1                                  # 0x453B4E byte[0x56CCC8]=1
         # 0x453B3F..0x453B7B：亮度/对比度（0x4AB5B8 两字段 ×4−0xC8 → 0x44CDF0）
-        _br = (self.disp_cfg.bits & 0x1FC0000) & 0xFFFFFFFF
-        _ct = (self.disp_cfg.bits & 0xFE000000) & 0xFFFFFFFF
-        _br = ((0 if _br == 0 else _br) * 4 - 0xC8) & 0xFFFFFFFF
-        _ct = ((0 if _ct == 0 else _ct) * 4 - 0xC8) & 0xFFFFFFFF
-        if not self.p4_load_palette(1, _ct, _br):         # 0x453B87 失败 → 旗标 2
+        br, ct = self.p4_451630_adjust(self.disp_cfg.bits)
+        if not self.p4_load_palette(1, ct, br):
             self.flags.set(2)
             return
+        self.pal = fade_palette(self.pal, br, ct)          # 0x44CCBD：先调整基准色表
+        self.pal_now = fade_palette(self.pal, -255, self.fade_b)
+        self.fade_a = -255                                # 0x453B3F / 0x44CCDA
+        self.pal_flags = 0                                # 0x44CD1B
         self.inp.set_mode(0)                              # 0x453B9B 0x44EDA0(0x4AB454,0)
         # 回放输入管线：delta 由 page14_step 直接加到 inp.x/y（0x44EB60 回放分支 =
-        # [mgr+0x14] += tmp.dx 裸加 + 边界钳），但 inp.build 每帧仍会跑 —— 若留在
+        # [mgr+0x14] += tmp.dx），但 inp.build 每帧仍会跑 —— 若留在
         # 菜单管线（p4_cfg=None）它的尾部钳位会把指针拽回 448x400、和回放 delta
         # 打架（实测飞机定在原点不跟手）。这里给一个"全屏边界、kb/ms 全 0"的
-        # 合成预设：_build_p4 只算出 dx=dy=0 并钳到 (0,0)-(640,480)，指针所有权
-        # 归回放。页14 收尾不恢复 —— 下一页的 enter 会重载自己的预设。
+        # 合成预设：设备只提供退出键和按钮沿，位置由回放积分。
         self.inp.p4_cfg = dict(kb=0, ms=0, fixed=0, step=0, shift=0, catch=0,
-                               bounds=(0, 0, 0x280, 0x1E0))
+                               bounds=(-0x80000000, -0x80000000, 0x7FFFFFFF, 0x7FFFFFFF))
         # 战斗中的预设切换（0x446470 → set_preset4）在 exe 里仍会发生：0x44E620
         # 把指针**吸附**到自机当前位置（锁定按下/释放、自机构造——录制会话同样
         # 如此，回放 delta 与这些吸附点是自洽的），但 exe 的回放分支**不走设备
@@ -2502,7 +2502,7 @@ class Pages(Page4Mixin):
                 _inp.set_pos(*pos)
                 _inp.mouse_tx, _inp.mouse_ty = int(pos[0]), int(pos[1])
             _inp.p4_cfg = dict(kb=0, ms=0, fixed=0, step=0, shift=0, catch=0,
-                               bounds=(0, 0, 0x280, 0x1E0))
+                               bounds=(-0x80000000, -0x80000000, 0x7FFFFFFF, 0x7FFFFFFF))
         self.inp.set_preset4 = _p14_set_preset4
         ok = True                                         # 0x453BA0..0x453D2E 音效装载
         for slot_no, wav in self.P14_SE_SLOTS:
@@ -2513,9 +2513,9 @@ class Pages(Page4Mixin):
             self.flags.set(8)                             # 0x453D39
             return
         # 0x453D43..0x453D5C：0x458D60(App, a1..a4) —— 与 p4_enter 同一参数布局
-        # （a1=dword hdr+0x1A、a2=word hdr+0x14、a3=sbyte hdr+0x1A=残机、a4=sbyte hdr+0x19=继续门）
-        a1 = int.from_bytes(hdr[0x1A:0x1E], "little")
-        a2 = int.from_bytes(hdr[0x14:0x16], "little")
+        # （a1=dword hdr+0x16、a2=sword hdr+0x14、a3=sbyte hdr+0x1A、a4=sbyte hdr+0x19）
+        a1 = int.from_bytes(hdr[0x16:0x1A], "little")
+        a2 = int.from_bytes(hdr[0x14:0x16], "little", signed=True)
         a3 = hdr[0x1A] - 0x100 if hdr[0x1A] & 0x80 else hdr[0x1A]
         a4 = hdr[0x19] - 0x100 if hdr[0x19] & 0x80 else hdr[0x19]
         self.p4_engine(a1, a2, a3, a4)
@@ -2551,13 +2551,10 @@ class Pages(Page4Mixin):
         self.replay_play()                                # 0x453EEF 0x45D2B0
         if real_skip:                                     # 0x453F1F → 旗标 0x200
             self.flags.set(0x200)
-        # 0x44EB60 的回放分支：[mgr+0x14] += tmp.dx（裸加；边界钳由上面的合成预设
-        # 的 _build_p4 承担）。不要写 p4_player_pos —— 0x56CC8C/90 是自机坐标镜像，
-        # 由自机行为每帧写；旧实现把指针写进镜像，死亡重生 0x460C00 读镜像
-        # ⇒ 飞机重生到指针位置而不是死亡点。
+        # 0x44EC3E / 0x44EC43：累加已录制的 dx/dy，玩家行为随后更新自机镜像。
         if rec is not None and (rec.dx or rec.dy):
-            self.inp.x = max(0, min(640, int(self.inp.x) + rec.dx))
-            self.inp.y = max(0, min(480, int(self.inp.y) + rec.dy))
+            self.inp.x += rec.dx
+            self.inp.y += rec.dy
         if rec is not None and rec.key:
             self.key_command(rec.key)                     # 0x453F84 0x458FD0
         self.p4_frames += 1                               # 0x453F93 [0x56CCA8]++
@@ -2716,7 +2713,9 @@ class Pages(Page4Mixin):
         return 1 if getattr(o, "alive", True) else 0
 
     def spawn(self, queue: list, type_word: int, x: int = 0, y: int = 0,
-              a3: int = 0, a4: int = 0) -> UiEntity:
+              a3: int = 0, a4: int = 0) -> UiEntity | None:
+        if queue is self.p4_ui49c and not self.p4_435440("ui49c", type_word):
+            return None
         hi = type_word & 0xFF000000
         if hi == 0x12000000 and type_word in self.FX12_TABLE:
             return self.fx12_spawn(type_word, x, y, a3)
@@ -3742,11 +3741,14 @@ class Pages(Page4Mixin):
                 e.beh = "default"
         else:
             e.beh = "default"                     # 0x43DA4F / 0x449AA7
-        queue.append(e)
+        if queue is self.ui46c and self.page in (4, 11, 14, 15):
+            queue.insert(0, e)                             # 0x430315 / 0x430318
+        else:
+            queue.append(e)
         self.log(f"spawn type=0x{type_word:X} beh={e.beh}")
         return e
 
-    def tick_ui(self, queue: list) -> None:
+    def tick_ui(self, queue) -> None:
         for e in queue:
             if not e.alive:
                 continue

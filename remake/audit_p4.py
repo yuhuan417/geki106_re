@@ -1095,7 +1095,7 @@ def main():
           and b"\x1e\x00\x00\x00" in img[0x446DCE - ib:0x446DDA - ib]
           and b"\x3c\x00\x00\x00" in img[0x446EBE - ib:0x446ECA - ib], "")
 
-    # ---- §16.195 0x447410 四发上限发射器 ----
+    # ---- 0x447410 捕获按键计时 ----
     check("0x447410 已登记",
           0x447410 in page4.P4_BEH, "")
     check("0x447410 的 4 发上限是『两计数器之和 >= 4 就冻结』（cmp edx,4）",
@@ -1422,7 +1422,7 @@ def main():
         bits = 0                     # 0x4AB5B0 位图（p4_45af30/60/aff0 现在直接读写它）
 
         def test(self, b):
-            return False
+            return bool(self.bits & b)
 
         def field(self, mask):
             return 0
@@ -3167,7 +3167,7 @@ def main():
           and _cv_z.p4_stat[0x5000 + 0x28] == 3   # bits(0x200)≠0 ⇒ 自动爆破 ON=3
           and _cv_a.g32(0x10) == 0 and _cv_a.g32(0x18) == 0
           and len(_cv_hits2) == 1 and _cv_z2.p4_stat[0x5001 + 0x28] == 2
-          and _cv_p2.g32(0x10) == 1, "")
+          and _cv_p2.g32(0x10) == 0 and _cv_p2.g32(0x18) == 0, "")
     check("0x45AF30 = |= bits；0x45AF60 = &= ~bits（都返回新值）",
           _bor1 == 0x1F00 and _bo.keys.bits == 0x1E00 and _bor2 == 0x1E00
           and img[0x45AF37 - ib:0x45AF3C - ib] == bytes([0x0B, 0xD0, 0x89, 0x51, 0x04])
