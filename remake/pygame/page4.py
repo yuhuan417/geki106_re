@@ -23584,6 +23584,11 @@ class Page4Mixin:
             rec.b0, rec.b1 = bool(b0), bool(b1)
             rec.e0 = 1 if (b0 and not prev0) else 0
             rec.e1 = 1 if (b1 and not prev1) else 0
+            # 0x45D2B0 的 +4/+5：释放沿 = (本帧 0) & (上帧 1) —— type5 的锁定
+            # 释放（0x446CB7 byte[0x4AB599]）和自机跟随的 r1 分支都靠它；缺失时
+            # demo 的锁定永不释放 ⇒ 指针停在远处、飞机追过去撞死（真机 demo 无死亡）。
+            rec.r0 = 1 if (not b0 and prev0) else 0
+            rec.r1 = 1 if (not b1 and prev1) else 0
             self.p4_stat[0x4CD5D8 + 0x9E378] = b0
             self.p4_stat[0x4CD5D8 + 0x9E379] = b1
         self.p4_stat[0x4CD5D8 + 0x9E380] = cur + 1
