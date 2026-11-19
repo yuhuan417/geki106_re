@@ -2485,6 +2485,21 @@ class Pages(Page4Mixin):
         # 归回放。页14 收尾不恢复 —— 下一页的 enter 会重载自己的预设。
         self.inp.p4_cfg = dict(kb=0, ms=0, fixed=0, step=0, shift=0, catch=0,
                                bounds=(0, 0, 0x280, 0x1E0))
+        # 战斗中的预设切换（0x446470 → set_preset4）在 exe 里仍会发生：0x44E620
+        # 把指针**吸附**到自机当前位置（锁定按下/释放、自机构造——录制会话同样
+        # 如此，回放 delta 与这些吸附点是自洽的），但 exe 的回放分支**不走设备
+        # 轮询** ⇒ 预设的 catch 拖拽/shift 缩放从不参与。复刻侧包装 set_preset4：
+        # 保留吸附（set_pos + mouse_tx），p4_cfg 强制回合成预设（无 catch 拉拽）。
+        # 页14 收尾恢复原方法。
+        self.inp._p14_orig_set_preset4 = self.inp.set_preset4
+
+        def _p14_set_preset4(fid, pos=None, _inp=self.inp):
+            if pos is not None:
+                _inp.set_pos(*pos)
+                _inp.mouse_tx, _inp.mouse_ty = int(pos[0]), int(pos[1])
+            _inp.p4_cfg = dict(kb=0, ms=0, fixed=0, step=0, shift=0, catch=0,
+                               bounds=(0, 0, 0x280, 0x1E0))
+        self.inp.set_preset4 = _p14_set_preset4
         ok = True                                         # 0x453BA0..0x453D2E 音效装载
         for slot_no, wav in self.P14_SE_SLOTS:
             if not self.load_wave(slot_no, wav):
@@ -2558,6 +2573,11 @@ class Pages(Page4Mixin):
         self.canvas.fill(0xB4); self.present()
         self.layers.free_all()
         self.replay_mode = False
+        # 恢复真实 set_preset4（demo 期间包装版强制合成预设，见 page14_enter）
+        _orig = getattr(self.inp, "_p14_orig_set_preset4", None)
+        if _orig is not None:
+            self.inp.set_preset4 = _orig
+            del self.inp._p14_orig_set_preset4
         # 0x4540A0 收尾：0x10000 → 页2（attract 循环），0x200 → 页3
         self.page = 2 if self.flags.bits & 0x10000 else 3
 
