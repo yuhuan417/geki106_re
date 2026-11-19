@@ -7765,7 +7765,7 @@ def _beh_41D080(self, e) -> bool:
     """`0x41D080`（0x29000002）：**编队长机（六翼）**。
 
     t=++[0x1C]；t==1 → 六发 0x29000003 @(x+Δx, y+Δy) prm=父指针 入 0x4AD43C，
-    相对位 (−0xA0,0)(0x36,−0xAA)(0x5C,−0x30)(−0x3A,−0x5A)(0x60,0x4C)(−0x16,0x4C)。
+    相对位 (−0x60,0)(0x36,−0x56)(0x5C,−0x30)(−0x3A,−0x5A)(0x60,0x4C)(−0x16,0x4C)。
     [0x20] 相位：0 → x−− 到 0x1E0 → 1；1 → t&1==0 时 x−− 到 0x118 → 2、
     (t&3)==0 → y += (自机y≥y ? +1 : −1)；2 → x++ 到 0x208 → 1。
     [0x28] 计时/[0x24] 弹数：[0x24]==0 → [0x28]>0 ? [0x28]=−0x1E :
@@ -7779,7 +7779,8 @@ def _beh_41D080(self, e) -> bool:
     if t == 1:
         _h = id(e) & 0x7FFFFFFF
         self.p4_links[_h] = e
-        for dx, dy in ((-0xA0, 0), (0x36, -0xAA), (0x5C, -0x30),
+        # 0x41D09F/0x41D0B7：0xFFFFFFA0=−0x60、0xFFFFFFAA=−0x56（不是 −0xA0/−0xAA）
+        for dx, dy in ((-0x60, 0), (0x36, -0x56), (0x5C, -0x30),
                        (-0x3A, -0x5A), (0x60, 0x4C), (-0x16, 0x4C)):
             # ctor 0x41C0D1：[0x1C]=rec3(父)、[0x20]=rec0(dx)、[0x24]=rec1(dy)
             self._p4_ent43c(0x29000003, dx, dy, _h)
@@ -7813,24 +7814,26 @@ def _beh_41D080(self, e) -> bool:
             e.d32(0x28, -0x1E & 0xFFFFFFFF)
         elif tm == 0:
             e.d32(0x24, (self.p4_rand() & 3) + 1)
+        # 0x41D1EF 只在 [0x24]==0 分支可达（0x41D1BE/0x41D1CF 都跳 0x41D1FF）
+        if t > 0x1518:
+            e.d32(0x18, 0)
     elif 0 < n <= 4:
         if tm == 0x80:
             e.d32(0x24, 0)
-    if t > 0x1518:
-        e.d32(0x18, 0)
     if e.g32(0x18) != 0:
         if self.p4_430860(self.p4_q43c) == 1:      # 0x41D206 队列只剩自身 → 爆炸
             self.spawn(self._p4_q("ui4cc"), 0x49000005, e.s32(0x04), e.s32(0x08),
                        e.s32(0x2C))
             return False
         x = e.s32(0x04)
-        if e.s32(0x2C) != 0 and x > 0x118:
+        if e.s32(0x2C) != 0:
             x = (x - 1) & 0xFFFFFFFF
             e.d32(0x04, x)
-        if x <= 0x118:                            # 0x41D22A → 发 0x49000005
-            self.spawn(self._p4_q("ui4cc"), 0x49000005, x, e.s32(0x08),
-                       e.s32(0x2C))
-            return False
+            # 0x41D225 的 x<=0x118 判定只在 [0x2C]!=0 分支内
+            if x <= 0x118:
+                self.spawn(self._p4_q("ui4cc"), 0x49000005, x, e.s32(0x08),
+                           e.s32(0x2C))
+                return False
         if e.node is not None:
             e.node.dst = (x - 0x60, e.s32(0x08) - 0x60)
         return True
@@ -8037,9 +8040,10 @@ def _beh_41E960(self, e) -> bool:
     s_ = page4_sin(ang)
     old_x = e.s32(0x04)
     old_y = e.s32(0x08)
-    # 0x41EA32：x = ((cos>>2 − 旧x + [0x20] + 4)>>3) + [0x20]
-    x = (((((c >> 2) - old_x + v20 + 4) >> 3) + v20)) & 0xFFFFFFFF
-    y = (((((s_ >> 2) - old_y + v24 + 4) >> 3) + v24)) & 0xFFFFFFFF
+    # 0x41EA32..0x41EA66：x = ((cos>>2 − 旧x + [0x20] + 4)>>3) **+ 旧x**；
+    # y 同构用旧 y。旧实现末项加 [0x20]/[0x24]，护卫会收敛到父坐标附近而不是绕轨。
+    x = (((((c >> 2) - old_x + v20 + 4) >> 3) + old_x)) & 0xFFFFFFFF
+    y = (((((s_ >> 2) - old_y + v24 + 4) >> 3) + old_y)) & 0xFFFFFFFF
     e.d32(0x04, x)
     e.d32(0x08, y)
     if 0x384 <= ph < 0xA8C and ph % 0xF0 == 0:

@@ -650,7 +650,8 @@ ctor 置 0@`0x445F45`，由重生状态机 `0x446540` 在 timer=-1 与 t=120 两
 - **复刻侧 BGM 后端**（非 exe 逻辑，只实现 `0x44F600` 的"无限循环播放"语义）：
   `fluidsynth` 离线渲染 `extracted/midi/bgm_XX.mid`，音色库优先
   `~/.local/share/geki106/soundfonts/MuseScore_General_Full.sf3`（其次 FluidR3_GM），
-  可用 `GEKI_SF2` 指定；44.1kHz、512 复音、混响/合唱。渲染后**裁掉尾部数字静音**
+  可用 `GEKI_SF2` 指定；44.1kHz、512 复音、混响/合唱。音色库可用
+  `tools/install_bgm_soundfont.sh` 免 root 安装（Debian/Ubuntu）。渲染后**裁掉尾部数字静音**
   （曲目 EOT 常带 5–9s 静音，如 `bgm_08` 约 9s）再交给 `pygame.mixer.music.play(-1)`，
   否则每圈末尾会静音一段——2026-11-19 用户实测"音乐放完没声音，过一会才继续"。
   缓存文件名带 MIDI/音色库 mtime 与设置版本，换库即重渲。
