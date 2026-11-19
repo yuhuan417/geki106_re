@@ -1157,6 +1157,8 @@ P31_CTOR = {
     0x3100001D: (0x433820, 0x30, 0, (0x00, 0x00, 0x01, 0x01)),
     0x3100001F: (0x433AD0, 0x01, 0, (0xD8, 0x168, 0xEF, 0x17F)),
     0x31000011: (0x432DC0, 0x10, 2, (0x140, 0x140, 0x15F, 0x15F)),
+    # 0x430FFF：1×1 粒子（[0x1C]=rec3、[0x20]=rec3+0x78、x/y<<3、node 不激活）
+    0x31000010: (0x432C80, 0x10, 2, (0, 0, 1, 1)),
     0x31000013: (0x432F20, 0x0C, 2, (0x000, 0x148, 0x17, 0x15F)),
     0x31000014: (0x432FE0, 0x0C, 2, (0x000, 0x148, 0x17, 0x15F)),
     0x31000018: (0x433340, 0x0C, 2, (0x1B0, 0x150, 0x1DF, 0x167)),
@@ -1166,6 +1168,26 @@ P31_CTOR = {
     0x3100001C: (0x433520, 0x0A, 3, (0xC0, 0, 0xD7, 0x17)),
     # 0x4315CD：与 01 同 ctor 形状（rad=1、层0、rect D8/168/EF/17F），代码里 21 处使用
     0x3100001E: (0x4321C0, 0x01, 0, (0xD8, 0x168, 0xEF, 0x17F)),
+}
+
+# ctor 内 0x4013A2(0x4AB4B0, se, (x-0x140)<<4)（0x450350 带声像音效）：
+# 01/06/0A/19/1E/1F → SE 2；03/08/17 → SE 0xA；15/1B → SE 0xF；05 → SE 0xF 仅 rec3==0。
+P31_SE = {
+    0x31000001: 2, 0x31000003: 0xA, 0x31000006: 2, 0x31000008: 0xA,
+    0x3100000A: 2, 0x31000015: 0xF, 0x31000017: 0xA, 0x31000019: 2,
+    0x3100001B: 0xF, 0x3100001E: 2, 0x3100001F: 2, 0x31000005: 0xF,
+}
+
+# 共通尾 dst 偏移（node[0x14]/[0x18]）：默认 −0xC（0x4316D7/0x43170A）；
+# −8 = 0x430B28 系（05/13/14/16 共用尾）与 0x43111D（12）；−0x10 = 0x430EBD 系
+# （06/08/09/0C/0E/0F/11）；−0x18 = (x−0x18, y−0xC)（17/18 的 0x43137C/0x43140C）；
+# 0 = (0,0) 且 node[0x1C]=0（10/15/1B/1D 的 0x431AD5/0x431B02 尾）。
+P31_DST = {
+    0x31000005: 8, 0x31000006: 0x10, 0x31000008: 0x10, 0x31000009: 0x10,
+    0x3100000C: 0x10, 0x3100000E: 0x10, 0x3100000F: 0x10, 0x31000011: 0x10,
+    0x31000012: 8, 0x31000013: 8, 0x31000014: 8, 0x31000016: 8,
+    0x31000017: -0x18, 0x31000018: -0x18,
+    0x31000010: 0, 0x31000015: 0, 0x3100001B: 0, 0x3100001D: 0,
 }
 
 P32_RECTS = {
@@ -3099,6 +3121,13 @@ class Pages(Page4Mixin):
                 beh, rad, layer, rect = spec
                 e.beh = beh
                 e.d32(0x0C, rad)
+                # ctor 内的 0x4013A2(0x4AB4B0, se, (x-0x140)<<4) 音效（按型分表；
+                # 0x31000005 仅 rec3==0 即母体时放 SE 0xF，0x430AA4 cmp/jne 门）。
+                _se31 = P31_SE.get(type_word)
+                _skip_se = (type_word == 0x31000005
+                            and (int(a3) if isinstance(a3, int) else 0) != 0)
+                if _se31 is not None and not _skip_se:
+                    self.p4_se_pan(_se31, (int(x) - 0x140) << 4)       # 0x43093C 等
                 vx, vy = a3 if (isinstance(a3, tuple) and len(a3) == 2) else (0, 0)
                 e.d32(0x1C, int(vx) & 0xFFFFFFFF)
                 e.d32(0x20, int(vy) & 0xFFFFFFFF)
@@ -3107,31 +3136,40 @@ class Pages(Page4Mixin):
                 e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
                 e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
                 e.d32(0x18, (abs(int(vx)) + abs(int(vy))) & 0xFFFFFFFF)
-                if type_word == 0x31000004:          # ctor 0x430A57：[0x1C]=0、[0x18]=1
+                if type_word == 0x31000004:          # ctor 0x430A37：[0x1C]=0、[0x18]=1
                     e.d32(0x1C, 0)
                     e.d32(0x18, 1)
-                elif type_word == 0x31000013:        # ctor 0x431140：[0x1C]=rec3、[0x20]=x<<2、[0x24]=y<<2
+                elif type_word == 0x31000013:        # ctor 0x43112A：[0x1C]=rec3、[0x20]=x<<2、[0x24]=y<<2
                     e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
                     e.d32(0x20, (int(x) << 2) & 0xFFFFFFFF)
                     e.d32(0x24, (int(y) << 2) & 0xFFFFFFFF)
                     e.d32(0x18, 1)
-                elif type_word == 0x3100000C:        # ctor 0x430E37：[0x1C]=rec3<<3、[0x20]=rec1
+                elif type_word == 0x3100000C:        # ctor 0x430E1E：[0x1C]=rec3<<3、[0x20]=rec1
                     e.d32(0x1C, (int(a3) << 3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
                     e.d32(0x20, int(y) & 0xFFFFFFFF)
                     if isinstance(a3, int) and a3 >= 0:
-                        rect = (0x120, 0x120, 0x13F, 0x15F)
+                        rect = (0x120, 0x140, 0x13F, 0x15F)   # 0x430E74 (0x120,0x140,0x13F,0x15F)
                     else:
-                        rect = (0x120, 0x120, 0x13F, 0x13F)
-                elif type_word == 0x31000005:        # ctor 0x430ADE：[0x1C]=0、[0x20]=rec3(标量)、[0x18]=1
+                        rect = (0x120, 0x120, 0x13F, 0x13F)   # 0x430E56
+                elif type_word == 0x31000005:        # ctor 0x430AA4：[0x1C]=0、[0x20]=rec3(标量)、[0x18]=1
                     e.d32(0x1C, 0)
                     e.d32(0x20, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
                     e.d32(0x18, 1)
-                elif type_word in (0x31000008, 0x31000009, 0x31000011,
-                                   0x31000014, 0x31000018):  # ctor [0x1C]=0、[0x18]=1
+                elif type_word in (0x31000008, 0x31000009, 0x3100000F, 0x31000011,
+                                   0x31000014, 0x31000016, 0x31000018):  # ctor [0x1C]=0、[0x18]=1
                     e.d32(0x1C, 0)
                     e.d32(0x18, 1)
                     if type_word == 0x31000018:
                         e.raw[0x10] = 0                 # ctor 0x4313D1 byte[0x10]=0
+                elif type_word == 0x31000010:        # ctor 0x430FFF：[0x1C]=rec3、[0x20]=rec3+0x78、x/y<<3
+                    v = int(a3) if isinstance(a3, int) else 0
+                    e.d32(0x1C, v & 0xFFFFFFFF)
+                    e.d32(0x20, (v + 0x78) & 0xFFFFFFFF)       # 0x431024 add ecx,0x78
+                    e.d32(0x24, (int(x) << 3) & 0xFFFFFFFF)    # 0x431027 shl edx,3
+                    e.d32(0x28, (int(y) << 3) & 0xFFFFFFFF)    # 0x431034 shl eax,3
+                    e.d32(0x2C, 0)                             # 0x431043
+                    e.d32(0x18, 1)                             # 0x431046
+                    rect = (0, 0, 1, 1)                        # 0x431030 (0,0,1,1)
                 elif type_word == 0x31000012:        # ctor 0x43109B：角度直线
                     e.d32(0x1C, 0)
                     e.d32(0x20, 0x10)
@@ -3146,11 +3184,13 @@ class Pages(Page4Mixin):
                     vx0 = int(dx)
                     if dx > 0 or abs(dx) < abs(dy):
                         vx0 = -abs(int(dy))
-                    e.d32(0x1C, (inv * vx0 >> 6) & 0xFFFFFFFF)
-                    e.d32(0x20, (inv * int(dy) >> 6) & 0xFFFFFFFF)
+                    _vxc = (inv * vx0 >> 6)                       # 0x4312EB..0x4312F2
+                    _vyc = (inv * int(dy) >> 6)                   # 0x4312FA..0x431302
+                    e.d32(0x1C, _vxc & 0xFFFFFFFF)
+                    e.d32(0x20, _vyc & 0xFFFFFFFF)
                     e.d32(0x24, (int(x) << 2) & 0xFFFFFFFF)
                     e.d32(0x28, (int(y) << 2) & 0xFFFFFFFF)
-                    e.d32(0x18, (abs(vx0) + abs(int(dy))) & 0xFFFFFFFF)
+                    e.d32(0x18, (abs(_vxc) + abs(_vyc)) & 0xFFFFFFFF)   # 0x43131A |vx|+|vy|（缩放后）
                 elif type_word == 0x3100001F:        # ctor 0x431653：8.8 反弹
                     e.d32(0x24, (int(x) << 8) & 0xFFFFFFFF)
                     e.d32(0x28, (int(y) << 8) & 0xFFFFFFFF)
@@ -3163,8 +3203,6 @@ class Pages(Page4Mixin):
                         e.d32(0x28 + 4 * k, int(rec[k]) & 0xFFFFFFFF)
                     e.d32(0x18, 1)
                     e.raw[0x10] = 0
-                    if e.disp is not None:
-                        e.disp.active = 0
                 elif type_word == 0x3100000E:        # ctor 0x430F3A：父子弹
                     e.d32(0x1C, int(a3) & 0xFFFFFFFF if isinstance(a3, int) else 0)
                     e.d32(0x20, (0x40 - self.p4_rand() % 0x18) & 0xFFFFFFFF)
@@ -3178,8 +3216,6 @@ class Pages(Page4Mixin):
                     e.d32(0x28, int(y) & 0xFFFFFFFF)
                     e.d32(0x2C, v & 0x10000)
                     e.d32(0x18, 1)
-                    if e.disp is not None:
-                        e.disp.active = 0
                 elif type_word == 0x3100001B:        # ctor 0x431419：8.4 累加器/朝向速度
                     ax, by = a3 if isinstance(a3, tuple) else (0, 0)
                     if not isinstance(a3, tuple):
@@ -3199,15 +3235,28 @@ class Pages(Page4Mixin):
                     e.d32(0x18, 1)
                     e.raw[0x10] = 0
                 elif type_word == 0x3100000D:        # ctor 0x430EE1：8.4 累加器 [0x28]/[0x2C]，[0x20]=−0x100
+                    e.d32(0x1C, 0)                             # 0x430EF7
                     e.d32(0x20, 0xFFFFFF00)
                     e.d32(0x24, 0)
                     e.d32(0x28, (int(x) << 4) & 0xFFFFFFFF)
                     e.d32(0x2C, (int(y) << 4) & 0xFFFFFFFF)
+                    e.d32(0x18, 1)                             # 0x430F1F
                 e.raw[0x10] = 1
-                e.disp = DisplayNode(layer=layer, rect=list(rect),
-                                     dst=[int(x) - 0xC, int(y) - 0xC])
+                # 共通尾 dst：0x4316D7/0x43170A = x/y−0xC，0x430B28 系 = −8，
+                # 0x430EBD/0x430C79 系 = −0x10，0x43137C/0x43140C = (x−0x18,y−0xC)，
+                # 0x431AD5/0x431B02 尾（15/10/1D/1B）= (0,0) 且 node[0x1C]=0。
+                _d = P31_DST.get(type_word, 0xC)
+                if _d == -0x18:
+                    _dst = [int(x) - 0x18, int(y) - 0xC]       # 0x43137C（17/18）
+                elif _d == 0:
+                    _dst = [0, 0]                              # 0x431B05（10/15/1B/1D）
+                else:
+                    _dst = [int(x) - _d, int(y) - _d]
+                e.disp = DisplayNode(layer=layer, rect=list(rect), dst=_dst)
                 if type_word in (0x31000018, 0x3100001B, 0x3100001C):
                     e.raw[0x10] = 0           # ctor 里 byte[0x10]=0，覆盖共通 1
+                if _d == 0 and e.disp is not None:
+                    e.disp.active = 0         # 0x431B0E node[0x1C]=0（10/15/1B/1D 不显示）
             else:
                 e.beh = "p31"
                 vx, vy = a3 if isinstance(a3, tuple) else (0, 0)
