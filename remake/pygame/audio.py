@@ -44,7 +44,7 @@ FREQ_TABLE = bytes([
 # 波形后交给 pygame.mixer.music 无限循环。曲目 MIDI 的 EOT 常带数秒**数字静音**尾
 # （bgm_08 有 9s、bgm_20 有 8s），直接整段循环会在每圈末尾静音一段——用户实测
 # "音乐放完没声音，过一会才继续"。渲染后裁掉尾部纯静音即可无缝循环。
-BGM_RATE = 48000
+BGM_RATE = 44100
 BGM_SETTINGS_VERSION = 2
 SF2_ENV = "GEKI_SF2"
 SF2_CANDIDATES = (

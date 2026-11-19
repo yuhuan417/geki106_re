@@ -490,6 +490,7 @@ ENT_PROP_FAM = {
     0x25000008: (48, 960, 0, 336, 0),
     0x25000009: (72, 7200, 832, 336, 192),
     0x2500000a: (24, 380, 0, 0, 0),
+    0x2500000b: (24, 26, 0, 432, 0),
     0x26000001: (24, 1, 704, 0, 0),
     0x26000002: (24, 1023, 896, 48, 0),
     0x26000003: (24, 1, 704, 96, 0),
@@ -972,7 +973,10 @@ class Ent:
         if prop is not None:
             if True:
                 self.d32(0x0C, prop[0])           # 半径
-                self.d32(0x18, prop[1])           # 存活门
+                # 0x43AC59..0x43AC65：`mov ax,word[edi+2]; test ax,ax; je → or eax,-1`
+                # 表值 0 必须落成 −1（永不为 0 的存活门），不能原样存 0。
+                _gate = prop[1]
+                self.d32(0x18, (0xFFFFFFFF if _gate == 0 else _gate) & 0xFFFFFFFF)
                 # 0x43AC6D `movsx eax, word ptr [edi+4]`：属性表第 5 字段是**有符号
                 # 16 位**，落 +0x58 时必须符号扩展到 dword（0xFE00 → 0xFFFFFE00 = −512）。
                 # 旧实现把 ENT_PROP 的 0xFE00 当正数存 ⇒ `0x43AF90` 的 `arg<0` 分支失效、
