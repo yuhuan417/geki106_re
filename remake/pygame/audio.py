@@ -45,7 +45,7 @@ FREQ_TABLE = bytes([
 # （bgm_08 有 9s、bgm_20 有 8s），直接整段循环会在每圈末尾静音一段——用户实测
 # "音乐放完没声音，过一会才继续"。渲染后裁掉尾部纯静音即可无缝循环。
 BGM_RATE = 44100
-BGM_SETTINGS_VERSION = 2
+BGM_SETTINGS_VERSION = 3
 SF2_ENV = "GEKI_SF2"
 SF2_CANDIDATES = (
     # 用户自备/本仓库脚本装到用户目录的高质量音色库优先（MuseScore General）。
@@ -123,22 +123,31 @@ def _trim_trailing_silence(src: Path, dst: Path) -> None:
         return
     a = np.frombuffer(raw, dtype="<i2")
     frames = a.reshape(-1, ch)
-    # 从尾部按块找最后一个**可闻**样本（整段 300s 也不会爆内存）。
-    # 不能判 `!= 0`：MuseScore 音色库渲染尾部有 -90dB 级的稀疏抖动样本，
-    # 会把 9s 静音误当成"还有声音"，循环空档依旧。
-    last = -1
+    # 找首/尾的**可闻**样本（整段 300s 也不会爆内存）。
+    # 不能判 `!= 0`：MuseScore 渲染尾部有 -90dB 级稀疏抖动样本，会把 9s 静音误当
+    # "还有声音"。曲目开头普遍还有 1.3–1.7s 数字静音（GS Reset 后的空拍），
+    # 不裁掉的话每圈循环都会先静 1 秒多——用户听到的"过一会才继续"就是它。
     block = 1 << 20
+    first = -1
+    for start in range(0, len(frames), block):
+        end = min(len(frames), start + block)
+        nz = np.flatnonzero(np.any(np.abs(frames[start:end].astype(np.int32)) > 3, axis=1))
+        if nz.size:
+            first = start + int(nz[0])
+            break
+    last = -1
     for end in range(len(frames), 0, -block):
         start = max(0, end - block)
         nz = np.flatnonzero(np.any(np.abs(frames[start:end].astype(np.int32)) > 3, axis=1))
         if nz.size:
             last = start + int(nz[-1])
             break
-    if last < 0:
+    if first < 0 or last < first:
         shutil.copyfile(src, dst)
         return
+    lo = max(0, first - int(0.04 * rate))           # 保留 40ms 起音余量
     keep = min(len(frames), last + 1 + int(0.15 * rate))
-    out = frames[:keep].astype(np.float32)
+    out = frames[lo:keep].astype(np.float32)
     peak = float(np.abs(out).max()) / 32768.0
     if peak > 0.0:
         out *= min(1.0, 0.89 / peak)

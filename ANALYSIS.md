@@ -647,6 +647,17 @@ ctor 置 0@`0x445F45`，由重生状态机 `0x446540` 在 timer=-1 与 t=120 两
   `[+0x58]`=当前 MIDI-out 设备 id——设值函数 `0x44F390`：**50(0x32)=特殊硬件 MIDI-out
   模式**（`+0x1C` 流对象 `0x44B340` 直写，不走段播放），其余=DirectMusic 端口并清零。
   复位 `0x44FFD0`、释放 `0x44FE60`。
+- **复刻侧 BGM 后端**（非 exe 逻辑，只实现 `0x44F600` 的"无限循环播放"语义）：
+  `fluidsynth` 离线渲染 `extracted/midi/bgm_XX.mid`，音色库优先
+  `~/.local/share/geki106/soundfonts/MuseScore_General_Full.sf3`（其次 FluidR3_GM），
+  可用 `GEKI_SF2` 指定；44.1kHz、512 复音、混响/合唱。渲染后**裁掉尾部数字静音**
+  （曲目 EOT 常带 5–9s 静音，如 `bgm_08` 约 9s）再交给 `pygame.mixer.music.play(-1)`，
+  否则每圈末尾会静音一段——2026-11-19 用户实测"音乐放完没声音，过一会才继续"。
+  缓存文件名带 MIDI/音色库 mtime 与设置版本，换库即重渲。
+- **属性表 `+0x58` 是有符号 16 位**：`0x43AC6D movsx eax, word ptr [edi+4]`。表里
+  `0xFE00` 落 `+0x58` 应为 −512；按无符号存会让 `0x43AF90` 的 `arg<0` 分支失效并把
+  `arg>>4` 当速度，0x23000010 的爆散环会以十几倍速飞出屏幕（表现为"没有子弹"）。
+  全部 7 张表已由 `remake/audit_props.py` 直接读 exe 对账。
 
 声音频率、音量与调色板亮度属于不同系统。
 
@@ -892,7 +903,7 @@ type2 `0x437B00` 为“陽”及光块生成链；type3为“雲”；type4 `0x4
 ### 17.1 覆盖
 
 - **行为**：表驱动统计 **175 个行为地址**（`ENT*_INIT` + `P4_41_CTOR` 的 thunk 解析后），
-  全部有实现或明确不可达结论；`P4_BEH` **290 键**，全部落在函数入口。
+  全部有实现或明确不可达结论；`P4_BEH` **314 键**，全部落在函数入口。
 - **类型**：`ENT23` 26 型、`0x31` 26 型、`0x41` 17 型、`ENT24..ENT2D` 全表；
   `docs/p4_enemy_matrix.md` 正文 12 族、280 行（另有 0x31/0x41 族与关卡表）。
 - **脚本**：26 条链回放无异常，op 覆盖 `0x1..0xD`（`0xE` 在 45..76 块中无触发点）。
@@ -905,6 +916,7 @@ type2 `0x437B00` 为“陽”及光块生成链；type3为“雲”；type4 `0x4
 | 2 | `python3 remake/audit_p4.py` | 全部通过（rc=0） |
 | 3 | `python3 remake/audit_ctor.py` | 10 族 180 个 ctor case，0 差异 |
 | 4 | `python3 remake/audit_beh.py` | 行为地址缺实现 0；`P4_BEH` 非入口 0 |
+| 4b | `python3 remake/audit_props.py` | 7 张属性表 180 项与 exe 全一致 |
 | 5 | `python3 remake/check_behaviors.py` | 行为全登记、冒烟无异常 |
 | 6 | `python3 remake/longrun_p4.py 3000` | 无异常、无未实现、队列有界 |
 
