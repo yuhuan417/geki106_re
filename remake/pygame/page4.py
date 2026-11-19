@@ -3769,18 +3769,17 @@ def _beh_411AD0(self, e) -> bool:
 
 
 def _beh_4115B0(self, e) -> bool:
-    """`0x4115B0`（0x2400000A ×14）：右移 [0x20]（rec1<<3 变化）+ 周期事件：
-    t==0x64 → 0x31000005 敌弹入 0x4AD49C；t∈{0xA0,0xDC,0x118} → 0x43B070(e,−[0x58])
-    + 0x401D6B 波动；t>0x154 → [0x20]++；x≥0x298 或 HP=0 → 灭。"""
-    t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
-    e.d32(0x1C, t)
-    if t == 0x64:
-        self.spawn(self._p4_q("ui49c"), 0x31000005, e.s32(4), e.s32(8), 0)
-    elif t in (0xA0, 0xDC, 0x118):
-        if e.s32(0x24) != 0:
-            self.p4_43B070(e, (-e.s32(0x58)) & 0xFFFFFFFF)
-    elif t > 0x154:
+    """`0x4115B0`（0x2400000A）：头 20 帧和 t>0x154 时速度加一。
+    t=0x64 发 0x31000005；带参数的敌机另在 t=0xA0/0xDC/0x118 发两组弹。"""
+    t = _p4_s32(e.s32(0x1C) + 1)
+    e.d32(0x1C, t & 0xFFFFFFFF)
+    if t <= 0x14 or t > 0x154:                        # 0x4115C3 / 0x41163F
         e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
+    elif t == 0x64:
+        self.spawn(self._p4_q("ui49c"), 0x31000005, e.s32(4), e.s32(8), 0)
+    elif t in (0xA0, 0xDC, 0x118) and e.s32(0x24) != 0:
+        self.p4_43B070(e, -e.s32(0x58))                # 0x41162A
+        self.p4_43B150(e, 0)                           # 0x411633
     e.d32(4, (e.s32(4) + e.s32(0x20)) & 0xFFFFFFFF)
     if e.node is not None:
         nd = e.node
@@ -10027,28 +10026,23 @@ def _beh_4114C0(self, e) -> bool:
 
 
 def _beh_411790(self, e) -> bool:
-    """`0x411790`（0x2400000C）：t=[0x1C]−−；t==0 → [0x10]=1、[0x24]≠0 时
-    铺 0x2400000C @(rand%0xF0+0x1F8, rand%0x1E0+0x140) prm=[0x24]−1 入 0x4AD43C；
-    [0x20]≠0 → +1 else −1；[0x20] += [0x2C]?…（neg/sbb → ([0x20]==0)?−1:0）；
-    x −= 4；y −= [0x20]>>1（无符号语义 y += (~[0x20]>>?)）—— 字面：
-    ecx = ([0x20]==0) ? −1 : 0；eax = [0x20] + ecx；[0x20] = eax；y −= eax>>1；
-    node dst=(x−0x18,y−0x18)；return HP≠0 且 x>−0x18（尾未全读，按 0x411847 后
-    标准 cmp jge -0x18 处理）。"""
+    """`0x411790`（0x2400000C）：倒数到 0 时启用碰撞，带参数时再生一架。
+    子机坐标按 Y、X 顺序取随机数；每帧 x 减 4，y 减 (更新后的速度 sar 1)。"""
     t = (e.s32(0x1C) - 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
     if t == 0:
         e.m[0x10] = 1
         if e.s32(0x24) != 0:
-            rx = self.p4_rand() % 0x1E0 + 0x140   # 0x4117E9/0x4117F4：x
-            ry = self.p4_rand() % 0xF0 + 0x1F8    # 0x4117DD/0x4117EF：y
+            ry = self.p4_rand() % 0xF0 + 0x1F8    # 0x4117B1
+            rx = self.p4_rand() % 0x1E0 + 0x140   # 0x4117CA
             self._p4_ent43c(0x2400000C, rx, ry, e.s32(0x24) - 1)
     v = e.s32(0x20)
-    v = (v + (-1 if v != 0 else 0)) & 0xFFFFFFFF
-    e.d32(0x20, v)
-    x = (e.s32(0x04) - 4) & 0xFFFFFFFF
-    y = (e.s32(0x08) - (v >> 1)) & 0xFFFFFFFF
-    e.d32(0x04, x)
-    e.d32(0x08, y)
+    v = _p4_s32(v - (v != 0))
+    e.d32(0x20, v & 0xFFFFFFFF)
+    x = _p4_s32(e.s32(0x04) - 4)
+    y = _p4_s32(e.s32(0x08) - (v >> 1))
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
     return e.g32(0x18) != 0 and x > -0x18
@@ -17421,7 +17415,7 @@ class Page4Mixin:
         if self.p4_collide() is not None:          # 0x4017FD → 0x43BF60（vtable 初始化，无副作用）
             self.p4_collide_pair(self._p4_q("ui40c"), self.p4_q43c)   # 0x451480 0x43BFD0(0x4AD40C,0x4AD43C)
             self.p4_43c060(self._p4_q("ui46c"), self.p4_q43c)         # 0x451493 0x43C060(0x4AD46C,0x4AD43C)
-            self.p4_43c0f0(self._p4_q("ui49c"), self._p4_q("ui40c"))  # 0x4514A6 0x43C0F0(0x4AD49C,0x4AD40C)
+            self.p4_43c0f0(self._p4_q("ui49c"), self._p4_q("ui40c"))  # 0x4514A6，先传外层
         self.p4_bg_update()                       # S21 第一条 0x458E75 → 0x457BD0
         self.p4_dispatch()                        # S21 0x4514AD 0x458E70
         self.draw()                               # S22 0x4514B2 0x458EF0(App,1)
@@ -18655,7 +18649,7 @@ class Page4Mixin:
         ```
         ⇒ 命中条件 `|dx| + |dy| <= r_e + r - (r_e>>2) - (r>>2)`。
         """
-        if not e.g32(0x10):
+        if not (e.g32(0x10) & 0xFF):
             return False
         dx = e.s32(0x04) - x
         dy = e.s32(0x08) - y
@@ -18671,16 +18665,11 @@ class Page4Mixin:
         hits = 0
         if self.p4_sys_bits() & 2:                    # 0x43BFD4 0x45AFF0(0x56CCB8,2)
             return 0
-        for a in list(qa):
-            self._p4_set_col(a)
-            for b in list(qb):
-                if not b.g32(0x10):            # 0x43BFFC `mov al,[esi+0x10]; test; je`
-                    continue
-                self._p4_set_col(b)
-                # 0x43C011 `0x4306C0(edi=内层 arg1, esi[4], esi[8], esi[0xC])`：
-                # **内层（arg1=qa=演员）** 的半径对 **外层（arg2=qb=43C）** 的坐标做判定
+        for b in qb:
+            for a in qa:
+                if not (b.g32(0x10) & 0xFF):   # 0x43BFFC 逐对读参与字节
+                    break
                 if self.p4_hit_test(a, b.s32(0x04), b.s32(0x08), b.s32(0x0C)):
-                    # 0x43C01E → 0x43C170：回调 esi = **内层 qa**（walker 的 edi 最后 push）
                     self.p4_hit_cb(a, b)
                     hits += 1
         return hits
@@ -18731,6 +18720,10 @@ class Page4Mixin:
         # rec[3]=第 5 个 push（0x4100000C 的字形索引、0x41000014 的父/种子/模式三元组）。
         prm = rec[0] if rec else 0
         layer, l, t, r, b, dv, c1c, c120, c124, thunk = spec
+        if typ == 0x41000001:                           # 0x428CD3
+            row_offset = 0x30 * (self.p4_rand() % 3)
+            t += row_offset
+            b += row_offset
         e = Ent(int(x), int(y), int(typ), 0)
         e.d32(0x14, typ & 0xFFFFFFFF)
         e.d32(0x40, thunk)
@@ -18876,10 +18869,7 @@ class Page4Mixin:
         if (t & 7) == 4:                           # 0x43A5F6 and 7 / cmp 4（路径 B）
             o5 = self.p4_rand_mod(m2)[1] - dur
             o6 = self.p4_rand_mod(m2)[1] - dur
-            g = self.p4_spawn41(x + o6, y + o5, 0x41000001)           # 0x43A62F
-            if g is not None:
-                _, r3 = self.p4_rand_mod(3)                       # ctor 0x428CCF
-                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
+            self.p4_spawn41(x + o6, y + o5, 0x41000001)       # 0x43A62F
         if (t & 0xF) == 8 and flag:                # 0x43A668 and 0xF / cmp 8
             self.p4_se_pan(4, (x - 0x140) << 4)    # 0x43A685 SE#4 声像
 
@@ -18895,10 +18885,7 @@ class Page4Mixin:
         for _ in range(dur >> 3):
             o1 = self.p4_rand_mod(m2)[1] - dur
             o2 = self.p4_rand_mod(m2)[1] - dur
-            g = self.p4_spawn41(x + o2, y + o1, 0x41000001)
-            if g is not None:
-                _, r3 = self.p4_rand_mod(3)
-                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
+            self.p4_spawn41(x + o2, y + o1, 0x41000001)
         if flag:
             self.p4_se_pan(11, (x - 0x140) << 4)
 
@@ -18919,7 +18906,7 @@ class Page4Mixin:
           t&0xF==8 且 flag → SE4 声像 (x-0x140)<<4（0x43A677..0x43A688）
         0x43A700 终结：dur>>3 次（每次 2 rand）0x41000001 @(x+o2,y+o1)、rec3=0；
         flag → SE11 声像（0x43A7A0..0x43A7B5）。0x41000001 ctor 0x428CA5 内部
-        rand%3 选爆炸行 ⇒ 移植侧 spawn 后补 p4_rand_mod(3) 改 rect（同 0x43CA94）。"""
+        rand%3 选爆炸行。"""
         t = (e.s32(0x1C) + 1) & 0xFFFFFFFF             # 0x427589 inc（先于两段生成）
         e.d32(0x1C, t)
         self.p4_43a520(self._p4_q("ui4cc"), e.s32(0x04), e.s32(0x08),
@@ -19089,10 +19076,7 @@ class Page4Mixin:
                                                 0x29000013, 0x2C00000B, 0x2C00000A):
             self.p4_spawn_61000004(sub.s32(0x04), sub.s32(0x08), 0x30)   # 0x43D2F5
         else:
-            g = self.p4_spawn41(sub.s32(0x04), sub.s32(0x08), 0x41000001)   # 0x43D32F
-            if g is not None:
-                _, r3 = self.p4_rand_mod(3)                      # 0x428CD3 爆炸行随机
-                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
+            self.p4_spawn41(sub.s32(0x04), sub.s32(0x08), 0x41000001)   # 0x43D32F
         sub.d32(0x18, 0)                                         # 0x43D359
         sub.m[0x10] = 0                                          # 0x43D360
         self.p4_45eff0(ta, drv.g32(0x14), sub.s32(0x04), sub.s32(0x08))     # 0x43D373
@@ -19252,10 +19236,9 @@ class Page4Mixin:
             b.d32(0x18, 0)
             return
         if t == 6:                                        # 0x43C1AF 命中特效
-            jx = (rng.randrange(0x20) - 0xF)
-            jy = (rng.randrange(0x20) - 0xF)
-            self.spawn(self._p4_q("ui4cc"), 0x41000004,
-                       a.s32(0x04) + jx, a.s32(0x08) + jy)   # 0x43C1DA..0x43C20A
+            vx = (self.p4_rand() & 0x1F) - 0xF               # 0x43C1AF
+            vy = (self.p4_rand() & 0x1F) - 0xF               # 0x43C1BE
+            self.spark_spawn(a.s32(0x04), a.s32(0x08), vx, vy)
             if a.s32(0x18) <= 1:                          # 0x43C212 cmp 1 / ja 0x43C30D
                 # —— 最后一击（0x43C21B..0x43C302）：**不扣血**，直接置 0 并出爆/记分 ——
                 if a.s32(0x0C) == 0x30 and a.s32(0x14) not in (
@@ -20805,23 +20788,21 @@ class Page4Mixin:
         0x43C8D8 if ([a+0x14] == 0x2A000001) [p+0x18] = 0
         0x43C8E8 rec[0] = [p+4] + (rand()&0x1F) - 0x10
         0x43C8FB rec[1] = [p+8] + (rand()&0x3F) - 0x20
-        0x43C90E/0x43C91A 两次 (rand()&0x1F - 0xF) 交给 0x45A690，结果写 [esp+0x24]/[esp+0x2c]
+        0x43C90E/0x43C91A 按 y、x 顺序取火花速度，写入 rec[3] 指向的缓冲区
         0x43C940 0x43A3C0(0x4AD4CC, &rec)
         ```
 
-        ★ 两处必须说明（都已在 §16.226 定案）：
-        1. 这一段**没有** `0x430400`，类型槽 `rec[2]` 沿用前面 `0x43C488` 写下的 `0x41000004`；
-        2. `[esp+0x24]` / `[esp+0x2c]` 是 `rec+0x14` / `rec+0x1C`，而入队链只读 `rec[0..0x10]`
-           （`0x430450`）且 `0x430820` 会把 `rec+0x10` **覆盖**掉，所以这两个写入是**死写**，
-           对外不可观测 —— 故这里不复现。
-        同理 `rec[3]`（`a3`）在原版是 `0x43C488` 留下的**栈地址**，任何逻辑都不可能依赖它，
-           复刻侧传 0。
+        `0x43C466` 取速度缓冲地址，随 `0x43C488` 写入 rec[3]。
+        `0x43C93C` 写第二个分量时已有一次 push，因此该对数据位于同一栈基准的
+        `+0x24/+0x28`，由 `0x428D70..0x428D8A` 解引用。
         """
         if a.g32(0x14) == 0x2A000001:                          # 0x43C8D8
             p.d32(0x18, 0)                                     # 0x43C8E1
-        x = p.s32(0x04) + (_random.randrange(0x20) & 0x1F) - 0x10   # 0x43C8F3
-        y = p.s32(0x08) + (_random.randrange(0x40) & 0x3F) - 0x20   # 0x43C906
-        self.spawn(self._p4_q("ui4cc"), 0x41000004, x, y, 0)   # 0x43C940
+        x = p.s32(0x04) + (self.p4_rand() & 0x1F) - 0x10      # 0x43C8F3
+        y = p.s32(0x08) + (self.p4_rand() & 0x3F) - 0x20      # 0x43C906
+        vy = (self.p4_rand() & 0x1F) - 0xF                    # 0x43C90E
+        vx = (self.p4_rand() & 0x1F) - 0xF                    # 0x43C91A
+        self.spark_spawn(x, y, vx, vy)                        # 0x43C940
 
     def _p4_43c868(self, p) -> None:
         """`0x43C868`（类型 `0x10142214`）：在 `p` 原址连发 **20 个 `0x10032215`** 到 `0x4AD46C`。
@@ -20921,8 +20902,8 @@ class Page4Mixin:
             ox = p.s32(0x1C) >> 7                              # 0x43C4E5
             oy = p.s32(0x20) >> 7                              # 0x43C4E1
         elif t == 0x2000:                                      # 0x43C4C0
-            ox = _random.randrange(0x20) - 0xF                 # 0x43C4C7
-            oy = _random.randrange(0x20) - 0xF                 # 0x43C4D3
+            oy = (self.p4_rand() & 0x1F) - 0xF                # 0x43C4C2：先压 y
+            ox = (self.p4_rand() & 0x1F) - 0xF                # 0x43C4CE
         else:
             self._p4_43c460_dispatch(p, a, t0)                 # 0x43C4C0 jne 0x43C508 之前的分支
             return
@@ -20988,10 +20969,7 @@ class Page4Mixin:
                                               0x29000013, 0x2C00000B, 0x2C00000A):
             self.p4_spawn_61000004(a.s32(0x04), a.s32(0x08), 0x30)   # 0x43CA5A
         else:
-            g = self.p4_spawn41(a.s32(0x04), a.s32(0x08), 0x41000001)   # 0x43CA94
-            if g is not None:
-                _, r3 = self.p4_rand_mod(3)                     # 0x428CD3 爆炸行随机
-                g.node.rect = (0, 0xC0 + 48 * r3, 0x2F, 0xEF + 48 * r3)   # 竖排 破/滅/壊（bm_cm48 x0..0x2F 列）
+            self.p4_spawn41(a.s32(0x04), a.s32(0x08), 0x41000001)   # 0x43CA94
         a.d32(0x18, 0)                                         # 0x43CA9F
         a.d32(0x10, 0)                                         # 0x43CAA6
         self.p4_45eff0(ta, p.g32(0x14), a.s32(0x04), a.s32(0x08))   # 0x43CAB9
@@ -21047,43 +21025,30 @@ class Page4Mixin:
         0x43C085 eax = [esi+0x14] ; test ah,0x80 ; je 跳过该 esi
         ```
 
-        ⇒ 当 `0x56CCB8` 的 bit2 为 0 时，只处理**类型带 0x8000 位**的实体。
+        ⇒ 当 `0x56CCB8` 的 0x2 位置位时，只处理**类型带 0x8000 位**的实体。
         """
         hits = 0
         # 0x43C075 0x45B030(0x56CCB8, 2)：**bit2 清**时返回 1 → jne 跳过类型过滤
         bit2_clear = self.p4_bit_none(0x02)
-        for e in list(qa):
-            if not e.g32(0x10):                    # 0x43C094 `mov al,[esi+0x10]; test; je`
-                continue
+        for e in qa:
             if not bit2_clear and not (e.g32(0x14) & 0x8000):   # 0x43C085 test ah,0x80
                 continue
-            for t in list(qb):
-                # 0x4306C0(t, …) 自己检查 t[+0x10]；exe **不写**两边的参与位。
-                # 旧实现把 t[0x10] 强置 1 ⇒ 已被捕获回调清零的敌机会被下一发束再命中
-                # （一次捕获生成两个 type6）。这里只读不写。
+            for t in qb:
+                if not (e.g32(0x10) & 0xFF):       # 0x43C094 回调后重新检查弹
+                    break
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):   # 0x43C0A9
                     self.p4_43c460(e, t)                        # 0x43C0B2 push edi / 0x43C0B3 push esi
                     hits += 1
         return hits
 
 
-    @staticmethod
-    def _p4_set_col(e) -> None:
-        """碰撞参与位 [0x10] = 1（Ent 用 .m、UiEntity 用 .raw）。"""
-        if hasattr(e, "m"):
-            e.m[0x10] = 1
-        elif hasattr(e, "raw"):
-            e.raw[0x10] = 1
-
     def p4_43c0f0(self, qa, qb) -> int:
-        """`0x43C0F0(a, b)`：与 `0x43BFD0` 同形，但命中回调是 `0x43CCC0`（`0x43C135`）。"""
+        """`0x43C0F0`：外层敌弹／道具、内层演员，回调 `0x43CCC0`。"""
         hits = 0
-        for e in list(qa):
-            if not e.g32(0x10):                    # 0x43C105 `mov al,[esi+0x10]; test; je`
-                continue
-            self._p4_set_col(e)
-            for t in list(qb):
-                self._p4_set_col(t)
+        for e in qa:
+            for t in qb:
+                if not (e.g32(0x10) & 0xFF):       # 0x43C113 逐对读敌弹参与字节
+                    break
                 if self.p4_hit_test(t, e.s32(0x04), e.s32(0x08), e.s32(0x0C)):
                     self.p4_43ccc0(e, t)                        # 0x43C135 → 0x401FDC
                     hits += 1

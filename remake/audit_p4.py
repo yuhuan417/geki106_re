@@ -1464,6 +1464,8 @@ def main():
             return _Q(n)
         def spawn(self, *a):
             self.calls.append(a)
+        def spark_spawn(self, *a):
+            self.calls.append(("spark",) + a)
         def p4_se_pan(self, *a):
             self.calls.append(("SE",) + a)
     _za = _Z({0x4AB5B0 + 4: 0xC000})
@@ -1479,7 +1481,7 @@ def main():
     _ja.d32(0x18, 0)        # ENT2A_INIT 现设 HP=0x30D40；显式清 0 以测分派逻辑
     _jz = _Z()
     page4.Page4Mixin.p4_43c460(_jz, _j1, _ja)
-    _jhit = [c for c in _jz.calls if c[0] == "ui4cc" and c[1] == 0x41000004]
+    _jhit = [c for c in _jz.calls if c[0] == "spark"]
     _bo = _Z({0x4AB5B0 + 4: 0x0F00})
     _bor1 = page4.Page4Mixin.p4_45af30(_bo, 0x1000)
     _bor2 = page4.Page4Mixin.p4_45af60(_bo, 0x0100)
@@ -3183,9 +3185,8 @@ def main():
           and _m1.g32(0x18) == 0 and _m1.g32(0x10) == 0, "")
     check("0x43C8CD（类型 0x10FF0053）：抖动 ±0x10/±0x20 的 0x41000004；"
           "[a+0x14]==0x2A000001 时清零 [p+0x18]；随后进共用尾击破靶（0x43C945 jmp）",
-          len(_jhit) == 1 and _jhit[0][1] == 0x41000004
-          and 0x200 - 0x10 <= _jhit[0][2] <= 0x200 + 0x0F
-          and 0x100 - 0x20 <= _jhit[0][3] <= 0x100 + 0x1F
+          _jhit == [("spark", 0x20F, 0x112, 5, -6)]
+          and _jz.rng_seed == 0x6252E503  # 火花四次，随后击破爆炸取一次
           and _ja.g32(0x18) == 0
           and _ja.g32(0x10) == 0
           and any(c[0] == "ui4cc" and c[1] == 0x41000001 for c in _jz.calls), "")
@@ -3500,6 +3501,22 @@ def main():
           and img[0x43BFDB - ib:0x43BFE0 - ib] == bytes([0xE8, 0xAB, 0x60, 0xFC, 0xFF]), "")
     check("0x43C0F0 已接入帧循环（p4_43c0f0 与 p4_43c060 都已定义）",
           hasattr(page4.Page4Mixin, "p4_43c060") and hasattr(page4.Page4Mixin, "p4_43c0f0"), "")
+    _collision = _Z()
+    _shot = page4.Ent(100, 100, 0x31000001, 0)
+    _actors = [page4.Ent(100, 100, 1, 0) for _ in range(3)]
+    _shot.d32(0x10, 1)
+    for _actor, _flag in zip(_actors, (0x100, 1, 1)):
+        _actor.d32(0x10, _flag)
+
+    def _consume_shot(shot, actor):
+        _collision.calls.append(actor)
+        shot.m[0x10] = 0
+
+    _collision.p4_43ccc0 = _consume_shot
+    check("0x43C113/0x4306C0 按字节判定；回调清除敌弹参与位后立即结束内层",
+          _collision.p4_43c0f0([_shot], _actors) == 1
+          and _collision.calls == _actors[1:2]
+          and _actors[0].g32(0x10) == 0x100, "")
     check("0x43CCC0 已落地：p4_43ccc0 / p4_43c0f0 / 四个 0x4CD4A0 写入口都在",
           all(hasattr(page4.Page4Mixin, n) for n in
               ("p4_43ccc0", "p4_43c0f0", "p4_45f5f0", "p4_45f690",
