@@ -6305,12 +6305,12 @@ def _beh_414080(self, e) -> bool:
 def _beh_415200(self, e) -> bool:
     """`0x415200`（0x2600000C）：**右侧编队发生器**。t=++[0x1C]；
     [0x20]==0（展开态）：vy = (y≥0xF0 ? +4 : −0xC)；x += vy；x<−0xA0 →
-    [0x24]−− 且 y = rand%0x18 + 0x28（上移重置）；x > 0x320 → y = rand%0x18+0x190；
+    [0x24]−− 且 y = rand%0x18 + 0x28（上移重置）；x > 0x320 → y = rand%0x30+0x190；
     y > [0x1C]&&0x1F==0xF → 0x43B070(e,0)；(t&3)==3 → 0x414010；
     alive = [0x24]≠0 且 HP≠0。
     [0x20]≠0（编队态）：(t&0xF)!=0 → return 1；[0x20]−−==0 → 定版（[0x10]=1、
     node.active=1、x=0x298、y=rand%0x18+0x190）；否则发 0x2600000C @
-    (0x298, rand%0x18+0x190) prm=rand/0x18 入 0x4AD43C 并 return 1。
+    (0x298, rand%0x30+0x190) 入 0x4AD43C 并 return 1。
     rand = 0x45AD00 LCG；rand%N/÷N 经 0x462D71（push N 作除数残留）。"""
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
@@ -6320,10 +6320,10 @@ def _beh_415200(self, e) -> bool:
         e.d32(0x04, (e.s32(0x04) + vy) & 0xFFFFFFFF)
         if e.s32(0x04) < -0xA0:
             e.d32(0x24, (e.s32(0x24) - 1) & 0xFFFFFFFF)
-            r = self.p4_rand() % 0x30
+            r = self.p4_rand() % 0x18
             e.d32(0x08, (r + 0x28) & 0xFFFFFFFF)
         if e.s32(0x04) > 0x320:
-            r = self.p4_rand() % 0x30
+            r = self.p4_rand() % 0x18
             e.d32(0x08, (r + 0x190) & 0xFFFFFFFF)
         y = e.s32(0x08)
         if y > 0xF0 and (t & 0x1F) == 0xF:
@@ -6343,10 +6343,10 @@ def _beh_415200(self, e) -> bool:
         if e.node is not None:
             e.node.active = 1
         e.d32(0x04, 0x298)
-        e.d32(0x08, (self.p4_rand() % 0x18 + 0x190) & 0xFFFFFFFF)
+        e.d32(0x08, (self.p4_rand() % 0x30 + 0x190) & 0xFFFFFFFF)
         return True
     rnd = self.p4_rand()
-    r = rnd % 0x18                                  # 0x462D71 余数；prm 固定 0
+    r = rnd % 0x30                                  # 0x415288 push 0x30
     self._p4_ent43c(0x2600000C, 0x298, r + 0x190, 0)
     return True
 
@@ -6384,9 +6384,10 @@ def _beh_415480(self, e) -> bool:
             e.d32(0x24, (e.s32(0x24) + (1 if y >= 0xF0 else -1)) & 0xFFFFFFFF)
         else:
             e.d32(0x24, 0)                          # 0x4155A3 先清 vy
-            if e.s32(0x04) < 0x78:
-                e.d32(0x20, 0)
-                e.d32(0x24, (-0x18 if y >= 0xF0 else 0x18) & 0xFFFFFFFF)
+        # 0x4155A6：两条路合流后都判 x<0x78 —— 旧实现只在 y 越界时执行。
+        if e.s32(0x04) < 0x78:
+            e.d32(0x20, 0)
+            e.d32(0x24, (-0x18 if y >= 0xF0 else 0x18) & 0xFFFFFFFF)
     elif v == 0:
         vy = e.s32(0x24)
         if vy == 0:
@@ -6681,10 +6682,10 @@ def _beh_4145A0(self, e) -> bool:
 
 
 def _beh_4148B0(self, e) -> bool:
-    """`0x4148B0`（0x26000006）：**链体护卫机（45t 正弦纵摆）**。
+    """`0x4148B0`（0x26000006）：**链体护卫机（45t 正弦纵摆，振幅 25/32）**。
 
     t=[0x20]++；无链（[0x1C]==0）：t<0x258 且 t 奇 → 发 0x26000006 @
-    (0x298, 0xF0 + (45*sin(45t)>>5)) 入 0x4AD43C（45t=(t*5)*9、0x401A50=sin），
+    (0x298, 0xF0 + (25*sin(45t)>>5)) 入 0x4AD43C（45t=(t*5)*9、0x401A50=sin），
     自身 y 同步；[0x24]>0 且 t<0x2D0 → return 1（等链体），否则 return 0。
     有链：x −= 6；t==0xF 且 y 奇 → 0x43B360(e, 自机x, y+自机y−0x140, 0)；
     (t&0xF)==0xF → 0x414010；HP≠−1 → [0x18]=−1 且 [链体+0x24]−−。
@@ -6698,7 +6699,8 @@ def _beh_4148B0(self, e) -> bool:
     if h == 0:
         if t < 0x258 and (t & 1):
             ang = (t * 5 * 9) & 0xFFFFFFFF
-            yy = 0xF0 + ((45 * page4_sin(ang)) >> 5)
+            # 0x4148E3/0x4148F0：sin×5×5>>5 ⇒ 振幅 25（不是角度系数 45）
+            yy = 0xF0 + ((25 * page4_sin(ang)) >> 5)
             e.d32(0x08, yy & 0xFFFFFFFF)
             _h = id(e) & 0x7FFFFFFF
             self.p4_links[_h] = e
@@ -10224,7 +10226,8 @@ def _beh_415BB0(self, e) -> bool:
     if y == 0xF0:                               # 0x415C10：4 档速度 × 17 发
         spd = -0xC0
         off = 0
-        while spd >= -0x3C0:
+        # 0x415C58 cmp ebx,0xFFFFFC40 / jg：速度只到 −0x2C0（3 档×17 发）
+        while spd > -0x3C0:
             ang = off
             for _ in range(0x11):
                 self.p4_43B290(e, page4_cos(ang & 0xFFFFFFFF),
