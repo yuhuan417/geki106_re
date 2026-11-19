@@ -1537,13 +1537,26 @@ class Ent:
             self.d32(0x20, a & 0xFFFFFFFF)
         if "r1_24" in info:
             self.d32(0x24, b & 0xFFFFFFFF)
-        if "d3pair" in info:                           # 0x41200B：[0x1C]=*rec3、[0x20]=rec3[1]
-            tgt = self._deref_link(d)
-            if tgt is not None:
-                self.d32(info["d3pair"][0], tgt.g32(0x1C))
-                self.d32(info["d3pair"][1], tgt.g32(0x20))
-        if "node_src_y" in info:                       # 0x412041：node src 按 rec3 链 y
-            pass  # src 依赖 rec3 解引用的运行期 y，首帧由行为补
+        if "p25000a" in info:                          # 0x411FFE（0x2500000A）
+            # param 结构 {父指针, 索引}：0x41200B [0x1C]=p[0]、0x412016 [0x20]=p[1]、
+            # 其后 [0x24]/[0x28]/[0x2C]/[0x30] 全清 0（0x412019..0x412025）。
+            # 节点 rect 由父态与索引算：yy=((父.[0x1C]+i−3)*3)<<4；yy>0x120 再 −0x150；
+            # rect=(0x1E0,yy,0x20F,yy+0x2F)（0x412028..0x412081）。
+            if isinstance(d, tuple) and len(d) >= 2:
+                ph = int(d[0]) & 0x7FFFFFFF
+                idx = int(d[1]) & 0xFFFFFFFF
+                self.d32(0x1C, ph)
+                self.d32(0x20, idx)
+                for off in (0x24, 0x28, 0x2C, 0x30):
+                    self.d32(off, 0)
+                parent = self._deref_link(ph)
+                pst = parent.s32(0x1C) if parent is not None else 0
+                yy = (((pst + idx - 3) & 0xFFFFFFFF) * 3) << 4
+                yy &= 0xFFFFFFFF
+                if yy > 0x120:
+                    yy = (yy - 0x150) & 0xFFFFFFFF
+                if self.node is not None:
+                    self.node.rect = (0x1E0, yy, 0x20F, (yy + 0x2F) & 0xFFFFFFFF)
 
     def d32(self, off: int, val: int) -> None:
         self.m[off:off + 4] = int(val & 0xFFFFFFFF).to_bytes(4, "little")
@@ -2581,8 +2594,7 @@ ENT25_INIT = {
     0x25000008: {"beh": 0x4024C8, "z1c_24": True},
     0x25000009: {"beh": 0x401078, "b10_0": True, "z1c_24": True,
                  "imm": {0x28: 0x40, 0x2C: 0, 0x30: 0x1770}, "node_hidden": True},
-    0x2500000A: {"beh": 0x401186, "z1c": True, "deref3": True,
-                 "d3pair": (0x20, 0x24), "node_src_y": True},
+    0x2500000A: {"beh": 0x401186, "z1c": True, "p25000a": True},
     0x2500000B: {"beh": 0x4012D0, "r0sh": (0x1C, 4), "r1sh": (0x20, 4),
                  "rand_pair": True, "d_to": 0x2C},
 }
@@ -3178,11 +3190,13 @@ def _beh_4127E0(self, e) -> bool:
         s_ = page4_sin(ang)
         e.d32(0x2C, (e.s32(0x2C) + ((c * r + 0x7F) >> 8)) & 0xFFFFFFFF)
         e.d32(0x30, (e.s32(0x30) + ((s_ * r + 0x7F) >> 8)) & 0xFFFFFFFF)
+        # 0x4128AF/0x4128B3：ecx=[0x30] → [8]（y）；eax=[0x2C] → [4]（x）。
+        # 旧实现把两者写反（x/y 互换）⇒ 0x25000006/07 的螺旋整体转 90°。
         x2, y2 = e.s32(0x2C), e.s32(0x30)
-        e.d32(8, (x2 >> 1) & 0xFFFFFFFF)
-        e.d32(4, (y2 >> 1) & 0xFFFFFFFF)
+        e.d32(4, (x2 >> 1) & 0xFFFFFFFF)
+        e.d32(8, (y2 >> 1) & 0xFFFFFFFF)
         if e.node is not None:
-            e.node.dst = ((y2 >> 1) - 0x18, (x2 >> 1) - 0x18)
+            e.node.dst = ((x2 >> 1) - 0x18, (y2 >> 1) - 0x18)
     # 出屏测 margin 0x18 + HP 门
     x, y = e.s32(4), e.s32(8)
     on_screen = (-0x18 < x < 0x280 + 0x18 and -0x18 < y < 0x1E0 + 0x18)
@@ -3471,9 +3485,21 @@ def _beh_412680(self, e) -> bool:
 
 
 def _beh_412950(self, e) -> bool:
-    """`0x412950`（0x25000007 ×45）：三状态机。
-    state=[0x1C]: 0=左移→x≤0x1E0 转 1；1=纵摆+周期 spawn 0x25000005→t≥0x4B0 转 2；
-    2=右移→x>0x1E0 转 0。x<−0x30 或 HP=0 → 灭。"""
+    """`0x412950`（0x25000008 ×3，ctor 0x411FC9）：三状态机。
+
+    ```
+    0x412957 state=[0x1C]
+      0：x -= 3（node.dst.x -= 3）；x<=0x1E0 → state=1；[0x24]=0x40
+      1：t=++[0x20]；(t&0x1F)==0 → 先 rand()%0x190 得 y=+0x28，
+         再 rand()%0xF0 得 x=+0x168，铺 0x25000005 入 0x4AD43C；
+         (t&0x3F)==0 → 0x43B610(e,0,0,−0x100) 朝左上开火；
+         vy=+1 if y<0xF0 else −1；[0x24]+=vy；y += ([0x24]+8)>>4；
+         t==0x4B0 → state=2、[0x24]=0
+      2：++[0x24]；x -= [0x24]>>3（加速左移），dst=(x−0x30,y−0x30)；
+         **没有回环**，x<=−0x30 或 HP=0 才灭
+    0x412AC4 return HP!=0 && x>−0x30
+    ```
+    """
     st = e.s32(0x1C)
     if st == 0:
         e.d32(4, (e.s32(4) - 3) & 0xFFFFFFFF)
@@ -3482,34 +3508,35 @@ def _beh_412950(self, e) -> bool:
             nd.dst = (nd.dst[0] - 3, nd.dst[1])
         if e.s32(4) <= 0x1E0:
             e.d32(0x1C, 1)
-            e.d32(0x24, 0x40)
+        e.d32(0x24, 0x40)                            # 0x412ABD 无条件
     elif st == 1:
         t = (e.s32(0x20) + 1) & 0xFFFFFFFF
         e.d32(0x20, t)
-        if (t & 0x1F) == 0:                                  # 每 0x20 帧 spawn 子机
-            import random as _r
-            rx = (_r.randrange(0x7FFFFFFF) % 0xF0) + 0x168   # 0x4129EB/0x4129EC：x
-            ry = (_r.randrange(0x7FFFFFFF) % 0x190) + 0x28    # 0x4129E5/0x4129EB：y
+        if (t & 0x1F) == 0:                          # 0x4129AE
+            # 0x4129B2..0x4129ED：rand%0x190 → y、rand%0xF0 → x（顺序不能反）
+            ry = (self.p4_rand() % 0x190) + 0x28
+            rx = (self.p4_rand() % 0xF0) + 0x168
             self._p4_ent43c(0x25000005, rx, ry)
-        if not (t & 0x3F):                                   # [0x20]&0x3F==0 → 淡入闪光
-            self.spawn_flash(e.s32(4), e.s32(8), -0x100)
-        vy = 1 if e.s32(8) >= 0xF0 else -1             # 0x412A3E..0x412A48：{−1,+1}
-        e.d32(0x24, (e.s32(0x24) + vy) & 0xFFFFFFFF)
-        e.d32(8, (e.s32(8) + ((e.s32(0x24) + 8) >> 4)) & 0xFFFFFFFF)  # 0x412A42..0x412A58 累加
+        if (t & 0x3F) == 0:                          # 0x412A1A → 0x43B610
+            self.p4_43B610(e, 0, 0, -0x100)
+        vy = -1 if e.s32(8) >= 0xF0 else 1           # 0x412A35 setge/dec/and 2/dec
+        v24 = (e.s32(0x24) + vy) & 0xFFFFFFFF
+        e.d32(0x24, v24)
+        v24s = v24 - 0x100000000 if v24 & 0x80000000 else v24
+        e.d32(8, (e.s32(8) + ((v24s + 8) >> 4)) & 0xFFFFFFFF)
         if e.node is not None:
             e.node.dst = (e.s32(4) - 0x30, e.s32(8) - 0x30)
-        if t >= 0x4B0:
+        if t == 0x4B0:                               # 0x412A7D jne
             e.d32(0x1C, 2)
             e.d32(0x24, 0)
     elif st == 2:
-        e.d32(4, (e.s32(4) + 3) & 0xFFFFFFFF)
+        v24 = (e.s32(0x24) + 1) & 0xFFFFFFFF       # 0x412973 inc
+        e.d32(0x24, v24)
+        e.d32(4, (e.s32(4) - (v24 >> 3)) & 0xFFFFFFFF)   # 0x412979 sar 3
         if e.node is not None:
-            nd = e.node
-            nd.dst = (nd.dst[0] + 3, nd.dst[1])
-        if e.s32(4) > 0x1E0:
-            e.d32(0x1C, 0)
-            e.d32(0x24, 0x40)
+            e.node.dst = (e.s32(4) - 0x30, e.s32(8) - 0x30)
     return e.g32(0x18) != 0 and e.s32(4) > -0x30
+
 
 
 def _beh_4165A0(self, e) -> bool:
@@ -3584,42 +3611,57 @@ def _beh_41F610(self, e) -> bool:
 
 
 def _beh_4123E0(self, e) -> bool:
-    """`0x4123E0`（0x25000003 ×32）：三阶段跳跳——t<0x100 下落（[0x20]−− 到 −0x10
-    → [0x2C]≠0 时开火）；t∈[0x100,0x118) 弹跳动画（t%4==3 → node 外扩 ±0x30）；
-    t≥0x118 → byte[0x10]=1 + [0x20]=0x30（起步速度）；8.8 定点正弦（[0x1C] 角速度、
-    [0x24]/[0x28] 累积 → >>2 定屏）；x=[0x24]>>2 < −0x30 出屏或 HP=0 → 灭。"""
+    """`0x4123E0`（0x25000003 ×32，ctor 0x411FAE）：三阶段跳跳。
+
+    ```
+    0x4123E3 eax=[0x20]
+    0x4123E6 cmp eax,0x100
+    0x4123EB jl  0x412425            ; spd<0x100：下落段
+    0x4123ED inc eax; [0x20]=eax
+    0x4123F6 jge 0x412418            ; spd>=0x118：落地段（byte[0x10]=1、[0x20]=0x30）
+    0x4123F8 and eax,3; ==3 → rect += (-0x30,0,-0x30,0)
+    0x412477 ...                    ; 两条弹跳分支都跳到这里，**跳过三角积分**
+    0x412425 dec eax; [0x20]=eax
+    0x41242C jne 0x41243E
+    0x41242E if ([0x2C]!=0) 0x43B070(e,0)
+    0x41243E 0x40159B(cos([0x1C]))*spd → [0x24]
+    0x41245D 0x401A50(sin([0x1C]))*spd → [0x28]
+    0x412477 [8]=[0x28]>>2、[4]=[0x24]>>2、dst=(x−0x18,y−0x18)
+    0x4124A2 if spd > −0x30 → 只查 HP；否则先 0x4305F0(e,0x18)
+    ```
+    """
     spd = e.s32(0x20)
-    t = e.s32(0x1C)
-    if spd < 0x100:
+    if spd < 0x100:                                  # 0x412425 下落段
         spd = (spd - 1) & 0xFFFFFFFF
         spd_s = spd - 0x100000000 if spd & 0x80000000 else spd
         e.d32(0x20, spd)
-        if spd_s == -0x10:
-            if e.s32(0x2C) != 0:
-                self.p4_43B070(e, 0)
-    elif spd < 0x118:
+        if spd_s == -0x10 and e.s32(0x2C) != 0:      # 0x41242E
+            self.p4_43B070(e, 0)
+        ang = e.s32(0x1C)                            # 0x41243E..0x412474
+        c = page4_cos(ang)
+        s_ = page4_sin(ang)
+        e.d32(0x24, (e.s32(0x24) + ((c * spd_s + 0x7F) >> 8)) & 0xFFFFFFFF)
+        e.d32(0x28, (e.s32(0x28) + ((s_ * spd_s + 0x7F) >> 8)) & 0xFFFFFFFF)
+    elif spd < 0x118:                                # 0x4123ED 弹跳动画
         spd = (spd + 1) & 0xFFFFFFFF
+        spd_s = spd
         e.d32(0x20, spd)
         if (spd & 3) == 3 and e.node is not None:
             e.node.rect = (e.node.rect[0] - 0x30, e.node.rect[1],
                            e.node.rect[2] - 0x30, e.node.rect[3])
-    else:
+    else:                                            # 0x412418 落地
+        spd_s = 0x30
         e.m[0x10] = 1
         e.d32(0x20, 0x30)
-    ang = e.s32(0x1C)
-    c = page4_cos(ang)
-    s_ = page4_sin(ang)
-    e.d32(0x24, (e.s32(0x24) + ((c * spd + 0x7F) >> 8)) & 0xFFFFFFFF)
-    e.d32(0x28, (e.s32(0x28) + ((s_ * spd + 0x7F) >> 8)) & 0xFFFFFFFF)
     e.d32(8, (e.s32(0x28) >> 2) & 0xFFFFFFFF)
     e.d32(4, (e.s32(0x24) >> 2) & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = ((e.s32(0x24) >> 2) - 0x18, (e.s32(0x28) >> 2) - 0x18)
-    if spd_s if 'spd_s' in dir() else spd <= -0x30:
+    # 0x4124A2：只有 spd <= −0x30 才做带半径的屏内判据；否则仅 HP。
+    if spd_s <= -0x30 and not self.p4_4305f0(e, 0x18):
         return False
-    x, y = e.s32(4), e.s32(8)
-    on_screen = (-0x18 < x < 0x280 + 0x18 and -0x18 < y < 0x1E0 + 0x18)
-    return on_screen and e.g32(0x18) != 0
+    return e.g32(0x18) != 0
+
 
 
 def _beh_419850(self, e) -> bool:
@@ -10275,14 +10317,22 @@ def _beh_412B60(self, e) -> bool:
                 if e.s32(0x2C) >= 0x1C:
                     e.d32(0x1C, 0xA)
                     e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
+                elif e.g32(0x30) & (1 << (ring + 0x10)):
+                    # 0x412CBB：该圈位已占 → 整段跳过（只由 0x412D5B 增 [0x2C]）
+                    e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
                 else:
+                    # 0x412CC3：**先把 boss 态切到 ring+3**（3..9 态由此可达；
+                    # 旧实现漏了这一步 ⇒ 后面 7 个计时态永远不出现）。
+                    e.d32(0x1C, ring + 3)
+                    e.d32(0x24, self.p4_rand() & 0x100)      # 0x412CD5
+                    h = id(e) & 0x7FFFFFFF
+                    self.p4_links[h] = e                     # 子体 [0x1C] 要能解析到父
                     for i in range(7):
-                        if e.g32(0x30) & (1 << (i + 0x10)):
+                        # 0x412D1C..：索引 (i+ring)%7；已占位则跳过
+                        idx = (i + ring) % 7
+                        if e.g32(0x30) & (1 << (idx + 0x10)):
                             continue
-                        c = self._p4_ent43c(0x2500000A, 0x2BC, y)
-                        c.d32(0x18, id(e) & 0x7FFFFFFF)
-                        c.d32(0x1C, (self.p4_rand() & 0x100))
-                        c.d32(0x20, i + ring * 0 + ring)
+                        self._p4_ent43c(0x2500000A, 0x2BC, y, (h, idx))
                     e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
         elif 3 <= st <= 9:
             if t == limits[st - 3]:
@@ -10319,14 +10369,14 @@ def _beh_412B60(self, e) -> bool:
         e.d32(0x20, (t + 1) & 0xFFFFFFFF)
     else:
         e.d32(0x20, 0)
+    # 0x412E97..0x412EB5：[0x2A] += word[0x28]；y<0xF0 且 (signed)word[0x28]<0x60
+    # 时 **word[0x28] += 1**（加速度字段自增），旧实现错误地把 +1 加到了 [0x2A]。
     w28 = e.g16(0x28)
-    w2a = e.g16(0x2A)
-    w2a = (w2a + w28) & 0xFFFF
+    w2a = (e.g16(0x2A) + w28) & 0xFFFF
     e.d16(0x2A, w2a)
     w28s = w28 - 0x10000 if w28 & 0x8000 else w28
     if y < 0xF0 and w28s < 0x60:
-        e.d16(0x2A, (w2a + 1) & 0xFFFF)
-        w2a += 1
+        e.d16(0x28, (w28 + 1) & 0xFFFF)
     w2as = w2a - 0x10000 if w2a & 0x8000 else w2a
     y = (0xF0 + (w2as >> 6)) & 0xFFFFFFFF
     e.d32(0x08, y)
