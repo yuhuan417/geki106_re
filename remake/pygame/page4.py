@@ -5096,19 +5096,23 @@ def p4_41fc60(self, e, k: int) -> None:
     """`0x41FC60`（thunk 0x40102D，ret 4）：入场舱纵队——6×0x29000019。
 
     ctor 0x41C613：x=-0xA0、+0x1C=p3(主)、+0x20=*p0、+0x24=*(p0+4)、+0x28=*(p3+0x1C)、
-    +0x2C=*p1(=k)；rect=*(p1+4)!=0?{180,F0,1AF,11F}:{180,120,1AF,14F}（此处恒非0→前者）、
+    +0x2C=*p1(=k)；rect=*(p1+4)!=0?{180,F0,1AF,11F}:{180,120,1AF,14F}。
+    kp 缓冲 p1={k,0}（0x41fc82），仅 pod6 前 `0x41fd87` 写 p1[1]=1 →
+    pod1..5 rect={180,120,1AF,14F}、pod6 rect={180,F0,1AF,11F}；
     node.dst=(-0x30,-0x30)。六组 (p0[0],p0[1]) 见 0x41FC9A..0x41FD73 的 push 对。"""
     h = id(e) & 0x7FFFFFFF
     self.p4_links[h] = e
-    for ox, oy in ((0x78, -0x18), (0x9C, -0x24), (0xA8, -0x48),
-                   (0xAC, -0x6C), (0xA8, -0x90), (0x9C, -0xA8)):
+    for i, (ox, oy) in enumerate(((0x78, -0x18), (0x9C, -0x24), (0xA8, -0x48),
+                                  (0xAC, -0x6C), (0xA8, -0x90), (0x9C, -0xA8))):
         c = self._p4_ent43c(0x29000019, 0, 0, h)    # d_to 0x1C → +0x1C=主句柄
         c.d32(0x20, ox & 0xFFFFFFFF)
         c.d32(0x24, oy & 0xFFFFFFFF)
         c.d32(0x28, e.g32(0x1C))                    # 0x41C640 *(p3+0x1C)
         c.d32(0x2C, k & 0xFFFFFFFF)
         if c.node is not None:
-            c.node.rect = (0x180, 0xF0, 0x1AF, 0x11F)
+            # 0x41fc82 kp={k,0}；0x41fd87 pod6 前 kp[1]=1（0x41c651..56 test 选 rect）
+            c.node.rect = ((0x180, 0xF0, 0x1AF, 0x11F) if i == 5
+                           else (0x180, 0x120, 0x1AF, 0x14F))
             c.node.dst = (-0x30, -0x30)
 
 
@@ -5195,10 +5199,10 @@ def _beh_4200C0(self, e) -> bool:
         if t == 0:
             for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0x9C, -0x24, 0xA0, -0x18), 0),
                           ((0xA8, -0x48, 0xC8, -0x18), 0), ((0xAC, -0x6C, 0xF0, -0x18), 0),
-                          ((0xA8, -0x70, 0x118, -0x18), 0), ((0x9C, -0x58, 0x140, -0x18), 1)):
+                          ((0xA8, -0x90, 0x118, -0x18), 0), ((0x9C, -0x58, 0x140, -0x18), 1)):
                 _p4_spawn29a(self, e, q, 0x3C, rf)
-        elif t == 0x3C:                               # 0x4203FC：16×0x2900001C 纵列
-            for i in range(16):
+        elif t == 0x3C:                               # 0x4203FC：18×0x2900001C 纵列
+            for i in range(18):                       # 0x420449 x+0x28<0x2D0 继续（0..0x2A8）
                 self._p4_ent43c(0x2900001C, i * 0x28, -0x18, id(e) & 0x7FFFFFFF)
         elif t == 0x1A4:                              # 0x42046B：再铺 6×0x2900001A
             for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0xA0, -0x18, 0x9C, -0x24), 0),
@@ -5206,6 +5210,8 @@ def _beh_4200C0(self, e) -> bool:
                           ((0x118, -0x18, 0xA8, -0x90), 0), ((0x140, -0x18, 0x9C, -0x58), 1)):
                 _p4_spawn29a(self, e, q, 0x3C, rf)
     elif state == 4:                                  # 0x420677
+        e.d32(0x2C, 0)                                # 0x42067E/0x420681 每帧强制清 vx/vy
+        e.d32(0x30, 0)
         if t == 0:
             p4_41fc60(self, e, 0x3E8)
             self._p4_ent43c(0x2900001D, 0x9C, -0xA8, id(e) & 0x7FFFFFFF)
@@ -5237,14 +5243,17 @@ def _beh_4200C0(self, e) -> bool:
         elif t == 0x186:
             e.d32(0x24, 0xE60)
             e.d32(0x2C, -0x40 & 0xFFFFFFFF)
+            # 0x420d24 cmp 0x186 → 0x420d2a jmp 0x4214c5（保标志）→ t==0x186 落入公共门补舱
+            p4_41fc60(self, e, 0x3E8)
         elif t > 0x186:
             v = e.s32(0x2C)
             e.d32(0x2C, (v + (1 if v != 0 else 0)) & 0xFFFFFFFF)
         if t == 0:                                    # 0x42081C
             p4_41fc60(self, e, 0x5B)
-            for q in ((0x9C, -0x58, 0x9C, 0x78), (0xAC, -0x6C, 0xAC, 0x3C),
-                      (0xA8, -0x48, 0xA8, 0x18), (0x9C, -0x24, 0x9C, -0xC)):
-                _p4_spawn29a(self, e, q, 0x5B, 1)
+            for q, rf in (((0x9C, -0xA8, 0x9C, 0x78), 1), ((0xA8, -0x90, 0xA8, 0x60), 0),
+                          ((0xAC, -0x6C, 0xAC, 0x3C), 0), ((0xA8, -0x48, 0xA8, 0x18), 0),
+                          ((0x9C, -0x24, 0x9C, -0xC), 0)):          # 0x42085D..0x4209C2 五舱
+                _p4_spawn29a(self, e, q, 0x5B, rf)
         elif t == 0x5A:                               # 0x4209F9：11×0x2900001F
             for blk in ((0x9C, 0x78, 1, 0), (0xA8, 0x60, 0, 0), (0xAC, 0x3C, 0, 0),
                         (0xA8, 0x18, 0, 0), (0x9C, -0xC, 0, 0), (0x78, -0x18, 0, 0),
@@ -5254,7 +5263,8 @@ def _beh_4200C0(self, e) -> bool:
     elif state == 6:                                  # 0x420D2F
         if t == 0:
             e.d32(0x2C, 0)
-            e.d32(0x30, (0x11 if e.s32(0x08) >= 0x118 else -0x11) & 0xFFFFFFFF)
+            # 0x420D3B..0x420D4E：y≥0x118 → -0x11，否则 +0x11
+            e.d32(0x30, (-0x11 if e.s32(0x08) >= 0x118 else 0x11) & 0xFFFFFFFF)
         else:
             e.d32(0x2C, ((0x198 - e.s32(0x04)) >> 4) & 0xFFFFFFFF)
             if t & 1:
@@ -5267,38 +5277,46 @@ def _beh_4200C0(self, e) -> bool:
         if 0x5A < t < 0x258 and (t & 3) == 0:         # 0x420DA1 开火段
             c = page4_cos(t * 40)
             s = page4_sin(t * 40)
-            x = e.s32(0x04) + 0x9C
-            y = e.s32(0x08) - 0xA8
+            x0 = e.s32(0x04)
+            y0 = e.s32(0x08)
+            # 0x420DAF..0x420DCC：本体 x/y 临时改写为 muzzle（x0+0x9C, y0-0xA8）——
+            # 41fff0 的 dx/dy 与弹生成坐标都以 muzzle 为基准；0x420F35..0x420F40 还原
+            mx = x0 + 0x9C
+            my = y0 - 0xA8
+            e.d32(0x04, mx & 0xFFFFFFFF)
+            e.d32(0x08, my & 0xFFFFFFFF)
             if st & 0x8000:                           # 0x420DD5 八发两排
-                p4_41fff0(self, e, x + c, y + s, -0x680)
-                p4_41fff0(self, e, x - c, y - s, -0x680)
-                p4_41fff0(self, e, x + s, y - c, -0x340)
-                p4_41fff0(self, e, x - s, y + c, -0x340)
-                y += 0x120                            # 0x420E61 [ebp+8]+=0x120
-                p4_41fff0(self, e, x + c, y - s, -0x680)
-                p4_41fff0(self, e, x - c, y + s, -0x680)
-                p4_41fff0(self, e, x + s, y + c, -0x340)
-                p4_41fff0(self, e, x - s, y - c, -0x340)
+                p4_41fff0(self, e, mx + c, my + s, -0x680)
+                p4_41fff0(self, e, mx - c, my - s, -0x680)
+                p4_41fff0(self, e, mx + s, my - c, -0x340)
+                p4_41fff0(self, e, mx - s, my + c, -0x340)
+                e.d32(0x08, (my + 0x120) & 0xFFFFFFFF)   # 0x420E61 muzzle.y += 0x120
+                p4_41fff0(self, e, mx + c, my + 0x120 - s, -0x680)
+                p4_41fff0(self, e, mx - c, my + 0x120 + s, -0x680)
+                p4_41fff0(self, e, mx + s, my + 0x120 + c, -0x340)
+                p4_41fff0(self, e, mx - s, my + 0x120 - c, -0x340)
             else:                                     # 0x420EC2
-                p4_41fff0(self, e, x, y, -0x900)
+                p4_41fff0(self, e, 0, my, -0x900)     # 0x420EC8 tx=0 → dx=-(x0+0x9C) 向左
                 if (t & 0x1F) == 0:
                     p4_41fff0(self, e, self.p4_stat.get(0x56CC8C, 0),
                               self.p4_stat.get(0x56CC90, 0) + 0x30, 0x400)
-                y += 0x120
-                p4_41fff0(self, e, x, y, -0x900)
+                e.d32(0x08, (my + 0x120) & 0xFFFFFFFF)   # 0x420F08 muzzle.y += 0x120
+                p4_41fff0(self, e, 0, my + 0x120, -0x900)  # 0x420F0C tx=0
                 if (t & 0x1F) == 0:
                     p4_41fff0(self, e, self.p4_stat.get(0x56CC8C, 0),
                               self.p4_stat.get(0x56CC90, 0) - 0x30, 0x400)
+            e.d32(0x04, x0 & 0xFFFFFFFF)              # 0x420F35 还原
+            e.d32(0x08, y0 & 0xFFFFFFFF)
         if t == 0:                                    # 0x420F4E
             p4_41fc60(self, e, 0x3E8)
             for q, rf in (((0x9C, -0x24, 0x9C, -0xC), 0), ((0xA8, -0x48, 0xA8, 0x18), 0),
-                          ((0xAC, -0x6C, 0xAC, 0x3C), 0), ((0xA8, -0x70, 0xA8, 0x60), 0),
-                          ((0x9C, -0x58, 0x9C, 0x78), 1)):
+                          ((0xAC, -0x6C, 0xAC, 0x3C), 0), ((0xA8, -0x90, 0xA8, 0x60), 0),
+                          ((0x9C, -0x58, 0x9C, 0x78), 1)):          # 0x421088 pod4 y0=-0x90
                 _p4_spawn29a(self, e, q, 0x259, rf)
         elif t == 0x258:                              # 0x42112A
             for q, rf in (((0x9C, -0xC, 0x9C, -0x24), 0), ((0xA8, 0x18, 0xA8, -0x48), 0),
-                          ((0xAC, 0x3C, 0xAC, -0x6C), 0), ((0xA8, 0x60, 0xA8, -0x70), 0),
-                          ((0x9C, 0x78, 0x9C, -0x58), 1)):
+                          ((0xAC, 0x3C, 0xAC, -0x6C), 0), ((0xA8, 0x60, 0xA8, -0x90), 0),
+                          ((0x9C, 0x78, 0x9C, -0x58), 1)):          # 0x421266 pod4 y1=-0x90
                 _p4_spawn29a(self, e, q, 0x5B, rf)
     elif state == 7:                                  # 0x421301
         if t < 0x5A:
@@ -5329,34 +5347,43 @@ def _beh_4200C0(self, e) -> bool:
         if t == 0x1E:                                 # 0x4213DF
             self.p4_51_spawn(0x18, 0x18, 0x5100000A, 0)
         elif t == 0xF0:
-            self.p4_51_spawn(0x1C8, 0x18, 0x5100000A, 0)
+            # 0x421421..0x421437：rec={0x18, 0x1C8}（x=0x18、y=0x1C8）
+            self.p4_51_spawn(0x18, 0x1C8, 0x5100000A, 0)
+        if t == 0:                                    # 0x4214C0 公共门（态7 每轮 t==0 补舱）
+            p4_41fc60(self, e, 0x3E8)
         if 0x5A < t < 0x1FE and (t & 1) == 0:         # 0x421461
             vy = e.s32(0x30)
             wob = (8 - (t & 0xF)) if vy > 0 else ((t & 7) - 4)
-            p4_41fff0(self, e, e.s32(0x04) + 0x9C + 0x18,
-                      e.s32(0x08) - 0xA8 + wob, 0x380)
+            # 0x421474..0x4214BD：muzzle 改写（x0+0x9C, y0-0xA8）→ dx=0x18、dy=wob，弹生成于 muzzle
+            x0 = e.s32(0x04)
+            y0 = e.s32(0x08)
+            e.d32(0x04, (x0 + 0x9C) & 0xFFFFFFFF)
+            e.d32(0x08, (y0 - 0xA8) & 0xFFFFFFFF)
+            p4_41fff0(self, e, x0 + 0x9C + 0x18, y0 - 0xA8 + wob, 0x380)
+            e.d32(0x04, x0 & 0xFFFFFFFF)              # 0x4214BA 还原
+            e.d32(0x08, y0 & 0xFFFFFFFF)
     elif state == 8:                                  # 0x4214DC
         e.d32(0x30, ((0x5A0 - e.s32(0x28)) >> 3) & 0xFFFFFFFF)
-        if t == 0:                                    # 0x4214F7：6×0x29000020
+        if t == 0:                                    # 0x4214F7：6×0x29000020（态8 无 41fc60 路径）
             for x, y, val in ((0x78, -0x18, 0x3E8), (0x9C, -0x24, 0x96),
                               (0xA8, -0x48, 0x78), (0xAC, -0x6C, 0x5A),
                               (0xA8, -0x70, 0x3C), (0x9C, -0x58, 0x1E)):
                 _p4_spawn29t(self, e, x, y, val)
-            p4_41fc60(self, e, 0x3E8)                  # 0x4214CB（t==0 重生门）
         elif t == 0x12C:                              # 0x421609：6×0x2900001A
-            for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0x78, -0x24, 0x9C, -0x18), 0),
-                          ((0x78, -0x48, 0xA8, -0x18), 0), ((0x78, -0x6C, 0xAC, -0x18), 0),
-                          ((0x78, -0x70, 0xA8, -0x18), 0), ((0x78, -0x58, 0x9C, -0x18), 1)):
+            # 0x42169E..0x4217D3：pod2..6 rec={0x78,-0x18, X, Y}
+            for q, rf in (((0x78, -0x18, 0x78, -0x18), 0), ((0x78, -0x18, 0x9C, -0x24), 0),
+                          ((0x78, -0x18, 0xA8, -0x48), 0), ((0x78, -0x18, 0xAC, -0x6C), 0),
+                          ((0x78, -0x18, 0xA8, -0x90), 0), ((0x78, -0x18, 0x9C, -0x58), 1)):
                 _p4_spawn29a(self, e, q, 0x3D, rf)
     # —— 公共尾 0x42180F ——
-    thr = (0x40, 0, 0x10E, 0x1DF, 0x118, 0x1C6, 0x2B2, 0x24E, 0x168)
+    thr = (0, 0x40, 0x10E, 0x1DF, 0x118, 0x1C6, 0x2B2, 0x24E, 0x168)   # 0x421818/20：thr[0]=0、thr[1]=0x40
     t = e.s32(0x20)
     if t == thr[state]:
         if state == 0:                                # 0x421883
             if e.s32(0x04) > 0x280:
                 e.d32(0x1C, (e.s32(0x1C) | 1) & 0xFFFFFFFF)     # → 态1
             else:
-                r = rng.randrange(0x7FFFFFFF)
+                r = self.p4_rand()                    # 0x4218A0 → 0x45AD00 LCG
                 e.d32(0x1C, (e.s32(0x1C) | ((r % 7) + 2)) & 0xFFFFFFFF)  # → 态2..8
             e.d32(0x20, 0)
         else:                                         # 0x42186C：round+1、态回 0
@@ -5368,8 +5395,8 @@ def _beh_4200C0(self, e) -> bool:
     e.d32(0x28, (e.s32(0x28) + e.s32(0x30)) & 0xFFFFFFFF)
     acc_x = e.s32(0x24)
     acc_y = e.s32(0x28)
-    x = (acc_x >> 2) if acc_x >= 0 else -((-acc_x) >> 2)        # sar 2
-    y = (acc_y >> 2) if acc_y >= 0 else -((-acc_y) >> 2)
+    x = acc_x >> 2                                    # 0x4218DA sar（Python >> 即算术右移）
+    y = acc_y >> 2                                    # 0x4218DD sar
     e.d32(0x04, x & 0xFFFFFFFF)
     e.d32(0x08, y & 0xFFFFFFFF)
     if e.node is not None:
@@ -5385,7 +5412,7 @@ def _beh_421FE0(self, e) -> bool:
 
     [0x18]=-1；x=主.x+[0x20]、y=主.y+[0x24]、node dst=(x-0x18,y-0x18)；
     主死 → beh=0x401852(0x422DD0) return 1；主态字变 且 [0x2C]≠0 → [0x2C]=1；
-    [0x2C]−−==0 → return 0（寿终）。"""
+    test 减前值（0x42204C）==0 → return 0（寿终），否则 [0x2C]-=1 return 1。"""
     main = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
     e.d32(0x18, -1 & 0xFFFFFFFF)
     if main is None:

@@ -1,0 +1,325 @@
+=====  0x41d080-0x41d330 =====
+0x41d080  sub      esp, 0x58
+0x41d083  push     esi
+0x41d084  mov      esi, ecx
+0x41d086  push     edi
+0x41d087  mov      edx, dword ptr [esi + 0x1c]
+0x41d08a  inc      edx
+0x41d08b  mov      eax, edx
+0x41d08d  mov      dword ptr [esi + 0x1c], edx
+0x41d090  cmp      eax, 1
+0x41d093  jne      0x41d12f
+0x41d099  mov      eax, 0x4c
+0x41d09e  push     ebp
+0x41d09f  mov      dword ptr [esp + 0x34], 0xffffffa0
+0x41d0a7  mov      dword ptr [esp + 0x38], 0
+0x41d0af  mov      dword ptr [esp + 0x3c], 0x36
+0x41d0b7  mov      dword ptr [esp + 0x40], 0xffffffaa
+0x41d0bf  mov      dword ptr [esp + 0x44], 0x5c
+0x41d0c7  mov      dword ptr [esp + 0x48], 0xffffffd0
+0x41d0cf  mov      dword ptr [esp + 0x4c], 0xffffffc6
+0x41d0d7  mov      dword ptr [esp + 0x50], 0xffffffa6
+0x41d0df  mov      dword ptr [esp + 0x54], 0x60
+0x41d0e7  mov      dword ptr [esp + 0x58], eax
+0x41d0eb  mov      dword ptr [esp + 0x5c], 0xffffffea
+0x41d0f3  mov      dword ptr [esp + 0x60], eax
+0x41d0f7  mov      dword ptr [esp + 0x14], 0x29000003
+0x41d0ff  mov      dword ptr [esp + 0x18], esi
+0x41d103  lea      edi, [esp + 0x38]
+0x41d107  mov      ebp, 6
+0x41d10c  mov      ecx, dword ptr [edi]
+0x41d10e  mov      eax, dword ptr [edi - 4]
+0x41d111  lea      edx, [esp + 0xc]
+0x41d115  mov      dword ptr [esp + 0x10], ecx
+0x41d119  push     edx
+0x41d11a  mov      ecx, 0x4ad43c
+0x41d11f  mov      dword ptr [esp + 0x10], eax
+0x41d123  call     0x401fa5
+0x41d128  add      edi, 8
+0x41d12b  dec      ebp
+0x41d12c  jne      0x41d10c
+0x41d12e  pop      ebp
+0x41d12f  mov      eax, dword ptr [esi + 0x20]
+0x41d132  sub      eax, 0
+0x41d135  je       0x41d192
+0x41d137  dec      eax
+0x41d138  je       0x41d14f
+0x41d13a  dec      eax
+0x41d13b  jne      0x41d1a9
+0x41d13d  mov      ecx, dword ptr [esi + 4]
+0x41d140  inc      ecx
+0x41d141  mov      eax, ecx
+0x41d143  mov      dword ptr [esi + 4], ecx
+0x41d146  cmp      eax, 0x208
+0x41d14b  jne      0x41d1a9
+0x41d14d  jmp      0x41d1a2
+0x41d14f  mov      eax, dword ptr [esi + 0x1c]
+0x41d152  test     al, 1
+0x41d154  jne      0x41d16e
+0x41d156  mov      edx, dword ptr [esi + 4]
+0x41d159  dec      edx
+0x41d15a  mov      ecx, edx
+0x41d15c  mov      dword ptr [esi + 4], edx
+0x41d15f  cmp      ecx, 0x118
+0x41d165  jne      0x41d16e
+0x41d167  mov      dword ptr [esi + 0x20], 2
+0x41d16e  test     al, 3
+0x41d170  jne      0x41d1a9
+0x41d172  mov      eax, dword ptr [esi + 8]
+0x41d175  mov      ecx, dword ptr [0x56cc90]
+0x41d17b  cmp      ecx, eax
+0x41d17d  je       0x41d1a9
+0x41d17f  xor      edx, edx
+0x41d181  cmp      ecx, eax
+0x41d183  setge    dl
+0x41d186  dec      edx
+0x41d187  and      edx, 0xfffffffe
+0x41d18a  inc      edx
+0x41d18b  add      edx, eax
+0x41d18d  mov      dword ptr [esi + 8], edx
+0x41d190  jmp      0x41d1a9
+0x41d192  mov      ecx, dword ptr [esi + 4]
+0x41d195  dec      ecx
+0x41d196  mov      eax, ecx
+0x41d198  mov      dword ptr [esi + 4], ecx
+0x41d19b  cmp      eax, 0x1e0
+0x41d1a0  jne      0x41d1a9
+0x41d1a2  mov      dword ptr [esi + 0x20], 1
+0x41d1a9  mov      edi, dword ptr [esi + 0x28]
+0x41d1ac  mov      eax, dword ptr [esi + 0x24]
+0x41d1af  inc      edi
+0x41d1b0  test     eax, eax
+0x41d1b2  mov      dword ptr [esi + 0x28], edi
+0x41d1b5  mov      ecx, edi
+0x41d1b7  je       0x41d1d1
+0x41d1b9  jle      0x41d1ff
+0x41d1bb  cmp      eax, 4
+0x41d1be  jg       0x41d1ff
+0x41d1c0  cmp      ecx, 0x80
+0x41d1c6  jne      0x41d1ff
+0x41d1c8  mov      dword ptr [esi + 0x24], 0
+0x41d1cf  jmp      0x41d1ff
+0x41d1d1  test     ecx, ecx
+0x41d1d3  jle      0x41d1dc
+0x41d1d5  mov      dword ptr [esi + 0x28], 0xffffffe2
+0x41d1dc  mov      eax, dword ptr [esi + 0x28]
+0x41d1df  test     eax, eax
+0x41d1e1  jne      0x41d1ef
+0x41d1e3  call     0x401393
+0x41d1e8  and      eax, 3
+0x41d1eb  inc      eax
+0x41d1ec  mov      dword ptr [esi + 0x24], eax
+0x41d1ef  cmp      dword ptr [esi + 0x1c], 0x1518
+0x41d1f6  jle      0x41d1ff
+0x41d1f8  mov      dword ptr [esi + 0x18], 0
+0x41d1ff  mov      eax, dword ptr [esi + 0x18]
+0x41d202  test     eax, eax
+0x41d204  je       0x41d253
+0x41d206  mov      ecx, 0x4ad43c
+0x41d20b  call     0x40221b
+0x41d210  cmp      eax, 1
+0x41d213  je       0x41d253
+0x41d215  mov      eax, dword ptr [esi + 0x2c]
+0x41d218  test     eax, eax
+0x41d21a  je       0x41d22c
+0x41d21c  mov      ecx, dword ptr [esi + 4]
+0x41d21f  dec      ecx
+0x41d220  mov      eax, ecx
+0x41d222  mov      dword ptr [esi + 4], ecx
+0x41d225  cmp      eax, 0x118
+0x41d22a  jle      0x41d253
+0x41d22c  mov      eax, dword ptr [esi + 8]
+0x41d22f  mov      ecx, dword ptr [esi + 4]
+0x41d232  sub      eax, 0x60
+0x41d235  sub      ecx, 0x60
+0x41d238  push     eax
+0x41d239  push     ecx
+0x41d23a  call     0x401753
+0x41d23f  mov      ecx, dword ptr [esi + 0x38]
+0x41d242  add      esp, 8
+0x41d245  mov      dword ptr [ecx + 0x14], eax
+0x41d248  pop      edi
+0x41d249  mov      al, 1
+0x41d24b  pop      esi
+0x41d24c  mov      dword ptr [ecx + 0x18], edx
+0x41d24f  add      esp, 0x58
+0x41d252  ret      
+0x41d253  mov      edx, dword ptr [esi + 0x2c]
+0x41d256  mov      eax, dword ptr [esi + 8]
+0x41d259  mov      ecx, dword ptr [esi + 4]
+0x41d25c  push     edx
+0x41d25d  push     0x49000005
+0x41d262  push     eax
+0x41d263  lea      edx, [esp + 0x28]
+0x41d267  push     ecx
+0x41d268  push     edx
+0x41d269  call     0x4023c4
+0x41d26e  mov      ecx, 5
+0x41d273  mov      esi, eax
+0x41d275  lea      edi, [esp + 0x1c]
+0x41d279  add      esp, 0x14
+0x41d27c  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x41d27e  lea      eax, [esp + 8]
+0x41d282  mov      ecx, 0x4ad4cc
+0x41d287  push     eax
+0x41d288  call     0x401686
+0x41d28d  pop      edi
+0x41d28e  xor      al, al
+0x41d290  pop      esi
+0x41d291  add      esp, 0x58
+0x41d294  ret      
+0x41d295  nop      
+0x41d296  nop      
+0x41d297  nop      
+0x41d298  nop      
+0x41d299  nop      
+0x41d29a  nop      
+0x41d29b  nop      
+0x41d29c  nop      
+0x41d29d  nop      
+0x41d29e  nop      
+0x41d29f  nop      
+0x41d2a0  int3     
+0x41d2a1  int3     
+0x41d2a2  int3     
+0x41d2a3  int3     
+0x41d2a4  int3     
+0x41d2a5  int3     
+0x41d2a6  int3     
+0x41d2a7  int3     
+0x41d2a8  int3     
+0x41d2a9  int3     
+0x41d2aa  int3     
+0x41d2ab  int3     
+0x41d2ac  int3     
+0x41d2ad  int3     
+0x41d2ae  int3     
+0x41d2af  int3     
+0x41d2b0  int3     
+0x41d2b1  int3     
+0x41d2b2  int3     
+0x41d2b3  int3     
+0x41d2b4  int3     
+0x41d2b5  int3     
+0x41d2b6  int3     
+0x41d2b7  int3     
+0x41d2b8  int3     
+0x41d2b9  int3     
+0x41d2ba  int3     
+0x41d2bb  int3     
+0x41d2bc  int3     
+0x41d2bd  int3     
+0x41d2be  int3     
+0x41d2bf  int3     
+0x41d2c0  int3     
+0x41d2c1  int3     
+0x41d2c2  int3     
+0x41d2c3  int3     
+0x41d2c4  int3     
+0x41d2c5  int3     
+0x41d2c6  int3     
+0x41d2c7  int3     
+0x41d2c8  int3     
+0x41d2c9  int3     
+0x41d2ca  int3     
+0x41d2cb  int3     
+0x41d2cc  int3     
+0x41d2cd  int3     
+0x41d2ce  int3     
+0x41d2cf  int3     
+0x41d2d0  int3     
+0x41d2d1  int3     
+0x41d2d2  int3     
+0x41d2d3  int3     
+0x41d2d4  int3     
+0x41d2d5  int3     
+0x41d2d6  int3     
+0x41d2d7  int3     
+0x41d2d8  int3     
+0x41d2d9  int3     
+0x41d2da  int3     
+0x41d2db  int3     
+0x41d2dc  int3     
+0x41d2dd  int3     
+0x41d2de  int3     
+0x41d2df  int3     
+0x41d2e0  int3     
+0x41d2e1  int3     
+0x41d2e2  int3     
+0x41d2e3  int3     
+0x41d2e4  int3     
+0x41d2e5  int3     
+0x41d2e6  int3     
+0x41d2e7  int3     
+0x41d2e8  int3     
+0x41d2e9  int3     
+0x41d2ea  int3     
+0x41d2eb  int3     
+0x41d2ec  int3     
+0x41d2ed  int3     
+0x41d2ee  int3     
+0x41d2ef  int3     
+0x41d2f0  int3     
+0x41d2f1  int3     
+0x41d2f2  int3     
+0x41d2f3  int3     
+0x41d2f4  int3     
+0x41d2f5  int3     
+0x41d2f6  int3     
+0x41d2f7  int3     
+0x41d2f8  int3     
+0x41d2f9  int3     
+0x41d2fa  int3     
+0x41d2fb  int3     
+0x41d2fc  int3     
+0x41d2fd  int3     
+0x41d2fe  int3     
+0x41d2ff  int3     
+0x41d300  int3     
+0x41d301  int3     
+0x41d302  int3     
+0x41d303  int3     
+0x41d304  int3     
+0x41d305  int3     
+0x41d306  int3     
+0x41d307  int3     
+0x41d308  int3     
+0x41d309  int3     
+0x41d30a  int3     
+0x41d30b  int3     
+0x41d30c  int3     
+0x41d30d  int3     
+0x41d30e  int3     
+0x41d30f  int3     
+0x41d310  int3     
+0x41d311  int3     
+0x41d312  int3     
+0x41d313  int3     
+0x41d314  int3     
+0x41d315  int3     
+0x41d316  int3     
+0x41d317  int3     
+0x41d318  int3     
+0x41d319  int3     
+0x41d31a  int3     
+0x41d31b  int3     
+0x41d31c  int3     
+0x41d31d  int3     
+0x41d31e  int3     
+0x41d31f  int3     
+0x41d320  int3     
+0x41d321  int3     
+0x41d322  int3     
+0x41d323  int3     
+0x41d324  int3     
+0x41d325  int3     
+0x41d326  int3     
+0x41d327  int3     
+0x41d328  int3     
+0x41d329  int3     
+0x41d32a  int3     
+0x41d32b  int3     
+0x41d32c  int3     
+0x41d32d  int3     
+0x41d32e  int3     
+0x41d32f  int3     

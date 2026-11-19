@@ -1,0 +1,83 @@
+=====  0x41dce0-0x41dd70 =====
+0x41dce0  push     esi
+0x41dce1  mov      esi, ecx
+0x41dce3  mov      eax, dword ptr [esi + 4]
+0x41dce6  add      eax, -4
+0x41dce9  mov      dword ptr [esi + 4], eax
+0x41dcec  mov      edx, dword ptr [0x56cc90]
+0x41dcf2  sar      edx, 1
+0x41dcf4  mov      ecx, eax
+0x41dcf6  mov      eax, dword ptr [esi + 8]
+0x41dcf9  add      edx, 0xf0
+0x41dcff  cmp      edx, eax
+0x41dd01  jle      0x41dd0e
+0x41dd03  cmp      eax, 0x1b8
+0x41dd08  jge      0x41dd0e
+0x41dd0a  inc      eax
+0x41dd0b  mov      dword ptr [esi + 8], eax
+0x41dd0e  mov      eax, dword ptr [esi + 8]
+0x41dd11  add      ecx, -0x18
+0x41dd14  sub      eax, 0x18
+0x41dd17  push     eax
+0x41dd18  push     ecx
+0x41dd19  call     0x401753
+0x41dd1e  mov      ecx, dword ptr [esi + 0x38]
+0x41dd21  add      esp, 8
+0x41dd24  mov      dword ptr [ecx + 0x14], eax
+0x41dd27  mov      dword ptr [ecx + 0x18], edx
+0x41dd2a  mov      eax, dword ptr [esi + 4]
+0x41dd2d  cmp      eax, -0x18
+0x41dd30  jle      0x41dd40
+0x41dd32  mov      eax, dword ptr [esi + 0x18]
+0x41dd35  test     eax, eax
+0x41dd37  je       0x41dd40
+0x41dd39  mov      eax, 1
+0x41dd3e  pop      esi
+0x41dd3f  ret      
+0x41dd40  xor      eax, eax
+0x41dd42  pop      esi
+0x41dd43  ret      
+0x41dd44  nop      
+0x41dd45  nop      
+0x41dd46  nop      
+0x41dd47  nop      
+0x41dd48  nop      
+0x41dd49  nop      
+0x41dd4a  nop      
+0x41dd4b  nop      
+0x41dd4c  nop      
+0x41dd4d  nop      
+0x41dd4e  nop      
+0x41dd4f  nop      
+0x41dd50  int3     
+0x41dd51  int3     
+0x41dd52  int3     
+0x41dd53  int3     
+0x41dd54  int3     
+0x41dd55  int3     
+0x41dd56  int3     
+0x41dd57  int3     
+0x41dd58  int3     
+0x41dd59  int3     
+0x41dd5a  int3     
+0x41dd5b  int3     
+0x41dd5c  int3     
+0x41dd5d  int3     
+0x41dd5e  int3     
+0x41dd5f  int3     
+0x41dd60  int3     
+0x41dd61  int3     
+0x41dd62  int3     
+0x41dd63  int3     
+0x41dd64  int3     
+0x41dd65  int3     
+0x41dd66  int3     
+0x41dd67  int3     
+0x41dd68  int3     
+0x41dd69  int3     
+0x41dd6a  int3     
+0x41dd6b  int3     
+0x41dd6c  int3     
+0x41dd6d  int3     
+0x41dd6e  int3     
+0x41dd6f  int3     

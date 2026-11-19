@@ -1,0 +1,124 @@
+=====  0x41eb60-0x41ec40 =====
+0x41eb60  sub      esp, 0x28
+0x41eb63  push     esi
+0x41eb64  mov      esi, ecx
+0x41eb66  push     edi
+0x41eb67  mov      eax, dword ptr [esi + 0x1c]
+0x41eb6a  mov      dword ptr [esi + 0x18], 0xffffffff
+0x41eb71  mov      ecx, dword ptr [eax + 0x20]
+0x41eb74  shl      ecx, 1
+0x41eb76  mov      dword ptr [esi + 0x20], ecx
+0x41eb79  mov      edx, dword ptr [eax + 0x24]
+0x41eb7c  shl      edx, 1
+0x41eb7e  mov      dword ptr [esi + 0x24], edx
+0x41eb81  mov      edx, dword ptr [eax + 4]
+0x41eb84  sub      ecx, edx
+0x41eb86  mov      dword ptr [esi + 4], ecx
+0x41eb89  mov      ecx, dword ptr [esi + 0x24]
+0x41eb8c  mov      edi, dword ptr [eax + 8]
+0x41eb8f  mov      edx, dword ptr [esi + 4]
+0x41eb92  sub      ecx, edi
+0x41eb94  sub      edx, 0x18
+0x41eb97  mov      dword ptr [esi + 8], ecx
+0x41eb9a  add      ecx, -0x18
+0x41eb9d  push     ecx
+0x41eb9e  push     edx
+0x41eb9f  call     0x401753
+0x41eba4  mov      ecx, dword ptr [esi + 0x38]
+0x41eba7  add      esp, 8
+0x41ebaa  mov      dword ptr [ecx + 0x14], eax
+0x41ebad  mov      dword ptr [ecx + 0x18], edx
+0x41ebb0  mov      edx, dword ptr [esi + 0x1c]
+0x41ebb3  mov      al, byte ptr [edx + 0x34]
+0x41ebb6  test     al, al
+0x41ebb8  jne      0x41ebfa
+0x41ebba  mov      eax, dword ptr [esi + 8]
+0x41ebbd  mov      ecx, dword ptr [esi + 4]
+0x41ebc0  push     0
+0x41ebc2  push     0x41000001
+0x41ebc7  push     eax
+0x41ebc8  lea      edx, [esp + 0x28]
+0x41ebcc  push     ecx
+0x41ebcd  push     edx
+0x41ebce  call     0x4023c4
+0x41ebd3  mov      ecx, 5
+0x41ebd8  mov      esi, eax
+0x41ebda  lea      edi, [esp + 0x1c]
+0x41ebde  add      esp, 0x14
+0x41ebe1  rep movsd dword ptr es:[edi], dword ptr [esi]
+0x41ebe3  lea      eax, [esp + 8]
+0x41ebe7  mov      ecx, 0x4ad4cc
+0x41ebec  push     eax
+0x41ebed  call     0x401686
+0x41ebf2  pop      edi
+0x41ebf3  xor      al, al
+0x41ebf5  pop      esi
+0x41ebf6  add      esp, 0x28
+0x41ebf9  ret      
+0x41ebfa  pop      edi
+0x41ebfb  mov      al, 1
+0x41ebfd  pop      esi
+0x41ebfe  add      esp, 0x28
+0x41ec01  ret      
+0x41ec02  nop      
+0x41ec03  nop      
+0x41ec04  nop      
+0x41ec05  nop      
+0x41ec06  nop      
+0x41ec07  nop      
+0x41ec08  nop      
+0x41ec09  nop      
+0x41ec0a  nop      
+0x41ec0b  nop      
+0x41ec0c  nop      
+0x41ec0d  nop      
+0x41ec0e  nop      
+0x41ec0f  nop      
+0x41ec10  int3     
+0x41ec11  int3     
+0x41ec12  int3     
+0x41ec13  int3     
+0x41ec14  int3     
+0x41ec15  int3     
+0x41ec16  int3     
+0x41ec17  int3     
+0x41ec18  int3     
+0x41ec19  int3     
+0x41ec1a  int3     
+0x41ec1b  int3     
+0x41ec1c  int3     
+0x41ec1d  int3     
+0x41ec1e  int3     
+0x41ec1f  int3     
+0x41ec20  int3     
+0x41ec21  int3     
+0x41ec22  int3     
+0x41ec23  int3     
+0x41ec24  int3     
+0x41ec25  int3     
+0x41ec26  int3     
+0x41ec27  int3     
+0x41ec28  int3     
+0x41ec29  int3     
+0x41ec2a  int3     
+0x41ec2b  int3     
+0x41ec2c  int3     
+0x41ec2d  int3     
+0x41ec2e  int3     
+0x41ec2f  int3     
+0x41ec30  int3     
+0x41ec31  int3     
+0x41ec32  int3     
+0x41ec33  int3     
+0x41ec34  int3     
+0x41ec35  int3     
+0x41ec36  int3     
+0x41ec37  int3     
+0x41ec38  int3     
+0x41ec39  int3     
+0x41ec3a  int3     
+0x41ec3b  int3     
+0x41ec3c  int3     
+0x41ec3d  int3     
+0x41ec3e  int3     
+0x41ec3f  int3     

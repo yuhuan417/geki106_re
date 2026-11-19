@@ -1,0 +1,81 @@
+=====  0x41cf70-0x41d040 =====
+0x41cf70  push     esi
+0x41cf71  mov      esi, ecx
+0x41cf73  mov      eax, dword ptr [esi + 0x20]
+0x41cf76  test     eax, eax
+0x41cf78  jne      0x41cfd0
+0x41cf7a  mov      ecx, dword ptr [esi + 0x24]
+0x41cf7d  test     ecx, ecx
+0x41cf7f  jne      0x41cfcc
+0x41cf81  mov      eax, dword ptr [esi + 0x1c]
+0x41cf84  inc      eax
+0x41cf85  mov      ecx, eax
+0x41cf87  mov      dword ptr [esi + 0x1c], eax
+0x41cf8a  and      ecx, 0x7f
+0x41cf8d  cmp      cl, 0x7f
+0x41cf90  jne      0x41cfa8
+0x41cf92  mov      ecx, dword ptr [esi + 8]
+0x41cf95  xor      edx, edx
+0x41cf97  cmp      ecx, 0xf0
+0x41cf9d  setge    dl
+0x41cfa0  dec      edx
+0x41cfa1  and      edx, 2
+0x41cfa4  dec      edx
+0x41cfa5  mov      dword ptr [esi + 0x24], edx
+0x41cfa8  and      eax, 0xcf
+0x41cfad  cmp      al, 0xcf
+0x41cfaf  jne      0x41cfba
+0x41cfb1  push     0
+0x41cfb3  mov      ecx, esi
+0x41cfb5  call     0x40213f
+0x41cfba  cmp      dword ptr [esi + 0x1c], 0x280
+0x41cfc1  jne      0x41cffd
+0x41cfc3  mov      dword ptr [esi + 0x20], 1
+0x41cfca  jmp      0x41cffd
+0x41cfcc  test     eax, eax
+0x41cfce  je       0x41cfde
+0x41cfd0  mov      ecx, dword ptr [esi + 4]
+0x41cfd3  mov      edx, dword ptr [esi + 0x28]
+0x41cfd6  cmp      ecx, edx
+0x41cfd8  jge      0x41cfde
+0x41cfda  inc      eax
+0x41cfdb  mov      dword ptr [esi + 0x20], eax
+0x41cfde  mov      eax, dword ptr [esi + 0x24]
+0x41cfe1  test     eax, eax
+0x41cfe3  je       0x41cffd
+0x41cfe5  mov      ecx, dword ptr [esi + 8]
+0x41cfe8  xor      edx, edx
+0x41cfea  cmp      ecx, 0xf0
+0x41cff0  setge    dl
+0x41cff3  dec      edx
+0x41cff4  and      edx, 2
+0x41cff7  dec      edx
+0x41cff8  add      edx, eax
+0x41cffa  mov      dword ptr [esi + 0x24], edx
+0x41cffd  mov      eax, dword ptr [esi + 0x20]
+0x41d000  mov      ecx, dword ptr [esi + 4]
+0x41d003  add      ecx, eax
+0x41d005  mov      edx, dword ptr [esi + 8]
+0x41d008  mov      dword ptr [esi + 4], ecx
+0x41d00b  mov      ecx, dword ptr [esi + 0x24]
+0x41d00e  push     ecx
+0x41d00f  push     eax
+0x41d010  mov      eax, dword ptr [esi + 0x38]
+0x41d013  add      edx, ecx
+0x41d015  add      eax, 0x14
+0x41d018  mov      dword ptr [esi + 8], edx
+0x41d01b  push     eax
+0x41d01c  call     0x401415
+0x41d021  mov      eax, dword ptr [esi + 4]
+0x41d024  add      esp, 0xc
+0x41d027  cmp      eax, 0x298
+0x41d02c  jge      0x41d03c
+0x41d02e  mov      eax, dword ptr [esi + 0x18]
+0x41d031  test     eax, eax
+0x41d033  je       0x41d03c
+0x41d035  mov      eax, 1
+0x41d03a  pop      esi
+0x41d03b  ret      
+0x41d03c  xor      eax, eax
+0x41d03e  pop      esi
+0x41d03f  ret      
