@@ -2998,8 +2998,9 @@ def _beh_411040(self, e) -> bool:
       （param=1 = 火口残留）；`return x > -0x18`（0x4110AF setg）。
     [0x24]!=0 火口段：`[0x1C]++` 每帧，`(t&7)==0` 时 rect 滑 0x30（口部动画），
       `t==0x38` 自灭。"""
+    # 0x411049：**无条件** [0x18]=−1（俯冲段与火口段都不可击破），旧实现只在俯冲段设。
+    e.d32(0x18, 0xFFFFFFFF)
     if e.s32(0x24) == 0:                             # 0x411052 俯冲段
-        e.d32(0x18, 0xFFFFFFFF)                      # 0x411049
         acc = e.s32(0x20)
         y = (e.s32(0x08) + acc) & 0xFFFFFFFF         # 0x411061
         e.d32(0x20, (acc + 1) & 0xFFFFFFFF)          # 0x411063 inc
@@ -3442,7 +3443,8 @@ def _beh_4118C0(self, e) -> bool:
         cnt = e.s32(0x24) + 1
         e.d32(0x24, cnt & 0xFFFFFFFF)
         if cnt == 0x19:
-            e.d32(4, (x - 0x128) & 0xFFFFFFFF)
+            # 0x4118EF 只写 [0x1C]=x−0x128；[4] 由随后的公共位移 +[0x20](−8) 更新。
+            # 旧实现额外写一次 [4]，机体在折返帧多瞬移 0x128。
             e.d32(0x20, -8)
             e.d32(0x1C, (x - 0x128) & 0xFFFFFFFF)
             e.d32(0x24, 0)
@@ -10065,8 +10067,9 @@ def _beh_4114C0(self, e) -> bool:
     e.d32(0x1C, t)
     if t == 0xA and e.s32(0x20) != 0:
         v = e.s32(0x20)
-        xx = (((v - 1) & 7) + 2) * 80
-        self._p4_ent43c(0x24000009, xx, -0x18)
+        # 0x4114DD lea ecx,[eax-1] 是 **param**；0x4114E0 的 x 用 eax&7（不是 v−1）
+        xx = ((v & 7) + 2) * 80
+        self._p4_ent43c(0x24000009, xx, -0x18, v - 1)
         e.m[0x10] = 1
     x = (e.s32(0x04) - (t >> 4)) & 0xFFFFFFFF     # 0x411530/535：x -= t>>4
     y = (e.s32(0x08) + (t >> 3)) & 0xFFFFFFFF     # 0x41152D/533：y += t>>3
