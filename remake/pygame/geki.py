@@ -1493,7 +1493,7 @@ class Pages(Page4Mixin):
         if self.page == 12:
             return self.page12_step()             # 0x4538E0
         if self.page == 14:
-            return self.page14_step()             # 0x453EA0
+            return self.flags.is_empty() and self.page14_step()  # 0x459585 / 0x453EA0
         if self.page in (8, 9, 10):
             # 0x4594FD：`enter(); if (al) do { step() } while (al); finish()`
             # —— 进场返回假（旗标非空）时整个帧循环被跳过
@@ -1524,7 +1524,7 @@ class Pages(Page4Mixin):
         elif self.page == 12:
             self.page12_finish()                  # 0x453970
         elif self.page == 14:
-            self.page14_finish()                  # 0x453EA0 后半
+            self.page14_finish()                  # 0x4540A0
         elif self.page in (8, 9, 10):
             self.page_results_finish()            # 0x4535A0
         elif self.page == 11:
@@ -2447,12 +2447,11 @@ class Pages(Page4Mixin):
                     (0x12, 0x18), (0x13, 0x1F))          # 0x453BA0..0x453D2E
 
     def page14_enter(self) -> None:
-        """`0x453A60`：theatre←选机 → 装内置回放（0x45D930）→ 头参数写配置 →
+        """`0x453A60`：保存配置 → 装内置回放（0x45D930）→ 头参数写配置 →
         清状态 → 亮度 → 层/输入/音效 → 0x458D60 阶段初始化 → VM 装链 → 跑一帧。"""
         self.flags.clear()
         self.screen_fill = -1
-        slot = self.keys.field(0xC000) & 0xFFFF
-        self.theatre = slot                               # 0x453A74 [0x4AB5C8] = eax
+        self.theatre = self.keys.bits                     # 0x453A68..0x453A74
         hdr = self.p4_45d930()                            # 0x453A8B/0x453A9A
         if hdr is None:                                   # 0x45D9DA xor al,al → 离页
             self.flags.set(0x10000)
@@ -2570,6 +2569,9 @@ class Pages(Page4Mixin):
         return self.flags.is_empty()                      # 0x453FFF 0x45AFF0(0x4AB5C0,0)：旗标空 = 继续
 
     def page14_finish(self) -> None:
+        self.midi_stop()                                 # 0x4540A8
+        if not self.timer.kill():                         # 0x4540B2
+            self.flags.set(0x40)
         self.canvas.fill(0xB4); self.present()
         self.canvas.fill(0xB4); self.present()
         self.layers.free_all()
@@ -2579,8 +2581,19 @@ class Pages(Page4Mixin):
         if _orig is not None:
             self.inp.set_preset4 = _orig
             del self.inp._p14_orig_set_preset4
-        # 0x4540A0 收尾：0x10000 → 页2（attract 循环），0x200 → 页3
-        self.page = 2 if self.flags.bits & 0x10000 else 3
+        # 0x4540FD..0x454156：恢复演示临时覆盖的三个配置位。
+        mask = 0x203
+        self.keys.bits = (self.keys.bits & ~mask) | (self.theatre & mask)
+        self.theatre = self.keys.bits
+        exit_flag = self.flags.lowest()
+        if exit_flag in (FLAG_CLICK, FLAG_ESC):
+            slot = self.keys.field(0xC000)
+            self.keys.set_field(0xC000, slot + 1 if slot < 2 else 0)
+            self.page = 2 if exit_flag == FLAG_CLICK else 3  # 0x10000 -> 0x454185; 0x200 -> 0x4541C9
+        elif exit_flag == 0x100:
+            self.page = 0
+        else:
+            self.page = 0xFF
 
     def _load_pal(self, idx: int):
         """加载第 idx 号调色板（从 pages_data.json 的 palettes）。"""
@@ -6503,35 +6516,21 @@ class Pages(Page4Mixin):
                 self.band_scroll_for(sp, fr)
                 self.log(f"page2 t={t} band scroll speed={sp} frames={fr}")
 
-        # 记录流窗口（0x43FA2D）：**只在 [start, end) 内**才 0x459D60 取一帧并贴屏；
-        # 原实现只判了 end（`end >= t`），导致 t<-350 就开始播 ⇒ 页2 开头闪出记录里的一小块
-        # 红色「撃」（玩家实测：图3 之前有一闪而过的小红字）。
-        # 窗口判定（0x43FA35 `jl`：`end < t` 才跳过；0x43FA5D `jle`：`next.start <= t` 才继续走）
-        # ⇒ 活跃窗口 = **闭区间 [start, end]**。全 5 段长度合计 = 3+171+515+429+945 = 2063+5 = 2068，
-        # 正好等于资源 77 的记录帧数（之前写成左闭右开，每段少 1 帧 ⇒ 最后 5 条永远播不到，
-        # 流播完的 flags |= 1 也就永不触发，页2 到不了页3）。
+        # 0x43FA2D..0x43FA5F 只在闭区间 [start, end] 内调用 0x459D60。
+        # 五个窗口合计 2068 帧，正好用完资源 77。
         if self.p2_stream is not None:
             for (s0, s1) in p2.get("windows", []):
                 if int(s0) <= t <= int(s1):
                     recs = self.p2_stream.advance()
                     if recs is None:
-                        self.flags.set(1)                    # 0x43FA47：流播完 → flags |= 1
-                        self.log(f"page2 t={t} 记录流结束 → flags=0x{self.flags.bits:X}")
+                        self.flags.set(1)                    # 0x43FA47：窗口内读取失败
+                        self.log(f"page2 t={t} 记录流读取失败 → flags=0x{self.flags.bits:X}")
                     else:
                         for (lay, src, dst) in recs:
                             lay_tab = self.layers.tab.get(lay)
                             if lay_tab is not None:
                                 self.canvas.blit_scaled(lay_tab.buf, src, dst, key=0)
                     break
-            # 0x459D60 播完后返回 0 ⇒ 0x43FA47 `flags |= 1`。窗口表 5 段闭区间合计正好 2068
-            # （= 资源77 帧数），所以"发现播完"的那一次调用必落在最后一个窗口之后
-            # （t > 4299）；不补这一步，页2 就永远等不到收尾旗标。
-            if t > int(p2["windows"][-1][1]) and self.p2_stream.pos >= self.p2_stream.size:
-                # 原码 0x43FA47 `flags |= 1` → 0x452FE7 映射到页 0xFF；
-                # 页 0xFF 的处理器 0x4595A8 会打印 "This program will be closed."(0x4A4A64)
-                # 并把页号清 0，随后 0x4595CD 调 PostQuitMessage ⇒ **不点鼠标就自动关游戏**。
-                self.flags.set(1)
-                self.log(f"page2 t={t} 记录流已播完 → flags=0x{self.flags.bits:X}")
 
         # 快照/拷贝表（0x43FB03）
         for (tt, lay, flag) in p2.get("copy", []):
@@ -6595,7 +6594,7 @@ class Pages(Page4Mixin):
         if t == 0:
             self.log(f"page2 t={t} 帧门基准清零（0x45A630(0x4AB570,0)）")
 
-        # ⑮ 0x440E19：t == 0x10F7 → flags |= 0x10000（去页3；正常流程 t=4300 已被 ⑤ 抢先）
+        # ⑮ 0x440E19：t == 0x10F7 → flags |= 0x10000（去页3）
         if t == 0x10F7:
             self.flags.set(FLAG_CLICK)
             self.log(f"page2 t={t} flags=0x{self.flags.bits:X}（0x440E19）")
