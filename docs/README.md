@@ -4,18 +4,19 @@
 [ANALYSIS.md](../ANALYSIS.md)；实现进度以当前源码与 Git 提交为准。历史推导不作为现行结论，
 地址结论须回到原始 `geki106.exe` 核对。
 
-## 当前状态（2026-11-17）
+## 当前状态
 
 | 范围 | 当前状态 | 依据 |
 |---|---|---|
 | 页1/2/3/13 | 视觉冻结；16 张金标为回归护栏 | `remake/golden_pages.json`、`remake/regress_pages.py` |
-| 页4/11 | 游戏与回放共用逻辑；页4行为和流程已大幅落地，完整关卡覆盖仍需持续验证 | `remake/pygame/page4.py`、`remake/audit_p4.py` |
-| 页5 | 页流程和回放入口已接入；排行文字格与选中行详情尚未完整复刻 | [p5_rank_notes.md](p5_rank_notes.md) |
-| 页6 | enter/step/finish、设置行表和网格动画已实现；设置保存的跨进程持久化仍未闭合 | [p5_rank_notes.md](p5_rank_notes.md)、`ANALYSIS.md` §15.4 |
-| 页12/15 | 鍛錬流程已贯通验证；页15全链路测试通过 | 源码与 `ANALYSIS.md` §14 |
-| 过关流程 | **未闭合**：Boss 击破后应经页8（关卡过场）再入下一关，复刻尚未实现页8 | `ANALYSIS.md` §15.1 |
+| 页4/11 | 游戏与回放共用逻辑；流程、实体行为与武器链主体已实现，逐型审计状态见矩阵 | `remake/pygame/page4.py`、`remake/audit_*.py` |
+| 页5 | 页流程、排行读表与回放入口已接入；完整排行浏览画面尚未逐字节（页跳转 §6 D9） | [p5_rank_notes.md](p5_rank_notes.md) |
+| 页6 | enter/step/finish、18 项交互行、网格动画、GRCD 配置位/排行持久化已实现；键位 blob 仍为会话内镜像 | [p6_settings.md](p6_settings.md) |
+| 页8/9/10 | Edg1/Edg2/ExtrEnding、制作名单与解锁档已实现 | 源码、页跳转 §1 |
+| 页12/15 | 鍛錬流程已贯通；页15 附加关行为链部分闭合（页跳转 §6 D8） | 源码与 `ANALYSIS.md` §14 |
+| 音频 | 波形/旋律按 exe 语义；BGM 由 fluidsynth 离线渲染、后台线程 + 预渲染 | `ANALYSIS.md` §11、`remake/pygame/audio.py` |
 
-“实现”不自动代表已与原作逐像素或全流程验证。未闭合问题以 `ANALYSIS.md` §15 为准。
+“实现”不自动代表已与原作逐像素或全流程验证。未闭合问题以 `ANALYSIS.md` §15（当前 7 项）为准。
 
 ## 专题规格
 
@@ -44,6 +45,8 @@ python3 remake/regress_pages.py     # 16 张冻结金标
 python3 remake/audit_p4.py          # exe 不变量
 python3 remake/audit_ctor.py        # 180 个 ctor case 字段
 python3 remake/audit_beh.py         # 行为覆盖 + 入口合法性
+python3 remake/audit_props.py       # 7 张属性表 vs exe
+python3 remake/check_behaviors.py   # 行为登记 + 154 型冒烟
 python3 remake/longrun_p4.py 3000   # 随机输入长跑
 python3 remake/replay_scripts.py    # 26 条脚本链回放
 ```
