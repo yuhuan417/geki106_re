@@ -709,13 +709,15 @@ for _k, _i in ((0, 0), (6, 1), (10, 2), (16, 3), (24, 4), (32, 5),
                (48, 6), (72, 7), (108, 8), (160, 9), (240, 10)):
     BG_KIND_IDX[_k] = _i
 
-# `0x4987F4` 调色板重映射表 A（0x44D290 的 COLORFILL 色号经它变换；remap_tables.json 提取件）
+# `0x4987F4` / `0x4988F4`：调色板索引重映射表。
 try:
     with open(os.path.join(os.path.dirname(os.path.dirname(
         os.path.dirname(os.path.abspath(__file__)))), "remap_tables.json")) as _rf:
-        P4_REMAP_A = bytes(json.load(_rf)["remap_A"])
+        _remaps = json.load(_rf)
+        P4_REMAP_A = bytes(_remaps["remap_A"])
+        P4_REMAP_B = bytes(_remaps["remap_B"])
 except Exception:                                       # 文件缺失时按恒等
-    P4_REMAP_A = bytes(range(256))
+    P4_REMAP_A = P4_REMAP_B = bytes(range(256))
 
 
 def _p4_trunc10(v: int) -> int:

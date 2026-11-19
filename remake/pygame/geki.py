@@ -36,7 +36,7 @@ REMAKE = HERE.parent
 GAME_DIR = Path(os.environ.get("GEKI_DIR", REMAKE.parent.parent / "geki106"))
 DATA_PATH = REMAKE / "pages_data.json"
 
-from page4 import Page4Mixin, P4_SE_SLOTS
+from page4 import Page4Mixin, P4_REMAP_A, P4_REMAP_B, P4_SE_SLOTS
 
 W, H = 640, 480
 
@@ -328,6 +328,7 @@ class Layers:
         self.data = data
         self.strings: dict[str, str] = data["string_table"]
         self.tab: dict[int, Layer] = {n: Layer(W, H) for n in range(14)}
+        self.cg40 = False
 
     def create(self, n: int, w: int, h: int) -> bool:
         """0x44C560：销毁并重建层表面。"""
@@ -387,6 +388,12 @@ class Layers:
             lay.bind_id = ggd_id
             return True
         w, h, px = ggd_load(p)
+        if self.cg40:
+            # 0x44BF7A..0x44C0A2：按 GGD 资源 ID 选择索引表。
+            if 0x10 <= ggd_id < 0x90 and 1 <= (ggd_id & 0xF) <= 0xA:
+                px = np.frombuffer(P4_REMAP_A, dtype=np.uint8)[px]
+            elif ggd_id in (0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x80, 0x8C):
+                px = np.frombuffer(P4_REMAP_B, dtype=np.uint8)[px]
         # 0x44C640 → 0x44BE10：层表面**按资源尺寸**建立，不是固定 640×480。
         # bm_cm48 是 240×528（页13 层0），旧版把它裁到 480 行 ⇒ y≥0x1E0 的精灵
         # （如 0x120D112B 的 (0x78,0x1F8,0x8F,0x20F)）永远贴不出来。
@@ -401,6 +408,12 @@ class Layers:
         lay.bind_id = ggd_id          # 记录“这一层当前装的是哪个 GGD”
         lay.dirty = True
         return True
+
+    def reload_bound(self) -> None:
+        """0x44CF10：重读已绑定图层的 GGD，按当前背景明度映射。"""
+        for n, layer in self.tab.items():
+            if layer.bind_id > 0 and layer.bind_id != 5:
+                self.load(n, layer.bind_id)
 
     def copy(self, src: int, dst: int, rect=(0, 0, W, H), pt=(0, 0)) -> None:
         """0x44D060(src,dst,pt,rect)：把层 src 的 rect 拷到层 dst 的 pt（Blt，flags 0x10）。"""
@@ -1293,14 +1306,6 @@ class Pages(Page4Mixin):
         self.keys.bits = 0x0010181C
         self.disp_cfg = KeyMgr()                   # 0x4AB5B8（亮度/对比度等显示配置字段）
         self.disp_cfg.bits = 0x64C80210
-        # 0x4987F4 调色板重映射表 A（0x44D290 色带填充的色号变换；行 12 门控）
-        try:
-            import json as _json
-            from pathlib import Path as _Path
-            with open(_Path(__file__).resolve().parent.parent / "remap_tables.json") as _rf:
-                self._band_remap_a = bytes(_json.load(_rf)["remap_A"])
-        except Exception:
-            self._band_remap_a = None
         self._adjust_bgm_i = 0
         self._adjust_bgm_dirty = False
         self._adjust_pal_dirty = False
@@ -1339,6 +1344,7 @@ class Pages(Page4Mixin):
         self.trailq = []
         self.rng_seed = 0            # `0x5D3E38`：`0x45AD00` 的 LCG 种子，BSS 初值 0
         self.layers = Layers(data)
+        self.layers.cg40 = bool(self.keys.test(0x40))  # 0x458470：从配置初始化背景明度
         self.page = 0
         self.ui52c: list[UiEntity] = []
         self.ui4fc: list[UiEntity] = []
@@ -1622,12 +1628,10 @@ class Pages(Page4Mixin):
             print(f"[banddraw] f={self.p4_frames} start={self.band_start} scroll={self.band_scroll} count={self.band_count}", flush=True)
         scroll = self.band_scroll
         cnt = max(self.band_count, 1)
-        remap = getattr(self, "_band_remap_a", None)
-        use_remap = bool(remap) and getattr(self.layers, "cg40", 0)
         while y < H:                         # 0x4562A0 只看 y，不查表项数（越界环绕）
             color, h = self.band_table[i % cnt]
-            if use_remap:
-                color = remap[color & 0xFF]
+            if self.layers.cg40:
+                color = P4_REMAP_A[color & 0xFF]
             hh = h - scroll
             scroll = 0                      # 只对起始条生效
             if y + hh > H:
@@ -2644,11 +2648,10 @@ class Pages(Page4Mixin):
             else:
                 self.keys.bits |= 0x800
         elif cmd == 5:                     # F4 背景明度切替（0x4590AC）
-            if self.keys.test(6):
-                self.keys.bits &= ~6
-            else:
-                self.keys.bits |= 6
-            # 0x45AF30(0x40)/0x45AFF0(0x40) + 色带/调色板重算
+            self.keys.bits ^= 0x40
+            self.layers.cg40 = bool(self.keys.test(0x40))
+            self.layers.reload_bound()   # 0x4590D4 → 0x44CF10
+            self.pal_flags |= 1
             self.log("cmd.f4: 背景明度")
         elif cmd in (6, 7):                # F5/F6 彩度 ±10（0x4590DC/0x45911F）
             f = self.disp_cfg.field(0xFE000000)
@@ -4395,10 +4398,8 @@ class Pages(Page4Mixin):
             self.disp_cfg.set_field(0x1FC0000, cur & 0xFFFFFFFF)
             self._adjust_pal_dirty = True            # 0x444DC6 [esp+0x13]=1
         elif row == 12:                              # 0x444DD0 切替 XOR 0x40
-            self.keys.bits ^= 0x40                   # 0x45AF90 XOR（旧版 OR ⇒ 切不回来）
-            # 0x44DCD0 byte[0x4AA7B0+0x86] = test(0x40)：層ブリット 0x44D2A4 の
-            # パレットリマップ有効フラグ（0x4987F4 表）——描画側リマップ pass 未搭載
-            self.layers.cg40 = 1 if self.keys.test(0x40) else 0
+            self.keys.bits ^= 0x40                   # 0x45AF90
+            self.layers.cg40 = bool(self.keys.test(0x40))  # 0x444DEE → 0x44DCD0
         elif row == 13:                              # 0x444DF8 切替 XOR 0x20
             self.keys.bits ^= 0x20                   # 0x45AF90 XOR
             self.layers.cg20 = 1 if self.keys.test(0x20) else 0   # 0x44DCB0 byte[0x85]
