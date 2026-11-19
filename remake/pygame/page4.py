@@ -15244,9 +15244,9 @@ def _beh_4417D0(self, e) -> bool:
 
 
 def _beh_442C70(self, e) -> bool:
-    """`0x442C70`（0x64000002，关2 背景板条控制器）。
+    """`0x442C70`（0x64000002）：树海场景的「草」字块控制器。
 
-    态0：[0x2C]-=2（x 漂移）；[0x20]==0x3C → 态1。态1：sysb8 bit0 置 → 态2、
+    态0：[0x2C]-=2（基准 y 上移）；[0x20]==0x3C → 态1。态1：sysb8 bit0 置 → 态2、
     [0x20]=[0x24]=0。态2：[0x20]==0x78 → 态3、[0x24]=0x24、[0x28]=0。
     态3：sysb8 bit0 清 → [0x20]=0、态4。态4：[0x20]==0x78 → 灭。
     尾（0x442C9D）：[0x20]++、[0x28]+=[0x24]；态≤1 且新 [0x28]<0x280 →
@@ -15276,17 +15276,16 @@ def _beh_442C70(self, e) -> bool:
             return False
     st = e.s32(0x1C)                                   # 0x442CA0 尾用新态
     e.d32(0x20, (e.s32(0x20) + 1) & 0xFFFFFFFF)
-    y = (e.s32(0x28) + e.s32(0x24)) & 0xFFFFFFFF
-    e.d32(0x28, y)
-    ys = y - 0x100000000 if y & 0x80000000 else y
+    x = _p4_s32(e.s32(0x28) + e.s32(0x24))
+    e.d32(0x28, x & 0xFFFFFFFF)
     if st <= 1:
-        if ys < 0x280:                                 # 0x442CBF jge（有符号）
-            self.p4_op5_ui4fc_spawn(0x54000001, y, e.s32(0x2C), id(e) & 0x7FFFFFFF)
-            e.d32(0x28, (y + 0x60) & 0xFFFFFFFF)
+        if x < 0x280:                                  # 0x442CBF
+            self.p4_op5_ui4fc_spawn(0x54000001, x, e.s32(0x2C), e)
+            e.d32(0x28, (x + 0x60) & 0xFFFFFFFF)
     elif st == 3:
-        if ys > -0x60:                                 # 0x442D99 jle
-            self.p4_op5_ui4fc_spawn(0x54000001, y, e.s32(0x2C), id(e) & 0x7FFFFFFF)
-            e.d32(0x28, (y - 0x60) & 0xFFFFFFFF)
+        if x > -0x60:                                  # 0x442D99
+            self.p4_op5_ui4fc_spawn(0x54000001, x, e.s32(0x2C), e)
+            e.d32(0x28, (x - 0x60) & 0xFFFFFFFF)
     return True
 
 
@@ -15664,21 +15663,15 @@ def _beh_441E00(self, e) -> bool:
 
 
 def _beh_44A000(self, e) -> bool:
-    """`0x44A000`（0x54000001 输送带板条，ctor 0x44924F）：父 = [0x1C]（生成方
-    0x64000002 句柄）；x += 父[0x24]（滚动 −0xA/0x24）、y += 父[0x2C]（行漂 −2）；
-    0x401753(x,y) → 节点 dst；存活 −0x90 < x < 0x310（0x44A035）。"""
-    parent = self.p4_links.get(e.s32(0x1C) & 0x7FFFFFFF)
-    x = e.s32(0x04)
-    y = e.s32(0x08)
-    if parent is not None:
-        x = (x + parent.s32(0x24)) & 0xFFFFFFFF
-        y = (y + parent.s32(0x2C)) & 0xFFFFFFFF
-    e.d32(0x04, x)
-    e.d32(0x08, y)
+    """`0x44A000`（0x54000001）：x 累加父项速度，y 取父项基准加自身抖动。"""
+    parent = e.p["parent"]
+    x = _p4_s32(e.s32(0x04) + parent.s32(0x24))         # 0x44A00C
+    y = _p4_s32(e.s32(0x20) + parent.s32(0x2C))         # 0x44A01A
+    e.d32(0x04, x & 0xFFFFFFFF)
+    e.d32(0x08, y & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = (x, y)
-    xs = x - 0x100000000 if x & 0x80000000 else x
-    return -0x90 < xs < 0x310                      # 0x44A035 两向出屏
+    return -0x90 < x < 0x310                           # 0x44A035
 
 
 def _beh_44A070(self, e) -> bool:
@@ -15714,7 +15707,7 @@ def _beh_449F10(self, e) -> bool:
     return node.dst[0] < 0x298
 
 
-def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
+def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int | Ent):
     """op5 控制器对 0x4AD4FC 的直生成（0x430400 + 0x40128A→0x44B140，ctor 0x449150）。
     0x54000001/0x54000003/0x56000001 的 ctor case + 0x51 族转 p4_51_spawn。"""
     if (typ & 0xFF000000) == 0x51000000:
@@ -15726,7 +15719,8 @@ def p4_op5_ui4fc_spawn(self, typ: int, x: int, y: int, prm: int):
     if typ == 0x54000001:                          # 0x44924F
         e.d32(0x40, 0x402252)
         e.beh = 0x44A000
-        e.d32(0x1C, prm & 0xFFFFFFFF)              # rec3 = 生成方句柄
+        e.p["parent"] = prm                        # 0x44925B：rec3 是 0x64000002 指针
+        e.d32(0x1C, id(prm) & 0x7FFFFFFF)
         e.d32(0x20, (self.p4_rand_mod(0x20)[1] - 0x10) & 0xFFFFFFFF)  # 0x449264 ±抖动
         e.node = DNode(2, 0x180, 0x60)
         e.node.rect = (0x180, 0x60, 0x1DF, 0xBF)
