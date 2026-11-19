@@ -1543,6 +1543,25 @@ class Ent:
             self.d32(0x20, a & 0xFFFFFFFF)
         if "r1_24" in info:
             self.d32(0x24, b & 0xFFFFFFFF)
+        if "s29015" in info:                           # 0x41C51D（0x29000015）
+            # [0x28] = (p3!=0 ? 0x82 : 0)；[0x2C] = p3（0x41C53E..0x41C54E）
+            self.d32(0x28, 0x82 if d != 0 else 0)
+            self.d32(0x2C, d & 0xFFFFFFFF)
+        if "s29016" in info:                           # 0x41C55D（0x29000016）
+            # [0x1C]=p3[0]、[0x20]=p3[1]、[0x24]=p3[2]，其余清 0。
+            # exe 的 p3[0]/p3[1] 在 0x41F873 是未初始化栈槽（UB），复刻按 0 传。
+            if isinstance(d, tuple) and len(d) >= 3:
+                self.d32(0x1C, int(d[0]) & 0xFFFFFFFF)
+                self.d32(0x20, int(d[1]) & 0xFFFFFFFF)
+                self.d32(0x24, int(d[2]) & 0xFFFFFFFF)
+                for off in (0x28, 0x2C, 0x30):
+                    self.d32(off, 0)
+        if "s2901e" in info:                           # 0x41C8C8（0x2900001E）
+            # y==−0x18 → rect(0x180,0xF0,0x1AF,0x11F)，否则 (0x180,0x120,0x1AF,0x14F)；
+            # 本 case **不写 dst**（0x41C975 只拷 rect 4 dword）。
+            if self.node is not None:
+                self.node.rect = ((0x180, 0xF0, 0x1AF, 0x11F) if b == -0x18
+                                  else (0x180, 0x120, 0x1AF, 0x14F))
         if "p25000a" in info:                          # 0x411FFE（0x2500000A）
             # param 结构 {父指针, 索引}：0x41200B [0x1C]=p[0]、0x412016 [0x20]=p[1]、
             # 其后 [0x24]/[0x28]/[0x2C]/[0x30] 全清 0（0x412019..0x412025）。
@@ -2747,10 +2766,10 @@ ENT29_INIT = {
     0x29000010: {"beh": 0x401EFB, "s10_fields": True},
     0x29000011: {"beh": 0x4010BE, "imm": {0x1C: 0, 0x20: 0x10, 0x24: -2}},
     0x29000012: {"beh": 0x4023A1, "z1c": True, "d_to": 0x20},
-    0x29000013: {"beh": 0x4017E9, "z1c": True},
+    0x29000013: {"beh": 0x4017E9, "z1c": True, "r1sh": (0x20, 5)},
     0x29000014: {"beh": 0x4018CF, "z1c": True, "d_to": 0x20},
-    0x29000015: {"beh": 0x401398, "imm": {0x24: -8}, "d_to": 0x28},
-    0x29000016: {"beh": 0x4018A7},
+    0x29000015: {"beh": 0x401398, "imm": {0x24: -8}, "s29015": True},
+    0x29000016: {"beh": 0x4018A7, "s29016": True},
     0x29000017: {"beh": 0x40217B, "imm": {0x1C: 0, 0x20: 0x10}, "d_to": 0x24},
     # —— 0x29000018..0x29000021（2026-11-11 按各自 ctor case 重读修正）——
     # 0x29000018（0x41C5CC）：+0x1C=(p3!=0)?0x8000:0、+0x20=0、+0x24=p0<<2、+0x28=p1<<2、+0x2C/30=0
@@ -2780,7 +2799,7 @@ ENT29_INIT = {
     0x2900001D: {"beh": 0x40209F, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C,
                  "r0_20": True, "r1_24": True,
                  "node_custom": {"dst": (-0x30, -0x30), "active": 0}},
-    0x2900001E: {"beh": 0x401474, "imm": {0x20: 0x40, 0x24: 0}, "d_to": 0x1C},
+    0x2900001E: {"beh": 0x401474, "imm": {0x20: 0x40, 0x24: 0}, "d_to": 0x1C, "s2901e": True},
     # 0x2900001F（0x41C99E）：x=-0xA0、+0x1C=p3、+0x20=*p0、+0x24=*(p0+4)+0x18、+0x28=0、
     #   rect=*(p0+8)?if:else（生成点填）
     0x2900001F: {"beh": 0x401F6E, "imm": {0x04: -0xA0, 0x28: 0}, "d_to": 0x1C,
@@ -3084,7 +3103,7 @@ def _beh_411C10(self, e) -> bool:
         while part is not None and not part.alive:
             h = part.g32(0x20)
             e.d32(0x20, h)
-            part = self._deref_link(h)
+            part = getattr(self, "p4_links", {}).get(h & 0x7FFFFFFF)
     elif y < 0x1B0:                                # 0x411C7A
         x -= 1
         y += 2
@@ -8305,9 +8324,11 @@ def _beh_41F860(self, e) -> bool:
     node.dst.y += [0x24]；[0x20]−−==0 → 0x61000004 @(x,y,0x48) 入 52C（受击闪）
     → return 0（死亡）；否则 node dst 同步、return 1。"""
     if e.s32(0x20) == 0:
-        c = self._p4_ent43c(0x29000016, 0, 0)
-        c.d32(0x18, id(e) & 0x7FFFFFFF)
-        getattr(self, "p4_links", {})[id(e) & 0x7FFFFFFF] = e
+        # 0x41F8A8：param[2]=本 boss（跟踪体），ctor 把它写进 [0x24]；
+        # 旧实现写到 [0x18]（HP）⇒ 护卫 HP 变成巨大 id 且永远不入相位机。
+        _h = id(e) & 0x7FFFFFFF
+        self._p4_ent43c(0x29000016, 0, 0, (0, 0, _h))
+        getattr(self, "p4_links", {})[_h] = e
         sub = e.s32(0x1C) & 3
         e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)
         if sub == 0:
@@ -8371,7 +8392,6 @@ def _beh_41F860(self, e) -> bool:
         e.node.dst = (e.node.dst[0], e.node.dst[1] + v24)
     e.d32(0x20, (e.s32(0x20) - 1) & 0xFFFFFFFF)     # 0x41FB19 无条件 dec
     if e.g32(0x18) == 0:                           # 0x41FB1F test HP / je
-        e.d32(0x20, 0xFFFFFFFF)
         self.p4_spawn52c_flash(x, e.s32(0x08), 0x61000004, 0x48)
         return False
     return True
@@ -10277,14 +10297,14 @@ def _beh_416CF0(self, e) -> bool:
         nd = e.node
         if nd is not None:                    # 0x45A790(node+4, 0x30, 0, 0x30, 0)
             nd.rect = (nd.rect[0] + 0x30, nd.rect[1], nd.rect[2] + 0x30, nd.rect[3])
-        parent = self._deref_link(e.g32(0x20))
+        parent = getattr(self, "p4_links", {}).get(e.g32(0x20) & 0x7FFFFFFF)
         if parent is not None:                       # 0x416DC5 减的是父的 [0x24]
             parent.d32(0x24, (parent.s32(0x24) - 1) & 0xFFFFFFFF)
         e.d32(0x18, -1 & 0xFFFFFFFF)
         e.m[0x10] = 1
     elif hp > 0x32:
         e.d32(0x18, -1 & 0xFFFFFFFF)
-    parent = self._deref_link(e.g32(0x20))
+    parent = getattr(self, "p4_links", {}).get(e.g32(0x20) & 0x7FFFFFFF)
     if parent is None or parent.m[0x34] == 0:
         self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
         for _ in range(4):
