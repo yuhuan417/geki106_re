@@ -879,11 +879,11 @@ def main():
         return out
 
     def overwrites(addr):
-        """记录被就地改写时的速度立即数（`C7 44 24 1C imm32`）。"""
+        """记录被就地改写时的速度立即数，压入记录地址后偏移加 4。"""
         out = []
         i = addr - ib
         end = fn_end(addr) - ib
-        pat = bytes([0xC7, 0x44, 0x24, 0x1C])
+        pat = bytes([0xC7, 0x44, 0x24, 0x20 if addr == 0x42C8F0 else 0x1C])
         while i < end - 7:
             if img[i:i + 4] == pat:
                 out.append(int.from_bytes(img[i + 4:i + 8], "little"))
@@ -895,12 +895,12 @@ def main():
         rec = records(addr)
         for extra in overwrites(addr):
             rec.append((extra, rec[0][1] if rec else 0))
-        if any(callable(vel) for _, vel, _ in shots):
-            continue                      # 随机速度由下面的字节序列断言覆盖
-        want = [(vel, tw) for tw, vel, dx in shots]
+        if mode == "rotating" or any(callable(shot[1]) for shot in shots):
+            continue                      # 三角与随机速度由下面的字节序列断言覆盖
+        want = [(shot[1], shot[0]) for shot in shots]
         if rec != want:
             bad[hex(addr)] = f"{[(hex(v), hex(t)) for v, t in rec]} != {[(hex(v), hex(t)) for v, t in want]}"
-        if mode == "single":
+        if mode in ("single", "paired"):
             cmps = [int(i.op_str.split(",")[1].strip(), 16)
                     for i in md32.disasm(img[addr - ib:fn_end(addr) - ib], addr)
                     if i.mnemonic == "cmp" and i.op_str.startswith("eax")]
@@ -945,11 +945,11 @@ def main():
 
     def _vel_px(v):
         lo, hi = _s3.unpack("<hh", _s3.pack("<I", v))
-        return (hi / 256.0, lo / 256.0)
+        return (lo / 256.0, hi / 256.0)
 
     sane, insane = 0, []
     for addr, (thr, shots, mode) in slots.items():
-        for tw, vel, dx in shots:
+        for _, vel, *_ in shots:
             if callable(vel):
                 continue
             vx, vy = _vel_px(vel)
@@ -958,9 +958,8 @@ def main():
                 insane.append((hex(addr), vx, vy))
     check("固定速度槽的分量全部在 ±32 像素/帧内（8.8 定点解读的合理性自检）",
           not insane and sane >= 12, f"{insane} / {sane}")
-    check("0x42D6A0 是唯一朝上的槽（vy < 0）",
-          [hex(a) for a, (t, sh, m) in slots.items()
-           if not callable(sh[0][1]) and _vel_px(sh[0][1])[1] < 0] == ["0x42d6a0"], "")
+    check("0x42D6A0 的固定速度水平向左",
+          _vel_px(slots[0x42D6A0][1][0][1]) == (-16.0, 0.0), "")
 
     # ---- 0x42C600 追加两发（§16.188）----
     def _imm32_after(addr):

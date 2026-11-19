@@ -36,7 +36,7 @@ REMAKE = HERE.parent
 GAME_DIR = Path(os.environ.get("GEKI_DIR", REMAKE.parent.parent / "geki106"))
 DATA_PATH = REMAKE / "pages_data.json"
 
-from page4 import Page4Mixin, P4_REMAP_A, P4_REMAP_B, P4_SE_SLOTS
+from page4 import Page4Mixin, P4_REMAP_A, P4_REMAP_B, P4_SE_SLOTS, _p4_11_nearest, page4_cos, page4_sin
 
 W, H = 640, 480
 
@@ -2717,8 +2717,10 @@ class Pages(Page4Mixin):
 
     def spawn(self, queue: list, type_word: int, x: int = 0, y: int = 0,
               a3: int = 0, a4: int = 0) -> UiEntity:
-        e = UiEntity(type_word=type_word, a3=a3, a4=a4)
         hi = type_word & 0xFF000000
+        if hi == 0x12000000 and type_word in self.FX12_TABLE:
+            return self.fx12_spawn(type_word, x, y, a3)
+        e = UiEntity(type_word=type_word, a3=a3, a4=a4)
         if hi == 0x41000000:
             # 0x41 族统一走 0x428C70 的 ctor：旧实现在这里没有分支 ⇒ 0x41000001
             # 爆炸核心、0x41000004 命中火花、0x4100000C 得分汉字等全落 default
@@ -4814,7 +4816,7 @@ class Pages(Page4Mixin):
         # 速度上限 0xA00、奇数帧 0x41000016 拖尾、0x4021E9(8) 出屏即死）
         0x12041129: ((0x100, 0xE0, 0x10F, 0xEF), "homing", 0, 0xC, 0x401BDB, 8),
         # 0x42B30E：rect 由 [+0x20] 符号二选一 (0x120/0x100,0xC0..0xCF)、16×16、层 1、
-        # [+0x30]=(a3==0)；a3!=0 → 随机方向 0x800；a3==0 → 预演 n=0xF-(帧&0xF) 帧 vy 衰减定 y；
+        # [+0x30]=(a3==0)；a3==0 → 随机方向 0x800；a3!=0 → 预演到下一 16 帧边界；
         # 行为 0x40144C→0x42BDF0（x≥0x288 才死）
         0x12061128: ((0x100, 0xC0, 0x10F, 0xCF), "drop", 0, 0xA, 0x40144C, 8),
         0x120A112F: ((0xA0, 0xC0, 0xAF, 0xCF), "burst", 0x200, 0xA, 0x401C26, 8),
@@ -4871,11 +4873,11 @@ class Pages(Page4Mixin):
         e.p["px"] = int(x) << 8                       # [+0x24]
         e.p["py"] = int(y) << 8                       # [+0x28]
         e.p["x"], e.p["y"] = int(x), int(y)           # [+4]/[+8]
-        e.d32(0x04, int(x) & 0xFFFFFFFF)               # 同步原始字段（0x43C060 碰撞读 [e+4]/[e+8]）
-        e.d32(0x08, int(y) & 0xFFFFFFFF)
+        e.raw[0x10] = 1                                # 0x42B220
+        e.d32(0x0C, life)                              # 各子构造器的碰撞半径
+        e.d32(0x18, -1 if kind == "arc2" else 1)        # 0x42B245 / 0x42B663
         # 0x42B62E/0x42B6B8：速度 = 生成记录 x（有符号 /4，cdq+and 3+sar 2）
         e.p["spd"] = int(int(x) >> 2) if speed == "x/4" else int(speed or 0)
-        e.p["vis"] = 1                                 # [+0x18] = 1（ctor）
         e.p["half"] = int(half)
         e.p["m"] = int(m)
         e.p["life"] = int(life)
@@ -4888,37 +4890,37 @@ class Pages(Page4Mixin):
             l0, r0 = (0x40, 0x5F) if flag else (0x80, 0x9F)
             e.p["rect"] = [l0, 0xE0, r0, 0xFF]
         elif kind == "drop":                      # 0x42B31C..0x42B3F9
-            e.p["dust"] = 1 if int(a3) == 0 else 0   # [+0x30]=(a3==0)
-            if e.p["dust"] == 0:
-                e.p["blink"] = 0                  # [+0x10]=0
-                vx_l, vy_l = [self._rng() - 0x7FFF], [self._rng() - 0x7FFF]
-                if self._vset(vx_l, vy_l, 0x800):  # 0x40105A(ebp,edi,0x800)
-                    e.p["vx"], e.p["vy"] = vx_l[0], vy_l[0]
+            if a3 == 0:
+                self._fx12_scatter(e, 0x800)
             else:
                 e.p["py"] = 0                     # 0x42B368 [+0x28]=0
-                n = 0xF - (self.frames & 0xF)     # 0x42B36B..0x42B379
-                e.p["cnt2"] = n                   # [+0x2C]=n（循环计数，出口为 0）
-                while n != 0:                     # 0x42B380
-                    if e.p["py"] != 0:            # 0x42B385 cmp edx,ebx
-                        e.p["vy"] += self._magic_neg26(e.p["py"])   # 0x42B389/0x42B3A0
+                n = 0xF - (self.p4_frame_no() & 0xF)     # 0x42B36B..0x42B379
+                for _ in range(n):                       # 0x42B380
+                    e.p["vy"] += self._magic_neg26(e.p["py"])
                     e.p["py"] += e.p["vy"]        # 0x42B3A2 add eax,ecx
-                    n -= 1                        # 0x42B3AA dec [+0x2C]
-                    e.p["cnt2"] = n
                 e.p["y"] = self.mirror_y() + (e.p["py"] >> 8)   # 0x42B3B0..0x42B3BD
             e.p["rect"] = ([0x120, 0xC0, 0x12F, 0xCF] if e.p["vy"] >= 0
                            else [0x100, 0xC0, 0x10F, 0xCF])  # 0x42B3D0..0x42B400
         else:
             e.p["rect"] = list(rect)
+            if kind == "follow" and a3 == 0:
+                self._fx12_scatter(e, 0xC00)             # 0x42B456..0x42B488
         rect = e.p["rect"]
         # 0x42B7D4/0x42B7D8 的减数：各支自己写（16×16 → 8、32×32 → 0x10），
         # 但 0x42B683 支走 0x42B73E ⇒ 32×32 也减 8，故不能用 rect 宽度推
         # 0x42B30E 支在 ctor 尾部之前改写 [+8]（0x42B3B0），故 dst 必须用改写后的 y
         e.p["beh40"] = beh                     # [+0x40] 行为指针（判分支用）
-        e.raw[0x10] = 1                        # 0x42B243 byte[+0x10]=1：参与碰撞
         e.d32(0x14, ty & 0xFFFFFFFF)           # 基础 ctor：[+0x14]=类型（碰撞分派读原始字段）
+        e.d32(0x04, e.p["x"])
+        e.d32(0x08, e.p["y"])
+        e.d32(0x1C, e.p["vx"])
+        e.d32(0x20, e.p["vy"])
         e.disp = DisplayNode(int(layer), list(rect),
                              [int(e.p["x"]) - half, int(e.p["y"]) - half])
-        self.ui46c.append(e)
+        if self.page == 13:
+            self.ui46c.append(e)
+        else:
+            self.ui46c.insert(0, e)                        # 0x430315 / 0x430318
         self.log(f"0x12 特效 0x{ty:X} kind={kind} beh=0x{beh:X} [+0xC]={life} @({x},{y}) rect={rect}")
         return e
 
@@ -4945,22 +4947,26 @@ class Pages(Page4Mixin):
 
     @staticmethod
     def _magic_neg26(y: int) -> int:
-        """`0x42B389 imul 0xB13B13B1 / sar 3 / shr 31 修正`：约等于 y * (−1/26) 的有符号乘。"""
-        prod = y * -1321528399
-        d = (prod >> 32) >> 3
-        d += (prod & 0xFFFFFFFF) >> 31
-        return d
+        """0x42B389 / 0x42BE15：修正位取自右移后的乘积高字。"""
+        d = (y * -1321528399) >> 35
+        return d + int(d < 0)
 
-    @staticmethod
-    def _vset(a: list, b: list, ln: int) -> bool:
-        """`0x40105A`→`0x45AC70`：把 (a[0],b[0]) 定长到 ln；分量为 0 → 返回 False。"""
-        x, y = float(a[0]), float(b[0])
-        d = (x * x + y * y) ** 0.5
-        if d == 0.0:
+    def _vset(self, a: list, b: list, ln: int) -> bool:
+        """0x45AC70：查角度、查 sin/cos、定点缩放。"""
+        if a[0] == 0 and b[0] == 0:
             return False
-        a[0] = int(x / d * ln)
-        b[0] = int(y / d * ln)
-        return True
+        ang = self.p4_45a9a0(a[0], b[0])
+        a[0] = (page4_cos(ang) * ln + 0x80) >> 8
+        b[0] = (page4_sin(ang) * ln + 0x80) >> 8
+        return bool(a[0] or b[0])
+
+    def _fx12_scatter(self, e: UiEntity, speed: int) -> None:
+        """0x42B331 / 0x42B456：命中子弹的随机初速与碰撞延迟。"""
+        e.d32(0x30, 1)
+        e.raw[0x10] = 0
+        vx, vy = [self._rng() - 0x7FFF], [self._rng() - 0x7FFF]
+        self._vset(vx, vy, speed)
+        e.p["vx"], e.p["vy"] = vx[0], vy[0]
 
     def _fx12(self, e: UiEntity) -> None:
         """行为 `0x42C320`（burst，中心**向外**爆散，三型）/ `0x42C050`（pulse，`0x120F112A`）。
@@ -4968,13 +4974,13 @@ class Pages(Page4Mixin):
         方向 = pos − target（`0x42C362 sub edi,ecx`），故为爆散而非追踪（勘误 A-36）。
         """
         if e.p.get("kind") == "homing":                # 0x42BEE0
-            tx, ty = int(self.inp.x), int(self.inp.y)  # 0x4021EE(0x4AD43C,&self,&out)
-            dx, dy = [tx - e.p["x"]], [ty - e.p["y"]]  # 0x42BF15/0x42BF23
-            if self._vset(dx, dy, 0x100):              # 0x42BF38
-                e.p["vx"] += dx[0]                     # 0x42BF51
-                e.p["vy"] += dy[0]                     # 0x42BF64
-                vx_l, vy_l = [e.p["vx"]], [e.p["vy"]]
-                if self._vset(vx_l, vy_l, 0xA00):      # 0x42BF67 限速
+            target = _p4_11_nearest(self, e.p["x"], e.p["y"])
+            if target is not None:
+                tx, ty = target
+                dx, dy = [tx - e.p["x"]], [ty - e.p["y"]]
+                if self._vset(dx, dy, 0x100):           # 0x42BF38
+                    vx_l, vy_l = [e.p["vx"] + dx[0]], [e.p["vy"] + dy[0]]
+                    self._vset(vx_l, vy_l, 0xA00)       # 0x42BF67
                     e.p["vx"], e.p["vy"] = vx_l[0], vy_l[0]
             self._fx12_integrate(e)                    # 0x42BF71
             self._fx12_place(e)                        # 0x42BF84 dst=(x-8,y-8)
@@ -4983,16 +4989,17 @@ class Pages(Page4Mixin):
             self._fx12_visibility(e)                   # 0x42BFD8 push 8
             return
         if e.p.get("kind") == "drop":                  # 0x42BDF0
-            if e.p.get("dust"):                         # 0x42BDF6 test eax,eax
-                n = e.p["dust"] + 1                     # 0x42BDFA inc eax
-                e.p["dust"] = n
-                e.p["blink"] = 1 if n > 3 else 0        # 0x42BE01 setg al
+            if e.g32(0x30):                             # 0x42BDF6
+                n = e.s32(0x30) + 1
+                e.d32(0x30, n)
+                e.raw[0x10] = int(n > 3)
                 self._fx12_integrate(e)                 # 0x42BE07
             else:
                 d = self._magic_neg26(e.p["py"])        # 0x42BE15 对 py 做衰减
                 e.p["vy"] += d                          # 0x42BE2B
                 self._fx12_integrate(e)                 # 0x42BE30
                 e.p["y"] = self.mirror_y() + (e.p["py"] >> 8)   # 0x42BE42
+                e.d32(0x08, e.p["y"])
             if e.disp:                                  # 0x42BE4D test byte,0x1F
                 if e.disp.rect[0] & 0x1F:
                     e.disp.grow(-0x10, 0, -0x10, 0)
@@ -5001,7 +5008,7 @@ class Pages(Page4Mixin):
             self._fx12_place(e)                         # 0x42BE77 dst=(x-8,y-8)
             # 0x42BE8B/0x42BE92：退出条件 = x >= 0x288（648）或 [+0x18]==0，
             # 不调 0x4021E9（本支的死亡判据与屏幕可见性无关）
-            if e.p["x"] >= 0x288 or not e.p.get("vis", 1):
+            if e.p["x"] >= 0x288 or not e.g32(0x18):
                 e.alive = False
             return
         if e.p.get("kind") == "chase":                 # 0x42BD00
@@ -5025,7 +5032,7 @@ class Pages(Page4Mixin):
                 else:
                     e.disp.grow(0x20, 0, 0x20, 0)
             self._fx12_place(e)                         # 0x42BD85 dst=(x-0x10,y-0x10)
-            if e.p["x"] >= 0x290 or not e.p.get("vis", 1):   # 0x42BD99 / 0x42BDA0
+            if e.p["x"] >= 0x290 or not e.g32(0x18):        # 0x42BD99 / 0x42BDA0
                 e.alive = False
             return
         if e.p.get("kind") == "pulse" and e.p.get("beh40") == 0x401BE5:
@@ -5038,7 +5045,7 @@ class Pages(Page4Mixin):
             if e.disp:
                 e.disp.dst[0] = e.p["x"] - 0x10        # 0x42C0BF
                 e.disp.dst[1] = e.p["y"] - 0x10
-            if not (self._on_screen(e.p["x"], e.p["y"], 0x10) and e.p.get("vis", 1)):
+            if not (self._on_screen(e.p["x"], e.p["y"], 0x10) and e.g32(0x18)):
                 e.alive = False                        # 0x42C0CE
             return
         if e.p.get("kind") == "pulse" and e.p.get("beh40") == 0x401BAE:
@@ -5053,30 +5060,16 @@ class Pages(Page4Mixin):
                 else:
                     e.disp.grow(0x20, 0, 0x20, 0)
             self._fx12_place(e, 0x10)                  # 0x42BA20 sub 0x10
-            # 0x42BA39：`[+0x2C]`（外部对象指针）非 0 才进入命中判定；ctor `0x42B683` 写 0，
-            # 页13 的两支（0x12091122/0x120B1121）直接跳到 0x42BAEC。
-            ext = e.p.get("ext", 0)                    # [+0x2C]
-            if ext:
-                e.p["cnt"] = e.p.get("cnt", 0) + 1     # 0x42BA47 inc edi / [esi+0x30]
-                # 0x42BA47..0x42BA6B：blink = (0x40145B(0x56CCB8,2) && byte[+0x10]==0)
-                blink = self._state2_bit(2) and not e.p.get("blink", 0)
-                e.p["blink"] = 1 if blink else 0       # byte[+0x10]
-                alive = ext.get("alive", True) if isinstance(ext, dict) else True
-                tgt_x = ext.get("x", 0) if isinstance(ext, dict) else 0
-                if not alive:                          # 0x42BA71 byte[eax+0x34] != 0 才保留
-                    pass
-                else:
-                    if e.p["cnt"] < 6:                 # 0x42BA78 jl 0x42BAE5
-                        e.p["ext"] = 0
-                    elif tgt_x > 0x290:                # 0x42BA7E
-                        e.p["ext"] = 0
-                    else:
-                        # 0x42BA87..0x42BAD8：投放 0x41000004 入 0x4AD4CC，
-                        # a3 = 指向 (vx>>7, vy>>7) 的两字点
-                        pt = ((e.p["vx"] >> 7) & 0xFFFFFFFF, (e.p["vy"] >> 7) & 0xFFFFFFFF)
-                        self._spawn_4100_0004(e.p["x"], e.p["y"], pt)
-                        e.alive = False                # 0x42BAD E xor al,al
+            partner = e.p.get("paired_shot")            # 0x42BA39 [+0x2C]
+            if partner is not None:
+                e.d32(0x30, e.s32(0x30) + 1)
+                e.raw[0x10] = int(self.p4_bit_none(2) and not e.raw[0x10])
+                if not partner.alive:                  # 0x42BA71 byte[partner+0x34]
+                    if e.s32(0x30) >= 6 and partner.s32(4) <= 0x290:
+                        self.spark_spawn(e.s32(4), e.s32(8), e.s32(0x1C) >> 7, e.s32(0x20) >> 7)
+                        e.alive = False
                         return
+                    del e.p["paired_shot"]
             self._fx12_visibility(e, 0x10)             # 0x42BAEC 0x4021E9(esi,0x10) + [+0x18]
             return
         if e.p.get("kind") == "pulse":                 # 0x42C050
@@ -5120,49 +5113,49 @@ class Pages(Page4Mixin):
             self.p4_spawn41(e.p["x"], e.p["y"], trail_type)   # 拖尾实体（0x42971D/0x42969D）
             self._fx12_integrate(e)                    # 0x42C194 / 0x42C293
             self._fx12_place(e)                        # 0x42C1A2 减 0xC / 0x42C29E 减 8
-            self._fx12_visibility(e)                   # push 8
+            self._fx12_visibility(e, 8)
             return
         if e.p.get("kind") == "trail":                 # 0x42BC40（0x12061124）
             self.p4_spawn41(e.p["x"], e.p["y"], 0x41000015)   # 拖尾实体（0x42960B）
             self._fx12_integrate(e)                    # 0x42BC80
             self._fx12_place(e)                        # 0x42BC87 sub 8
-            self._fx12_visibility(e)                   # 0x42BCA3 push 0x10
+            self._fx12_visibility(e, 0x10)             # 0x42BCA3
             return
         if e.p.get("kind") == "follow":                # 0x42BB80（0x12081123）
             self._fx12_integrate(e)                    # 0x42BB83
-            cnt = e.p.get("cnt", 0)
+            cnt = e.s32(0x30)
             if cnt == 0:                               # 0x42BB8D je 0x42BB9E
                 e.p["y"] = self.mirror_y()             # [+8] = [0x56CC90]
+                e.d32(0x08, e.p["y"])
             else:
                 cnt += 1                               # 0x42BB8F inc eax
-                e.p["cnt"] = cnt
-                e.p["blink"] = 1 if cnt > 3 else 0     # 0x42BB93 setg al
+                e.d32(0x30, cnt)
+                e.raw[0x10] = int(cnt > 3)             # 0x42BB93
             if e.disp:
                 if e.disp.rect[0] == 0x60:             # 0x42BBAF cmp dword [eax],0x60
                     e.disp.grow(0x18, 0, 0x18, 0)
                 else:
                     e.disp.grow(-0x18, 0, -0x18, 0)
             self._fx12_place(e)                        # 0x42BBD1 sub 0xC → dst
-            self._fx12_visibility(e)
+            self._fx12_visibility(e, 0x10)
             return
-        # ---- track：0x42C320 ----
-        tx = self.inp.x                                # 0x4021EE(0x4AD43C,&out1,&out2)：页13 取虚拟指针
-        ty = self.inp.y
-        dx = [e.p["x"] - int(tx)]                      # 0x42C362 sub edi,ecx
-        dy = [e.p["y"] - int(ty)]
-        spd = e.p["spd"] or 0
-        if self._vset(dx, dy, spd):                    # 0x42C37C
-            if (e.type_word & 0xFFFFFFFF) == 0x120A112F:   # 0x42C388 三倍速
-                dx[0] *= 3
-                dy[0] *= 3
-            e.p["vx"] += dx[0]                         # 0x42C3B7
-            e.p["vy"] += dy[0]
-            vx = [e.p["vx"]]
-            vy = [e.p["vy"]]
-            if self._vset(vx, vy, spd << 3):           # 0x42C3CC 钳到 [+0x2C]*8
+        # 0x42C320：沿远离最近敌机的方向改变速度。
+        target = ((self.inp.x, self.inp.y) if self.page == 13
+                  else _p4_11_nearest(self, e.p["x"], e.p["y"]))
+        if target is not None:
+            tx, ty = target
+            dx, dy = [e.p["x"] - tx], [e.p["y"] - ty]
+            spd = e.p["spd"]
+            if self._vset(dx, dy, spd):                 # 0x42C37C
+                mul = 3 if e.type_word == 0x120A112F else 1
+                vx = [e.p["vx"] + mul * dx[0]]
+                vy = [e.p["vy"] + mul * dy[0]]
+                self._vset(vx, vy, spd << 3)            # 0x42C3CC
                 e.p["vx"], e.p["vy"] = vx[0], vy[0]
         self._fx12_integrate(e)                        # 0x42C3D4
-        self._fx12_visibility(e)
+        if self.page != 13 and self.p4_frame_no() & 1: # 0x42C3FA
+            self.p4_spawn41(e.p["x"], e.p["y"], 0x41000019, (e.type_word,))
+        self._fx12_visibility(e, 8)
 
     def mirror_y(self) -> int:
         """`[0x56CC90]`：自机 y 镜像（页13 无自机 ⇒ 0）。"""
@@ -5190,13 +5183,6 @@ class Pages(Page4Mixin):
             self.log("0x56CCB8 状态对象未建模（ψ 页13 不可达分支），按 0 处理")
         return False
 
-    def _spawn_4100_0004(self, x: int, y: int, pt) -> None:
-        """`0x42BAB9` 的投放：`0x4023C4(rec, x, y, 0x41000004, &(vx>>7, vy>>7))` → `0x4AD4CC`。
-
-        ctor = 0x428D59（与碰撞火花同一实体）：复刻走 spark_spawn。
-        """
-        self.spark_spawn(x, y, pt[0], pt[1]) if isinstance(pt, tuple) else self.spark_spawn(x, y, 0, 0)
-
     def _fx12_visibility(self, e: UiEntity, m=None) -> None:
         """`0x4021E9`(m=半宽) 与 `[+0x18]` 的与：不满足即结束（`al && [+0x18]`）。
 
@@ -5206,7 +5192,7 @@ class Pages(Page4Mixin):
             return
         if m is None:
             m = (e.disp.rect[2] - e.disp.rect[0] + 1) >> 1
-        if not (self._on_screen(e.p["x"], e.p["y"], m) and e.p.get("vis", 1)):
+        if not (self._on_screen(e.p["x"], e.p["y"], m) and e.g32(0x18)):
             e.alive = False
 
     def _fx12_integrate(self, e: UiEntity) -> None:
@@ -5217,6 +5203,8 @@ class Pages(Page4Mixin):
         e.p["y"] = e.p["py"] >> 8
         e.d32(0x04, e.p["x"] & 0xFFFFFFFF)             # 同步原始字段（碰撞用）
         e.d32(0x08, e.p["y"] & 0xFFFFFFFF)
+        e.d32(0x1C, e.p["vx"])
+        e.d32(0x20, e.p["vy"])
         if e.disp:                                     # 0x42C3DB..0x42C3F7
             half = e.p.get("m", e.p["half"])
             e.disp.dst[0] = e.p["x"] - half
@@ -5582,7 +5570,7 @@ class Pages(Page4Mixin):
         投放 `0x41000004` 到 `0x4AD4CC`。
         """
         for e in self.ui46c:
-            if not (e.p.get("vis", 1)):
+            if not e.g32(0x18):
                 continue
             t = int(getattr(e, "type_word", 0)) & 0xFFFFFFFF
             if not (self._state2_bit(2) or (t & 0x8000)):

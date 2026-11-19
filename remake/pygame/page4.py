@@ -934,8 +934,8 @@ class Ent:
         self.node: DNode | None = None
         self.buf2c = None                 # 0x4601CB 字形位图缓冲（0x4602D0 家族）
         self.flags38 = 0                  # 0x4602B2 标志字
-        self.link24 = None                # 0x43CD77 演员链表头
-        self.p: dict = {}                 # 复刻侧 Python 链接（owner/pod1 等；不在 exe 内存模型里）
+        self.link24 = None                # 自机 +0x24 的武器发射器
+        self.p: dict = {}                 # 复刻侧 Python 链接
         if typ == 0x21000001:                    # 0x43A899（0x21 族里唯一有专有构造的）
             # 0x43A8AA [e+0x40] = 0x401E2E ；0x43A8B1 byte[+0x10]=1
             # 0x43A8B4 [+0xC]=0x18 ；0x43A8BB [+0x18]=1
@@ -2109,20 +2109,15 @@ def p4_446540(self, e) -> None:
     type 8  = 0x44601E ctor → 0x447410（0x10008431 捕获发射器 → 命中生成
               0x1000002/3 僚机舱）。
     """
-    for typ in (0x1000001, 5, 8):                      # 0x446548/0x446597/0x4465ae
+    self.p4_replace_pod(e, 0x01000001)                 # 0x446548
+    for typ in (5, 8):                                 # 0x446597/0x4465ae
         ent = self._p4_ent_into(self.actorq, typ, 0, 0, 0)
         if ent is None:
             continue
-        if typ == 0x1000001:
-            self.p4_42c4d0(ent, (0, 0, 0x1000001, id(e) & 0xFFFFFFFF))
-            ent.p["owner"] = e                         # [pod+0x20] = 自机
-            e.d32(0x24, id(ent) & 0xFFFFFFFF)          # 0x446594 [自机+0x24] = pod1
-            e.p["pod1"] = ent
-        else:
-            # type 5/8 走 0x445C00 分派（p4_445e47 / p4_44601e）：[+0x1C]=rec[3]=自机
-            self.p4_445c00(ent, (0, 0, typ, id(e) & 0xFFFFFFFF))
-            ent.p["sub"] = e                           # 行为的 sub = [ent+0x1C]（父=自机）
-            ent.p["owner"] = e
+        # type 5/8 走 0x445C00 分派：[+0x1C]=rec[3]=自机
+        self.p4_445c00(ent, (0, 0, typ, id(e) & 0xFFFFFFFF))
+        ent.p["sub"] = e
+        ent.p["owner"] = e
 
 
 def p4_446470(self, e, a: int, b: int) -> None:
@@ -12749,13 +12744,12 @@ P4_11_BEH = {
 def _p4_11_nearest(self, x: int, y: int):
     """`0x43BCE0(0x4AD43C, &pt, out)`：最近敌机（曼哈顿距离，跳过碰撞关/离屏）。
 
-    初始 out=(0x2710,0)（0x43BCE6 0x45A690(0x2710,0)）；逐项 0x43AD60 比较
-    `|bx-ex|+|by-ey|`，更小才更新；全部不合格返回 None。
+    初始 out=(0x2710,0)（0x43BCE6）；逐项 0x43AD60 比较距离，更小才更新。
     """
-    best = 0x2710
+    best = abs(0x2710 - x) + abs(y)
     out = None
     for e in self.p4_q43c:
-        if not e.g32(0x10) or not self.p4_4305f0(e, 0x30):
+        if not (e.g32(0x10) & 0xFF) or not self.p4_4305f0(e, 0x30):
             continue
         d = abs(e.s32(0x04) - x) + abs(e.s32(0x08) - y)
         if d < best:
@@ -14064,14 +14058,14 @@ def _beh_23000003(self, e) -> bool:
 ENT23_SW03 = [0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2]
 
 # ---- 特殊类 `0x42C4D0` 的 12 项行为（§16.176 / §16.180 / §16.181 / §16.182）----
-# 键 = 行为地址；值 = (间隔阈值, ((弹型, 速度, x 偏移), ...), 节奏模式)
+# 键 = 行为地址；值 = (间隔阈值, ((弹型, 速度, x 偏移[, y 偏移]), ...), 发射模式)
 #   节奏模式 "single"   ：[+0x1C] > 阈值即发，发后清零（每 阈值+1 帧一发）
 #   节奏模式 "cadence3" ：帧 3 发、帧 6 发并清零（相邻间隔恒 3 帧，§16.182）
-# 速度可以是整数，也可以是 `f(self) -> int`（随机/三角算出来的槽）。
+# 速度可以是整数，也可以是 `f(self) -> int`（随机速度）。
 
 
 def _p4_slot_vel_rand_d150(self) -> int:
-    """`0x42D150` 的速度：随机水平 ±16、垂直 +4（§16.184）。
+    """`0x42D150` 的速度：水平 +4、随机垂直 ±16。
 
     ```
     0x42D178 0x45AD00()（rand）  0x42D17D and eax,0x1FFF   ; 0..8191
@@ -14079,28 +14073,19 @@ def _p4_slot_vel_rand_d150(self) -> int:
     0x42D190 and eax,0xFFFF0400  0x42D199 or ah,4          ; 低 16 = 0x0400
     ```
     等价于 `((r & 0x1FFF) - 0x0FFF) << 16 | 0x0400`（已对全部 8192 个输入穷举验证），
-    即水平 `[-15.996, +16.0]` 像素/帧、垂直 `+4.0` 像素/帧。
+    即水平 `+4.0` 像素/帧、垂直 `[-15.996, +16.0]` 像素/帧。
     """
-    return (((rng.randrange(0x2000) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF
+    return ((((self.p4_rand() & 0x1FFF) - 0x0FFF) << 16) | 0x0400) & 0xFFFFFFFF
 
 
-def _p4_slot_vel_trig_d4a0(self, owner) -> int:
-    """`0x42D4A0` 的速度：由**发射者 `[+0x24]`** 决定方向（§16.185）。
-
-    ```
-    0x42D4CA eax = [ebp+0x24] ; ×25 ; shl 3   ⇒ arg = [+0x24] * 200（0.1° 单位 = ×20°）
-    0x42D4D9 0x45ABB0(arg) ; shl 3 ; esi = eax & 0xFFFF      ; 低 16 = cos×8
-    0x42D4F6 0x45AAF0(arg) ; shl 0x13 ; and 0xFFFF0000       ; 高 16 = sin×8
-    0x42D50A or esi, eax                                     ; vel
-    ```
-    """
-    arg = (owner.s32(0x24) * 200) & 0xFFFFFFFF
+def _p4_slot_vel_trig_d4a0(arg: int) -> int:
+    """0x42D4D9 / 0x42D4F6：cos×8 入低字，sin×8 入高字。"""
     lo = (p4_sin_q(arg, "cos") * 8) & 0xFFFF
     hi = ((p4_sin_q(arg, "sin") * 8) << 16) & 0xFFFF0000
     return (hi | lo) & 0xFFFFFFFF
 
 
-# 12 个槽至此全部登记（0x42D6A0 的速度 0xF000 = 正上方 16 像素/帧）。
+# 0x42D6A0 的速度 0xF000 = 水平向左 16 像素/帧。
 # 0x41 族各型的行为 thunk → 真地址（0x428C70 各 case 的 [e+0x40] 赋值）
 P4_41_BEH_THUNK = {
     0x401B95: 0x430550,   # 通用粒子（0x41000001/08/0B/0F/15/16/17/18/19 共用）
@@ -14121,14 +14106,17 @@ P4_SPAWN_SLOTS = {
     0x42D070: (4, ((0x120F112A, 0x00000F00, 0x10),), "single"),
     0x42D370: (6, ((0x120E112D, 0xFA000A64, 0x10),
                    (0x120E112D, 0x06000A64, 0x10)), "single"),
-    0x42C8F0: (7, ((0x12091122, 0x04280D00, 0x10),), "single"),
+    0x42C8F0: (7, ((0x12091122, 0x04280D00, 0x10, 3),
+                   (0x12091122, 0x07900C80, 0x10, 3),
+                   (0x12091122, 0xFBD80D00, 0x10, -3),
+                   (0x12091122, 0xF8700C80, 0x10, -3)), "paired"),
     0x42CD70: (5, ((0x12061127, 0xF6000A00, 0x10),
                    (0x12061127, 0x0A000A00, 0x10),
-                   (0x12061127, 0x0A0008E0, 0x10),
-                   (0x12061127, 0xF60008E0, 0x10)), "single"),
+                   (0x12061127, 0x0A0008E0, 0x10, 0x10),
+                   (0x12061127, 0xF60008E0, 0x10, -0x10)), "single"),
     0x42D150: (3, ((0x120D112B, _p4_slot_vel_rand_d150, 0x10),), "single"),
     0x42D260: (6, ((0x120C112C, _p4_slot_vel_rand_d150, 0x10),), "single"),
-    0x42D4A0: (9, ((0x120C112E, _p4_slot_vel_trig_d4a0, 0x10),), "single"),
+    0x42D4A0: (9, (), "rotating"),
     0x42D6A0: (3, ((0x120A112F, 0x0000F000, 0x10),), "single"),
     0x42CA70: (5, ((0x12081123, 0x00001000, 0x10),), "cadence3"),
     0x42CEF0: (5, ((0x12061128, 0xFA000C00, 0x10),
@@ -14138,9 +14126,7 @@ P4_SPAWN_SLOTS = {
 # 0x42C4D0（pod ctor）的 12-thunk 表按"变体×选机"取行：0x1000001→thunks[选机]、
 # 0x1000002→thunks[4+选机]、0x1000003→thunks[8+选机]；thunk 解引用后恰与
 # P4_SPAWN_SLOTS 的 12 项一一对应（thunk 序 → 槽号 [0,1,2,3,4,5,6,8,10,11,7,9]）。
-# rec[3]（=pod 的 [+0x20]）在 0x446540 里是 ship/5/8——5/8 作为 owner 指针在 exe
-# 语义下必崩，真实再赋值点未解（§15）；复刻侧 owner 一律取自机本体（功能等价：
-# 弹幕从自机位置发出、按住攻击键按各槽节奏连发）。
+# rec[3] 是自机指针，0x446597/0x4465ae 改的是 rec[2] 的类型。
 P4_POD_BEH = (
     (0x42C810, 0x42CC50, 0x42D070, 0x42D370),   # 0x1000001：撃/凛/漢/(选机3)
     (0x42C8F0, 0x42CD70, 0x42D150, 0x42D4A0),   # 0x1000002
@@ -14148,9 +14134,10 @@ P4_POD_BEH = (
 )
 
 
-def _p4_slot_behaviour(spec):
+def _p4_slot_behaviour(addr, spec):
     """生成一个槽行为（12 项表共用骨架，§16.181）。"""
     thr, shots, mode = spec
+    se = int(addr in (0x42C8F0, 0x42CD70, 0x42D150, 0x42D4A0))
 
     def beh(self, e) -> bool:
         e.d32(0x1C, (e.s32(0x1C) + 1) & 0xFFFFFFFF)          # 0x42CA7D 帧计数
@@ -14161,27 +14148,42 @@ def _p4_slot_behaviour(spec):
                 # 0x42CA91 cmp 2/jle → 0x42CB12（连 SE 都不播）
                 if t > 2:
                     if t == 3 or t > 5:                      # 0x42CA96 je / 0x42CA9B jle
-                        for tw, vel, dx in shots:
-                            self.p4_fire_slot(owner, tw, vel, dx)
+                        for shot in shots:
+                            self.p4_fire_slot(owner, *shot)
                     if t > 5:                                # 0x42CAE2 共用尾
-                        self.p4_42C600(e)                    # 0x42CAEA
+                        self.p4_fire_extra(e, addr)         # 0x42CAEA / 0x42CFCE
                         e.d32(0x1C, 0)                       # 0x42CAEF
-                    self.p4_slot_se()                        # 0x42CAF6 玩家声像
-            else:
-                if t > thr:                                  # 0x42D08D cmp 阈值/jle
-                    for tw, vel, dx in shots:
-                        self.p4_fire_slot(owner, tw, vel, dx)
-                    self.p4_42C600(e)                        # 0x42C874 / 0x42CD03
-                    e.d32(0x1C, 0)                           # 0x42C879 / 0x42D0D2
-                    self.p4_slot_se()                        # 0x42C880 / 0x42D0D9
+                    self.p4_slot_se(se)
+            elif t > thr:
+                if mode == "paired":
+                    for index in (0, 2):                   # 0x42C985 / 0x42C9C9
+                        primary = self.p4_fire_slot(owner, *shots[index])
+                        secondary = self.p4_fire_slot(owner, *shots[index + 1])
+                        self.p4_link_shots(primary, secondary)
+                elif mode == "rotating":
+                    phase = e.s32(0x24)
+                    for scale in (200, 400):               # 0x42D4D5 / 0x42D56D
+                        speed = _p4_slot_vel_trig_d4a0(phase * scale)
+                        self.p4_fire_slot(owner, 0x120C112E, speed, 0)
+                        self.p4_fire_slot(owner, 0x120C112E, ~speed & 0xFFFFFFFF, 0)
+                    e.d32(0x24, phase + 1)                 # 0x42D5D6
+                else:
+                    for shot in shots:
+                        self.p4_fire_slot(owner, *shot)
+                if addr in (0x42C810, 0x42C8F0):
+                    self.p4_fire_extra(e, addr)             # 0x42C874 / 0x42C9D5
+                e.d32(0x1C, 0)
+                self.p4_slot_se(se)
+                if addr in (0x42CC50, 0x42CD70):
+                    self.p4_fire_extra(e, addr)             # 0x42CD05 / 0x42CE69
         # 0x42C89E 存活判定：byte[ebp+0x34] 与 [ent+0x18] 同时非零
-        return bool(owner is not None and owner.s32(0x34) != 0 and e.g32(0x18) != 0)
+        return bool(owner is not None and owner.g32(0x34) & 0xFF and e.g32(0x18))
 
     return beh
 
 
 for _a, _spec in P4_SPAWN_SLOTS.items():
-    globals()[f"_beh_p4slot_{_a:06X}"] = _p4_slot_behaviour(_spec)
+    globals()[f"_beh_p4slot_{_a:06X}"] = _p4_slot_behaviour(_a, _spec)
 
 
 P4_TYPE5_BEH = (0x40197E, 0x401FBE, 0x4023B5, 0x401960,
@@ -20242,11 +20244,7 @@ class Page4Mixin:
                 self.p4_45f6e0(x, y)                            # 0x43CE97
         elif idx in (4, 5):                                     # 0x43CD37 / 0x43CD7F
             # 0x43CD4C/0x43CD94 先清旧链表的 [+0x18]，再造演员并把新记录挂到 [tgt+0x24]
-            old = getattr(tgt, "link24", None)
-            if old is not None and hasattr(old, "d32"):
-                old.d32(0x18, 0)
-            t = 0x01000002 if idx == 4 else 0x01000003
-            tgt.link24 = self.spawn(self._p4_q("ui40c"), t, 0, 0, tgt)
+            self.p4_replace_pod(tgt, 0x01000002 if idx == 4 else 0x01000003)
         elif idx == 7:                                          # 0x43CE9E
             self.spawn(self._p4_q("ui40c"), 9, x, y, tgt)
         self._p4_43ced5(b)
@@ -20444,6 +20442,15 @@ class Page4Mixin:
         w = int(self.p4_stat.get(0x56CCC0, 0)) | 1             # 0x4460F9（另一组旗标字）
         self.p4_stat[0x56CCC0] = w
         self.p4_stat["44e470_rec"] = (rec[0], rec[1]) if (rec is not None and len(rec) >= 2) else (0, 0)
+
+    def p4_replace_pod(self, owner, typ: int) -> None:
+        if owner.link24 is not None:
+            owner.link24.d32(0x18, 0)                       # 0x43CD4C / 0x43CD94
+        pod = self._p4_ent_into(self.actorq, typ, 0, 0)
+        self.p4_42c4d0(pod, (0, 0, typ, id(owner) & 0xFFFFFFFF))
+        pod.p["owner"] = owner
+        owner.link24 = pod
+        owner.d32(0x24, id(pod) & 0xFFFFFFFF)               # 0x446594 / 0x43CD77 / 0x43CDBF
 
     def p4_42c4d0(self, e, rec=None) -> None:
         """`0x401AF0` → `0x42C4D0`：**0x01 族（武器挂舱）构造器**，逐条按本体。
@@ -21026,7 +21033,7 @@ class Page4Mixin:
         hits = 0
         # 0x43C075 0x45B030(0x56CCB8, 2)：**bit2 清**时返回 1 → jne 跳过类型过滤
         bit2_clear = self.p4_bit_none(0x02)
-        for e in qa:
+        for e in tuple(qa):                                  # 新的命中子弹插在表头，下帧再碰撞
             if not bit2_clear and not (e.g32(0x14) & 0x8000):   # 0x43C085 test ah,0x80
                 continue
             for t in qb:
@@ -21911,59 +21918,48 @@ class Page4Mixin:
             e.d32(0x1C, (e.s32(0x1C) - 1) & 0xFFFFFFFF)
         return True
 
-    def p4_fire_slot(self, owner, type_word, vel, dx: int) -> None:
+    def p4_fire_slot(self, owner, type_word, vel, dx: int, dy: int = 0):
         """`0x430400` 造记录 + `0x430290` 入 `0x4AD46C`：从**发射者子对象**位置发弹。
 
-        `0x42C83A` 记录 =(速度, 弹型, y=[owner+8], x=[owner+4]+dx)；
+        `0x42C83A` 记录 =(速度, 弹型, y=[owner+8]+dy, x=[owner+4]+dx)；
         记录 +0xC 是速度字段（§16.180 由"槽 0 该位为 0xE00、槽 1 改成镜像值"实证）。
         """
         if callable(vel):
-            try:
-                v = vel(self, owner)
-            except TypeError:
-                v = vel(self)
+            v = vel(self)
         else:
             v = vel
-        e2 = self.fx12_spawn(type_word, owner.s32(0x04) + dx, owner.s32(0x08), v)
-        if e2 is not None:
-            self._p4_q("ui46c").append(e2)                 # 0x430290 → 0x4AD46C
+        return self.fx12_spawn(type_word, owner.s32(0x04) + dx, owner.s32(0x08) + dy, v)
 
-    def p4_slot_se(self) -> None:
-        """`0x42C880`：声像量 = `([0x56CC8C] - 0x140) << 4`，音效号 0。"""
+    @staticmethod
+    def p4_link_shots(primary, secondary) -> None:
+        primary.p["paired_shot"] = secondary
+        secondary.p["paired_shot"] = primary
+        secondary.raw[0x10] = 0                             # 0x42C98B / 0x42C9D1
+
+    def p4_slot_se(self, slot: int) -> None:
+        """`0x42C880`：声像量 = `([0x56CC8C] - 0x140) << 4`。"""
         pos = getattr(self, "p4_player_pos", (0x140, 0))
-        self.p4_se_pan(0, ((int(pos[0]) - 0x140) << 4) & 0xFFFFFFFF)
+        self.p4_se_pan(slot, ((int(pos[0]) - 0x140) << 4) & 0xFFFFFFFF)
 
-    def p4_42C600(self, e) -> None:
-        """`0x42C600`（`0x401776` 蹦床）：12 个槽发射后的**追加两发追踪弹**（§16.188）。
-
-        ```
-        0x42C604 ebx = [ecx+0x20]                     ; 发射者子对象
-        0x42C607 if ([ebx+0x2C] >= 0) → ret           ; jge 整段跳过
-        0x42C639 0x4021EE(0x4AD43C, &pt, &pt2)        ; 目标点 = 自机
-        第一发：0x42C6A0 原点 (x+0xC, y−0xC)，默认 0xF3460CBA = (−12.73, +12.73)
-                0x42C66A jns ⇒ 仅当 (ty−y+0xC) < 0 才改朝自机
-        第二发：0x42C75C 原点 (x+0xC, y+0xC)，默认 0x0CBA0CBA = (+12.73, +12.73)
-                0x42C72C jle ⇒ 仅当 (ty−y−0xC) > 0 才改朝自机
-        定向速度 = 0x40105A 把 (tx−x−0xC, ty−y±0xC) 定长到 0x1200（= 18.0 像素/帧）
-        ```
-        """
-        owner = e.p.get("owner")
-        if owner is None:
+    def p4_fire_extra(self, e, addr: int) -> None:
+        """撃用 0x42C600 的定向弹，凛用 0x42CB80 的追踪弹。"""
+        owner = e.p["owner"]
+        if owner.s32(0x2C) >= 0:                            # 0x42C60C / 0x42CB8C
             return
-        if owner.s32(0x2C) >= 0:                       # 0x42C60A test / jge 0x42C79B
+        if addr in (0x42CC50, 0x42CD70, 0x42CEF0):
+            self.p4_fire_slot(owner, 0x12041129, 0xF8EEF8EE, -0xC, -0xC)
+            self.p4_fire_slot(owner, 0x12041129, 0x0712F8EE, -0xC, 0xC)
             return
         ox, oy = owner.s32(0x04), owner.s32(0x08)
-        tx, ty = int(self.inp.x), int(self.inp.y)      # 0x4021EE 取到的目标点
-        for dx, dy, dflt, above in ((0xC, -0xC, 0xF3460CBA, True),
-                                    (0xC, 0xC, 0x0CBA0CBA, False)):
-            v = dflt
-            ddy = ty - oy - dy                         # 相对各自原点
-            if (ddy < 0) if above else (ddy > 0):      # 0x42C66A jns / 0x42C72C jle
-                vx, vy = [tx - ox - 0xC], [ddy]
-                if self._vset(vx, vy, 0x1200):         # 0x40105A 定长
-                    v = ((vy[0] << 16) | (vx[0] & 0xFFFF)) & 0xFFFFFFFF
-            self.spawn(self._p4_q("ui46c"), 0x12061124,
-                       ox + dx, oy + dy, v)            # 0x42C6A0 / 0x42C75C
+        for side, speed in ((-1, 0xF3460CBA), (1, 0x0CBA0CBA)):
+            dy = side * 0xC
+            target = _p4_11_nearest(self, ox, oy + side * 0x78)  # 0x42C639 / 0x42C6F9
+            if target is not None:
+                tx, ty = target
+                vx, vy = [tx - ox - 0xC], [ty - oy - dy]
+                if side * vy[0] > 0 and self._vset(vx, vy, 0x1200):
+                    speed = ((vy[0] & 0xFFFF) << 16) | (vx[0] & 0xFFFF)
+            self.p4_fire_slot(owner, 0x12061124, speed, 0xC, dy)
 
 
     def _p4_4437e0(self, e, ebp: int, st: int) -> bool:
@@ -22586,7 +22582,7 @@ class Page4Mixin:
         row, col = dy, dx
         if row == 0 and col == 0:                    # 0x45A9A9
             return 0
-        while row >= 0x100 or row < -0x100 or col >= 0x100 or col < -0x100:
+        while abs(row) >= 0x100 or abs(col) >= 0x100:
             row >>= 1                                # 0x45A9D1 sar（负数向 −∞）
             col >>= 1
         t = _p4_atan2_table()[abs(row) * 256 + abs(col)]
