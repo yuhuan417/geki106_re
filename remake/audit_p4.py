@@ -2147,6 +2147,14 @@ def main():
           and page4.Page4Mixin.p4_447640_state(0x1005) == _tbl447[0x1000]
           and page4.Page4Mixin.p4_447640_state(0x8000) is None
           and page4.Page4Mixin.p4_447640_state(0x6000) is None, "")
+    _wing_anim = page4.Ent(0x120, 0x90, 6, 0)
+    _wing_anim.d32(0x20, 3)
+    _wing_anim.d32(0x28, 0x3000)
+    _wing_anim.node = page4.DNode(2, 0xC0, 0)
+    _wing_owner = type("_WingState", (), {"p4_stat": {}})()
+    page4._p4_447640_states(_wing_owner, _wing_anim, None)
+    check("0x447C25 的 rect_add 沿 X 轴推进精灵帧，保持 Y/高度不变",
+          tuple(_wing_anim.node.rect) == (0xF0, 0, 0x11F, 0x2F), "")
     _o447 = {i.address: (i.mnemonic, i.op_str)
              for i in _mdk.disasm(img[0x447AA5 - ib:0x447AD0 - ib], 0x447AA5)}
     _c2d = {i.address: (i.mnemonic, i.op_str)

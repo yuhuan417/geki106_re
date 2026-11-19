@@ -13042,11 +13042,9 @@ def _p4_447640_states(self, e, sub) -> None:
     lo = node.g32(0x04)                                   # 节点 +4
     hi = node.g32(0x08)                                   # 节点 +8
 
-    def add(dy: int, dh: int) -> None:                    # 0x447C25 0x45A790(node+4,0,dy,0,dh)
-        node.d32(0x04, (node.g32(0x04) + 0) & 0xFFFFFFFF)
-        node.d32(0x08, (node.g32(0x08) + dy) & 0xFFFFFFFF)
-        node.d32(0x0C, (node.g32(0x0C) + 0) & 0xFFFFFFFF)
-        node.d32(0x10, (node.g32(0x10) + dh) & 0xFFFFFFFF)
+    def add(dx: int, dr: int) -> None:                    # 0x45A790(node+4,dx,0,dr,0)
+        node.d32(0x04, (node.g32(0x04) + dx) & 0xFFFFFFFF)
+        node.d32(0x0C, (node.g32(0x0C) + dr) & 0xFFFFFFFF)
 
     def bump(d: int) -> None:                             # 推进状态位
         e.d32(0x28, (e.g32(0x28) + d) & 0xFFFFFFFF)
