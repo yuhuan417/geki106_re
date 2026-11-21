@@ -12940,8 +12940,15 @@ def p4_446600(self, e) -> bool:
     0x446658     == 0x12C → node[+0x1C]=1; [0x56CCB2]=0
     0x44666E     > 0x78  → node[+0x1C] = [+0x20] & 1        ; 闪烁
               }
-    0x44667E [+0x20]++; 0x446681 ++[+0x2C]; if ([+0x30]) --[+0x30]
+    0x44667E [+0x20]++; 0x446681 ++[+0x2C]; if ([+0x30]) { --[+0x30];
+    0x446696     node[+4]  = ([+0x30]&2) ? 0x30 : 0
+    0x4466B5     node[+0xC] = ([+0x30]&2) ? 0x5F : 0x2F }
     ```
+    `+0x30` 是**拾取/激光释放反馈的换色闪烁计时**（0x43CD18 拾取置 0x3C、选机2 置 0x78、
+    0x4470AC/0x4471B7 激光释放抬到 ≥0x1E、0x446E20 族 0x3C）：非零期间按递减值的 bit1
+    每 2 帧在 bm_cm48 自机行的**第 0 列（普通色）与第 1 列（换色）**之间交替（rect.left
+    0↔0x30、rect.right 0x2F↔0x5F，top/bottom 不动），归 0 那帧落回普通格。0x44663F 的
+    `return 0` 早退**不**走这段。
     """
     t = e.s32(0x20)
     if t <= 0x12C:
@@ -12965,8 +12972,15 @@ def p4_446600(self, e) -> bool:
             e.node.active = t & 1          # 0x44667B 闪烁
         e.d32(0x20, e.s32(0x20) + 1)     # 0x44667E，0x44660E 跳过已结束的计时
     e.d32(0x2C, (e.s32(0x2C) + 1) & 0xFFFFFFFF)
-    if e.g32(0x30):
-        e.d32(0x30, (e.s32(0x30) - 1) & 0xFFFFFFFF)
+    t30 = e.g32(0x30)
+    if t30:                                  # 0x446688 test eax,eax / je 0x4466B8
+        e.d32(0x30, (t30 - 1) & 0xFFFFFFFF)  # 0x44668F/0x446693
+        nd = getattr(e, "node", None)
+        if nd is not None:
+            # 0x446696..0x4466B5：neg/sbb/and 0x30 = (bit1!=0)?0x30:0
+            off = 0x30 if ((t30 - 1) & 2) else 0
+            nd.d32(0x04, off)              # 0x44669F [节点+4]  rect.left
+            nd.d32(0x0C, off + 0x2F)       # 0x4466B5 [节点+0xC] rect.right
     return True
 
 
