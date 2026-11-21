@@ -410,9 +410,9 @@ class Audio:
             track, token = job
             if token == -1:
                 if self._cached_bgm(track) is None:
-                    self._resolve_bgm(track, nice=10)
+                    self._resolve_bgm(track)       # 默认 nice 19
                 continue
-            path = self._resolve_bgm(track)
+            path = self._resolve_bgm(track, nice=10)   # 当曲略高于预渲，BGM 尽快出声仍让帧
             with self._bgm_cond:
                 self._bgm_done[track] = (path, token)
                 self._bgm_cond.notify_all()
@@ -459,7 +459,11 @@ class Audio:
         tag = hashlib.sha1(
             f"{mid.stat().st_mtime}:{sf2.stat().st_mtime}:{BGM_SETTINGS_VERSION}".encode()
         ).hexdigest()[:10]
-        out = Path(tempfile.gettempdir()) / f"geki_bgm_{track:02d}_{tag}.wav"
+        # 缓存放 ~/.cache（持久，重启不丢）；/tmp 会在重启后清空导致每次开机重渲
+        cache = Path(os.environ.get("GEKI_BGM_CACHE",
+                                    Path.home() / ".cache" / "geki106_re" / "bgm"))
+        cache.mkdir(parents=True, exist_ok=True)
+        out = cache / f"geki_bgm_{track:02d}_{tag}.wav"
         return ("midi", mid, sf2, out)
 
     def _cached_bgm(self, track: int):
@@ -474,8 +478,9 @@ class Audio:
             return out
         return None
 
-    def _resolve_bgm(self, track: int, nice: int = 0):
-        """优先用编译好的 OGG；没有就用 fluidsynth 现渲（结果缓存在 /tmp）。
+    def _resolve_bgm(self, track: int, nice: int = 19):
+        """优先用一次性构建的 OGG（remake/build_bgm.py 产物）；没有才现渲
+        （兜底，缓存在 ~/.cache/geki106_re/bgm，持久——避免重启后重渲风暴）。
 
         渲染链（2026-11-19 用户反馈后重做）：
         1) 音色库优先 MuseScore General（`~/.local/share/geki106/soundfonts` 或系统），
@@ -498,7 +503,22 @@ class Audio:
             self._say(f"BGM #{track}：缺 fluidsynth")
             return None
         tmp = out.with_suffix(".raw.wav")
-        pre = (lambda: os.nice(nice)) if (nice and hasattr(os, "nice")) else None
+        def _child_prio() -> None:
+            # 流畅优先（2026-11-21 用户反馈）：nice 19 压不住 sf3 样本加载的多线程
+            # 峰值（实测 400-650% CPU）——再把整个渲染子进程钉到最后 2 个核，
+            # 无论内部多少线程，硬上限 ≈2 核，游戏帧绝不与之抢核。
+            if nice and hasattr(os, "nice"):
+                try:
+                    os.nice(nice)
+                except OSError:
+                    pass
+            if hasattr(os, "sched_setaffinity"):
+                try:
+                    ncpu = os.cpu_count() or 1
+                    os.sched_setaffinity(0, {max(0, ncpu - 2), ncpu - 1})
+                except (OSError, ValueError):
+                    pass
+        pre = _child_prio
         try:
             subprocess.run(
                 [exe, "-ni", "-q", "-g", "0.62", "-r", str(BGM_RATE),
@@ -510,7 +530,7 @@ class Audio:
                  "-o", "synth.reverb.level=0.75",
                  "-o", "synth.chorus.active=1",
                  "-o", "synth.chorus.level=1.2",
-                 "-o", "synth.cpu-cores=2",
+                 "-o", "synth.cpu-cores=1",      # 离线渲染限单核：多核会与游戏抢帧（2026-11-21 用户反馈掉帧）
                  "-O", "s32",
                  "-F", str(tmp), str(sf2), str(mid)],
                 check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
