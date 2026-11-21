@@ -18051,7 +18051,13 @@ class Page4Mixin:
             self.key_command(key)                 # 0x451788（无条件）
         self.band_draw()                          # 0x451792（无条件）
         self.draw()                               # 0x45179B 0x458EF0(App,1)（无条件）
-        self.p4_hud()                             # 0x4517E1 HUD + 两准星
+        self.p4_hud()                             # 0x4517E1..0x45196F 提示面板三段贴块
+        # 原作的提示文字走 GDI TextOut 直绘窗口（0x44D010 内 [edx+0x1C] 虚调用），
+        # 每轮迭代即时可见；复刻的整帧 present 在 run.py 的 advance() 之后，
+        # 而本循环在 advance() 内自转 ⇒ 必须每轮显式上屏，否则提示永远不可见。
+        _fp = getattr(self, "frame_present", None)
+        if _fp is not None:
+            _fp()
         if not self.flags.is_empty() or self.btn0_edge():   # 0x451974
             self.p4_load_palette(1)               # 0x451993 恢复亮调色板
             if self.btn0_edge() and self.inp.rec.x < 0x140:

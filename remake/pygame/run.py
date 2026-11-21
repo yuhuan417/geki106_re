@@ -254,7 +254,32 @@ def main(argv: list[str] | None = None) -> int:
         _pump_events(full=False)
         _build_record()
 
+    def _present_frame() -> None:
+        """每帧显示：0x44C350 索引→RGB + present。
+
+        除正常帧尾调用外，还作为 `pages.frame_present` 在页4 0x451630 继续提示
+        循环的**每迭代**调用（原作提示文字走 GDI TextOut 直绘窗口、即时可见，
+        复刻的整帧上屏在 advance() 之后 ⇒ 循环内必须显式上屏）。"""
+        rgb = canvas.to_rgb(getattr(pages, "pal_now", getattr(pages, "pal", palette)))
+        if geki.FLIP_SCREEN:
+            rgb = rgb[::-1]
+        rgb = np.ascontiguousarray(rgb.transpose(1, 0, 2))
+        pygame.surfarray.blit_array(screen, rgb)
+        if args.ptr:
+            # 开发辅助（非原作内容）：把虚拟指针 [0x4AB59C]/[0x4AB5A0] 画出来
+            px = int(inp.x)
+            py = 479 - int(inp.y) if geki.FLIP_SCREEN else int(inp.y)
+            if 0 <= px < 640 and 0 <= py < 480:
+                pygame.draw.line(screen, (255, 0, 255), (px - 6, py), (px + 6, py))
+                pygame.draw.line(screen, (255, 0, 255), (px, py - 6), (px, py + 6))
+        if args.debug_hud:
+            hud = (f"page {pages.page} frame {frame} flags 0x{flags.bits:X} "
+                   f"ptr ({inp.x},{inp.y})")
+            screen.blit(clock_font.render(hud, True, (255, 255, 255)), (6, 6))
+        pygame.display.flip()
+
     pages.frame_input = _frame_input
+    pages.frame_present = _present_frame
     pages.start(args.page)
 
     out_dir = Path(args.out)
@@ -297,23 +322,7 @@ def main(argv: list[str] | None = None) -> int:
                 _t_last = _now
                 print(f"[fps] frame={frame} page={pages.page} {_fps:.1f} fps", flush=True)
             # ---- 显示（0x44C350 索引→RGB + present）
-            rgb = canvas.to_rgb(getattr(pages, "pal_now", getattr(pages, "pal", palette)))
-            if geki.FLIP_SCREEN:
-                rgb = rgb[::-1]
-            rgb = np.ascontiguousarray(rgb.transpose(1, 0, 2))
-            pygame.surfarray.blit_array(screen, rgb)
-            if args.ptr:
-                # 开发辅助（非原作内容）：把虚拟指针 [0x4AB59C]/[0x4AB5A0] 画出来
-                px = int(inp.x)
-                py = 479 - int(inp.y) if geki.FLIP_SCREEN else int(inp.y)
-                if 0 <= px < 640 and 0 <= py < 480:
-                    pygame.draw.line(screen, (255, 0, 255), (px - 6, py), (px + 6, py))
-                    pygame.draw.line(screen, (255, 0, 255), (px, py - 6), (px, py + 6))
-            if args.debug_hud:
-                hud = (f"page {pages.page} frame {frame} flags 0x{flags.bits:X} "
-                       f"ptr ({inp.x},{inp.y})")
-                screen.blit(clock_font.render(hud, True, (255, 255, 255)), (6, 6))
-            pygame.display.flip()
+            _present_frame()
             if frame in shot_frames:
                 out_dir.mkdir(parents=True, exist_ok=True)
                 pygame.image.save(screen, str(out_dir / f"page{pages.page}_f{frame}.png"))
