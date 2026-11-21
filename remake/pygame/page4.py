@@ -2235,6 +2235,9 @@ def p4_446470(self, e, a: int, b: int) -> None:
     base = 0xF if self.keys.test(2) else 7            # 0x446481（鼠标/键盘模式）
     mode = self.keys.field(0xC000) & 3                # 0x45AFC0(0x4AB5B0,0xC000) 选机
     fid = base + mode * 2 + (1 if a else 0)
+    # 记住自机演员的预设 fid：0x451630 继续提示进门会 set_preset(5)（菜单管线，
+    # p4_cfg=None），继续接受后重生自机的战斗预设要按同一 fid 恢复。
+    self._p4_actor_fid = fid
     if b:                                             # 0x4464CA 0x44E620：预设+指针
         self.inp.set_preset4(fid, (e.s32(0x04), e.s32(0x08)))
     else:                                             # 0x4464DF 0x44E4A0：只装预设
@@ -18063,6 +18066,11 @@ class Page4Mixin:
             if self.btn0_edge() and self.inp.rec.x < 0x140:
                 self.sequence_start()             # 0x4519F4 0x460E40(0x4CD590)
                 self.stage_globals_begin()        # 0x4519FE 0x45F5C0(0x4CD4A0)
+                # 0x451652 装的菜单预设（行 5，set_preset 已把 p4_cfg 清 None）
+                # 在此恢复为重生自机的战斗预设——exe 侧战斗预设由死亡时入队的
+                # type1 演员 ctor（0x4464CA）装载，提示期间被行 5 覆盖、继续后
+                # 需要回到 kb/fixed 的移动管线；按同一 fid 重载（不动指针）。
+                self.inp.set_preset4(getattr(self, "_p4_actor_fid", 0x17))
             return False
         return True                               # 0x45198D
 
