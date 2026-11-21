@@ -1369,8 +1369,11 @@ class Ent:
             if tgt is not None:
                 self.d32(0x20, tgt.g32(0x00))
                 self.d32(0x24, tgt.g32(0x04))
-            # 0x410CD6：push 0x28 → rand → 0x462D71 → [0x28]=余数（公转相位 0..0x27）
-            self.d32(0x28, rng.randrange(0x28) & 0xFFFFFFFF)
+            # 0x410CD6：push 0x28 → rand(0x401393→0x45AD00 LCG，烧 1 步) → 0x462D71
+            # → [0x28]=余数（公转相位 0..0x27）
+            _pg = getattr(self, "_pages", None)
+            _rv = _pg.p4_rand() if _pg is not None else rng.randrange(0x7FFFFFFF)
+            self.d32(0x28, (_rv % 0x28) & 0xFFFFFFFF)
         if "z1c20" in info:                            # [0x1C]=[0x20]=0
             self.d32(0x1C, 0)
             self.d32(0x20, 0)
@@ -1411,10 +1414,12 @@ class Ent:
             if self.node is not None:
                 self.node.dst = (self.s32(4) - 0x18, self.s32(8) - 0x18)
                 self.node.active = 0
-        if "rand_pair" in info:                        # 0x4120A0：[0x24]=rand&0x3F+0x10、[0x28]=rand&0x3F
-            import random as _r
-            self.d32(0x24, ((_r.randrange(0x7FFFFFFF) & 0x3F) + 0x10) & 0xFFFFFFFF)
-            self.d32(0x28, (_r.randrange(0x7FFFFFFF) & 0x3F) & 0xFFFFFFFF)
+        if "rand_pair" in info:                        # 0x4120A0/0x4120AE：2 步 LCG（烧 2 步）
+            _pg = getattr(self, "_pages", None)
+            r1 = _pg.p4_rand() if _pg is not None else rng.randrange(0x7FFFFFFF)
+            r2 = _pg.p4_rand() if _pg is not None else rng.randrange(0x7FFFFFFF)
+            self.d32(0x24, ((r1 & 0x3F) + 0x10) & 0xFFFFFFFF)
+            self.d32(0x28, (r2 & 0x3F) & 0xFFFFFFFF)
         if "z1c_20" in info:
             self.d32(0x1C, 0)
             self.d32(0x20, 0)
@@ -6138,7 +6143,8 @@ def _beh_41A180(self, e) -> bool:
 
 
 def _beh_413930(self, e) -> bool:
-    """`0x413930`（0x2500000A）：[0x1C] −= [0x24]（横衰减）；[0x20] += ([0x2C]?−[0x28]:
+    """`0x413930`（0x2500000B；beh thunk 0x4012D0——0x2500000A 是 0x4130D0）：
+    [0x1C] −= [0x24]（横衰减）；[0x20] += ([0x2C]?−[0x28]:
     +[0x28])；[0x28] > −0x60 → [0x28]−−；x=[0x1C]>>4、y=[0x20]>>4；
     node dst=(x−0x18,y−0x18)；HP≠0 且（[0x2C]≠0 → y<0x1F8；否则 y>−0x18）。"""
     t = (e.s32(0x1C) - e.s32(0x24)) & 0xFFFFFFFF
@@ -15779,9 +15785,13 @@ def _beh_4417D0(self, e) -> bool:
         while k < 0x180:                               # 0x4417F3..0x44184E
             piece = self._p4_ent43c(0x24000011, 0x2B0 + (k >> 1), y, hs)
             slot.d32(0, id(piece) & 0x7FFFFFFF)        # 0x441846 [esp+0x10]=eax
+            # exe [0x20]=前件**指针**，beh 0x411C3D 直接解引用——复刻侧必须把
+            # 挂件登记进 p4_links，否则兄链追逐/链走（0x411C44..0x411C78）恒 None，
+            # 2..4 号不守 0x60 阶梯、出生即漂到 y=0x1B0 合流
+            self.p4_links[id(piece) & 0x7FFFFFFF] = piece
             k += 0x60
             y -= 0x60
-        e.d32(0x1C, 0xFFFFFFC0)                        # 0x441850 t = -0xC0
+        e.d32(0x1C, 0xFFFFFF40)                        # 0x441850 t = -0xC0（重波周期 192 帧）
     st = e.s32(0x24)
     if st == 0:                                        # 0x44186A
         e.d32(0x20, (self.p4_rand_mod(0x3C)[1] - 0xB4) & 0xFFFFFFFF)
