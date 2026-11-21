@@ -16,6 +16,7 @@
 环境变量 GEKI_DIR 优先，默认为本仓库的兄弟目录 ../geki106。
 """
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
