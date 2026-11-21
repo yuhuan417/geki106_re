@@ -6249,7 +6249,7 @@ def _beh_4107D0(self, e) -> bool:
     e.d32(0x08, y & 0xFFFFFFFF)
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
-    return x > -0x18 and e.g32(0x18) != 0
+    return x >= -0x18 and e.g32(0x18) != 0   # 0x410874 jl ⇒ ==-0x18 仍存活（0x414380/415A90/414B50 尾是 jle，> 才对）
 
 
 def _beh_415980(self, e) -> bool:
@@ -9853,7 +9853,11 @@ def _beh_40FD10(self, e) -> bool:
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
     if main.s32(0x1C) == 7 or e.g32(0x18) == 0:
-        self.p4_spawn41(0xC, 0, 0x41000014)
+        # 0x40FE0A..0x40FE19：rec={0xC,0,0x41000014,本卫星指针}——ctor 0x429551 以
+        # rec3 父锚定 pos/rect/dst、[0xC]=父[0xC]=24 作 0x43A520 波纹 offset/flag
+        _h = id(e) & 0x7FFFFFFF
+        links[_h] = e
+        self.p4_spawn41(0xC, 0, 0x41000014, (_h, 0xC, 0))
         return False
     t2 = (t2 + 1) & 0xFFFFFFFF
     e.d32(0x28, t2)
@@ -10144,7 +10148,11 @@ def _beh_40F880(self, e) -> bool:
                 # 复刻侧句柄表必须登记它，否则它的卫星查 p4_links 失败、出生即灭。
                 c1 = self._p4_ent43c(0x23000016, -0x18, 0, (h, 0x30, r))
                 self.p4_links[id(c1) & 0x7FFFFFFF] = c1
-                c2 = self._p4_ent43c(0x23000016, 1 if r == 0 else 0, 0, (h, -0x24, r))
+                # 0x40F937/0x40F95D：两次注册共用同一记录（x 恒 -0x18 未改，两次之间只
+                # 0x40F948 [esp+0x14]=-0x24、0x40F959 [esp+0x18]=(r==0)）——從B param[2]
+                # =(r==0)∈{0,1}（≠從A 的 r∈{0,0x100}）：r=0x100 时 從B [0x2C]=0 ⇒
+                # 尾 0x4102CA 每帧 [0x18]=-1（无敌），r=0 时 ctor 已置 -1
+                c2 = self._p4_ent43c(0x23000016, -0x18, 0, (h, -0x24, 1 if r == 0 else 0))
                 self.p4_links[id(c2) & 0x7FFFFFFF] = c2
             if x0 == 0x168:                        # 0x40F967
                 e.d32(0x2C, 0xFFD00000)            # word[0x2C]=0、word[0x2E]=0xFFD0(−0x30)
@@ -10195,11 +10203,13 @@ def _beh_40F880(self, e) -> bool:
                 e.d32(0x1C, 8 if (w22 - 3) == 0 else 1)
         elif st == 7:                              # 0x40FAAA 死亡演出（HP==0 尾部置态7）
             if wt == 0x78:
-                self.p4_43a700(x0, y0, 0x40, 0)    # 0x40FABC 0x4015BE → 0x43A700
+                # 0x40FAB6..0x40FAC5：arg4=0x40FAAE 预 push 的 1（→SE11）
+                self.p4_43a700(x0, y0, 0x40, 1)    # 0x40FABC 0x4015BE → 0x43A700(flag=1)
                 return False                       # 0x40FACD
-            # 0x40FAD4/0x40FAEC：0x43A520(q, x, y, wt, 0x48[, flag]) ×2
+            # 0x40FAD4/0x40FAEC：0x43A520(q, x, y, wt, 0x48[, flag]) ×2——
+            # call1 flag=1（0x40FAAE 同一预 push 1，(wt&0xF)==8 时 SE4）、call2 flag=0（0x40FAF6）
             q = self._p4_q("ui4cc")
-            self.p4_43a520(q, x0, y0, wts, 0x48, 0)
+            self.p4_43a520(q, x0, y0, wts, 0x48, 1)
             self.p4_43a520(q, x0, y0, wts, 0x48, 0)
         elif st == 8:                              # 0x40FB09
             if wt == 0x5A:
@@ -19387,15 +19397,18 @@ class Page4Mixin:
             e.d32(0x2C, 0)
             e.m[0x10] = 0                                   # ctor 不置碰撞字节
         if typ == 0x41000014 and isinstance(rec, tuple) and len(rec) == 3:
-            # 0x429551：[4]/[8]=父节点 dst.x/y、[0xC]=rec3(父)、[0x20]=rec0(漂移种子)、
-            # [0x28]=rec1(模式 0/1/2)、node rect/dst 从父节点拷贝、byte[node+0x1C]=1
+            # 0x429551：[4]/[8]=父节点 dst.x/y、[0xC]=父[0xC]（0x429579..0x429582 无条件）、
+            # [0x20]=rec0(漂移种子)、[0x28]=rec1(模式 0/1/2)、node rect/dst 从父节点
+            # 拷贝（0x4295A3..0x4295E2）、byte[node+0x1C]=1
             _h, _r0, _r1 = rec
             _p = getattr(self, "p4_links", {}).get(_h & 0x7FFFFFFF)
-            if _p is not None and _p.node is not None:
-                e.d32(0x04, _p.node.dst[0] & 0xFFFFFFFF)   # 0x42956A [edx+0x14]
-                e.d32(0x08, _p.node.dst[1] & 0xFFFFFFFF)   # 0x429576 [edx+0x18]
-                e.node.rect = tuple(_p.node.rect)          # 0x4295B9..0x4295CD rect 拷贝
-                e.node.dst = tuple(_p.node.dst)            # 0x4295D9/0x4295DF dst 拷贝
+            if _p is not None:
+                e.d32(0x0C, _p.s32(0x0C))                  # 0x429579..0x429582 [0xC]=父[0xC]
+                if _p.node is not None:
+                    e.d32(0x04, _p.node.dst[0] & 0xFFFFFFFF)   # 0x42956A [edx+0x14]
+                    e.d32(0x08, _p.node.dst[1] & 0xFFFFFFFF)   # 0x429576 [edx+0x18]
+                    e.node.rect = tuple(_p.node.rect)          # 0x4295B9..0x4295CD rect 拷贝
+                    e.node.dst = tuple(_p.node.dst)            # 0x4295D9/0x4295DF dst 拷贝
             e.d32(0x1C, 0)                                 # 0x42957F
             e.d32(0x24, 0)                                 # 0x42958A
             e.d32(0x20, _r0 & 0xFFFFFFFF)                  # 0x429585 rec[0]
