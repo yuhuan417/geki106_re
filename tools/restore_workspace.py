@@ -30,6 +30,8 @@ DEFAULT_GAME = REPO.parent / "geki106"
 STEPS = [
     ("解包 resource.rom", ["python3", "extract_everything.py"],
      "extracted/{midi,wave,script,data,replay,ggd_png} + resource_dec.bin"),
+    ("根目录 resource_dec.bin 对齐", None,
+     "extract_everything 写 extracted/；script_dump/layer_decode/page4 运行时读根目录副本"),
     ("脚本文本 dump", ["python3", "script_dump.py"],
      "extracted/script_txt/"),
     ("关卡背景层", ["python3", "layer_decode.py"],
@@ -96,6 +98,9 @@ def main() -> None:
     print(f"[restore] 游戏目录 = {game}")
     for name, cmd, note in STEPS:
         print(f"[restore] {name} → {note} ...")
+        if cmd is None:                        # 内置动作
+            shutil.copyfile(REPO / "extracted/resource_dec.bin", REPO / "resource_dec.bin")
+            continue
         r = subprocess.run(cmd, cwd=REPO, env=os.environ.copy())
         if r.returncode != 0:
             sys.exit(f"[restore] 步骤失败（rc={r.returncode}）：{' '.join(cmd)}")
