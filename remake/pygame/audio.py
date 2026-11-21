@@ -48,7 +48,14 @@ FREQ_TABLE = bytes([
 # （bgm_08 有 9s、bgm_20 有 8s），直接整段循环会在每圈末尾静音一段——用户实测
 # "音乐放完没声音，过一会才继续"。渲染后裁掉尾部纯静音即可无缝循环。
 BGM_RATE = 44100
-BGM_SETTINGS_VERSION = 3
+# 渲染质量（"最佳采样水平"，2026-11-21）：
+#   fluidsynth 以 32bit（s32）离线渲染 → 逐轨峰值归一（≤0.95、增益上限 3×）→
+#   TPDF 抖动回 16bit。32bit 中间态避免了 16bit 直出的一次性舍入损失，
+#   归一化把每轨电平推满且顺带修复源里偶发的过零削波。
+BGM_SETTINGS_VERSION = 4
+BGM_PEAK_TARGET = 0.95     # 归一化目标峰值（≈ -0.45dBFS）
+BGM_PEAK_MAX_GAIN = 3.0    # 归一化增益上限（≈ +9.5dB，防静音轨过度放大）
+
 SF2_ENV = "GEKI_SF2"
 SF2_CANDIDATES = (
     # 用户自备/本仓库脚本装到用户目录的高质量音色库优先（MuseScore General）。
@@ -75,15 +82,35 @@ def midi_path(track: int) -> Path:
     return REPO / "extracted" / "midi" / f"bgm_{track:02d}.mid"
 
 
+_SINC_HALF_TAPS = 16      # 32 抽头窗式 sinc（半宽）
+_SINC_KAISER_BETA = 6.5   # Kaiser 窗形状：旁瓣 ≈ -60dB
+
 def _resample(x: np.ndarray, factor: float) -> np.ndarray:
-    """线性重采样：n 个样本 → n*factor 个（factor>1 变长/降低音高）。"""
+    """窗式 sinc 重采样：n 个样本 → n*factor 个（factor>1 变长/降低音高）。
+
+    原作 SetFrequency 变调把 11025Hz 样本 4× 以上上采样；线性插值会把
+    5.5kHz 以上的镜像折回可闻域（SE 发闷带毛刺）。Kaiser 窗 sinc 把镜像
+    压到 ≈ -60dB（2026-11-21 "最佳采样水平"升级）。"""
     n = len(x)
     m = max(1, int(round(n * factor)))
     if m == n:
-        return x
-    src = np.arange(n, dtype=np.float64)
-    dst = np.linspace(0.0, n - 1, m)
-    return np.interp(dst, src, x).astype(np.float32)
+        return x.astype(np.float32)
+    pos = np.arange(m, dtype=np.float32) / np.float32(factor)   # 输出→源相位
+    base = pos.astype(np.int64)
+    offs = np.arange(-_SINC_HALF_TAPS + 1, _SINC_HALF_TAPS + 1,
+                     dtype=np.int64)[None, :]
+    xs = base[:, None] + offs                                   # (m, 2h) 源下标
+    taps = np.sinc((pos[:, None] - xs).astype(np.float32)) * np.kaiser(
+        2 * _SINC_HALF_TAPS, _SINC_KAISER_BETA).astype(np.float32)[None, :]
+    valid = (xs >= 0) & (xs < n)
+    taps = np.where(valid, taps, np.float32(0.0))
+    xf = x.astype(np.float32)
+    y = (xf[np.clip(xs, 0, n - 1)] * taps).sum(axis=1)
+    den = taps.sum(axis=1)
+    ok = np.abs(den) > 1e-6
+    y = np.where(ok, y / np.where(ok, den, np.float32(1.0)),
+                 np.float32(0.0)).astype(np.float32)
+    return y
 
 
 def _find_soundfont() -> Path | None:
@@ -103,6 +130,34 @@ def _find_soundfont() -> Path | None:
         if p.exists():
             return p
     return None
+
+
+def _normalize_and_dither(src: Path, dst: Path) -> None:
+    """32bit 渲染 → 逐轨峰值归一（≤0.95、增益上限 3×）→ TPDF 抖动 → 16bit。
+
+    归一化把每轨电平推到 0.95 峰值（顺带修复 -g 下偶发的过零削波），
+    32bit 中间态 + 抖动保证量化噪声低于可闻域（"最佳采样水平"，2026-11-21）。"""
+    with wave.open(str(src), "rb") as w:
+        ch, sw, rate = w.getnchannels(), w.getsampwidth(), w.getframerate()
+        raw = w.readframes(w.getnframes())
+    if sw == 4:
+        x = np.frombuffer(raw, dtype="<i4").astype(np.float64) / 2147483648.0
+    elif sw == 2:
+        x = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
+    else:
+        shutil.copy(src, dst)
+        return
+    peak = float(np.abs(x).max()) if x.size else 0.0
+    gain = min(BGM_PEAK_TARGET / max(peak, 1e-9), BGM_PEAK_MAX_GAIN)
+    y = x * gain
+    rng = np.random.default_rng()
+    d = rng.random(y.shape) - rng.random(y.shape)          # TPDF ±1 LSB
+    pcm = np.clip(np.rint(y * 32767.0 + d), -32768, 32767).astype("<i2")
+    with wave.open(str(dst), "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm.tobytes())
 
 
 def _trim_trailing_silence(src: Path, dst: Path) -> None:
@@ -448,15 +503,20 @@ class Audio:
             subprocess.run(
                 [exe, "-ni", "-q", "-g", "0.62", "-r", str(BGM_RATE),
                  "-o", "synth.polyphony=512",
+                 "-o", "synth.min-note-length=20",
                  "-o", "synth.reverb.active=1",
-                 "-o", "synth.reverb.room-size=0.65",
+                 "-o", "synth.reverb.room-size=0.62",
+                 "-o", "synth.reverb.damp=0.3",
                  "-o", "synth.reverb.level=0.75",
                  "-o", "synth.chorus.active=1",
+                 "-o", "synth.chorus.level=1.2",
+                 "-o", "synth.cpu-cores=2",
+                 "-O", "s32",
                  "-F", str(tmp), str(sf2), str(mid)],
                 check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 preexec_fn=pre)
-            _trim_trailing_silence(tmp, out)
-            self._say(f"BGM #{track} ← {sf2.name} → {out.name}")
+            _normalize_and_dither(tmp, out)               # 32bit → 归一 → 抖动 s16
+            self._say(f"BGM #{track} ← {sf2.name} → {out.name}（s32 归一化）")
             return out
         except Exception as exc:
             self._say(f"BGM #{track} fluidsynth 渲染失败：{exc}")
