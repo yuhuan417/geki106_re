@@ -9141,102 +9141,129 @@ def _beh_40BB60(self, e) -> bool:
 def _beh_40C590(self, e) -> bool:
     """`0x40C590`（0x2A000004，0x40A930 编队僚机）：**挂点体十三态**。
 
-    挂点 = [0x1C]+4 → 主；x = 主.x − 0x90、y = 主.y + 0x5A。
-    主掩码（[0x24]>>0x12&0x1FF）≠0：同 0x40B040 门（node.active、
-    [主 0x24]−=0x40000、[0x10]=掩码<0x3C）。掩码==0：主态 4→sin(45t−0xDC) 摆、
-    0xE→t∈{0x3C,0x67,0x91} 发 0x32000010；主.[0x20]−1 十三态表 0x40CC88：
-      0：(t&0x3F)==0 → 0x3100001B @(x,y) 入 49C
-      1：(t&7)==0 → 0x2A000005 @(x+rand%0x50, y+rand%0xC) 入 43C
-      3：(t%0xC)==0xB → 0x43B610(e, x±0x27F, y, −0x400)（镜像朝机）
-      4：(t%0x50)<0x36 且 (t&3)==3 → 8 向扇形（表 {0x62,0x64,0x5C,0x53,0x47,
-         0x38,0x26,0x14} 镜像 ±，spd −0x200 双发）
-      7：(t&1)==0 → ang=(0x1E−t)*30 反向：0x43B290(e, −sin, −cos, −0xE00)
-      9：(t&3)==0 → 0x43B070(e, 同 9 式)
-      10：t==0x78 → 0x3100001B + 0xC 偏移表 ×7 架（镜像朝机）入 49C
-      11：t==0x78 → 速度 = 6×单位向自机；t>0x78 且 (t&3)==0 → 三连 0x43B290
-         （(vx,vy)/(2vx−vy,2vy−vx)/(2vy−vx,vx−2vy) −0x380）
-      12：(t&0x1F)==0 → 环形 0x43B290 ×4（0x708 步 −0x64）+ 对向
-    收尾同 0x40B040（node dst=(x−0x32,y−0x2C)、主 HP 门、死亡三件）。"""
+    链接基址同 0x40B040：exe `ebx=[0x1C]+4`（0x40C59C..0x40C59F），字段偏移
+    一律 +4 换算：t=[主+0x20]、态=[主+0x24]、掩码 dword=[主+0x28]、
+    旗标=[主+0x2C]、存活字节=[主+0x34]。
+    x = 主.x − 0x90、y = 主.y + 0x5A（0x40C5A6..0x40C5B6，+0x5A 为加法）。
+    主.[0x28]>>0x12&0x1FF（掩码车道2）≠0（0x40C5B9 sar 0x12）：node.active 同
+    0x40B040 门；主 t≥0 且 掩码==1 且 主态<7 → 车道 −0 否则 −0x40000
+    （0x40C5E0..0x40C609，[ebx+0x24]=主+0x28）；[0x10] = 掩码<0x3C。
+    掩码==0：主 t<0 → 直接收尾；主态==4 → y = 主.y +
+    (sin(40t−0xDC)>>4 − sin)（0x40C624..0x40C646，lea (5t)*8−0xDC）；主态==0xE →
+    t∈{0x3C,0x67,0x91} → rec={t−0x3C, 0, 0x32000010, 自} 入 49C
+    （0x40C664..0x40C697，0x40C670 push ecx=t−0x3C=档位 0/0x2B/0x55）。
+    主.[0x2C]==0 → 态=主.[0x24]−1（>0xC 跳过；0x40C69C..0x40C6B4）；十三态表
+    0x40CC88（t=[主+0x20]）：
+      0：(t&0x3F)==0 → 0x3100001B @(x,y) 入 49C（0x40C6BB）
+      1：(t&7)==0 → 0x2A000005 @(x,y) rec3=t//0x50 入 43C（0x40C70B，无随机）
+      3：(t%0xC)==0xB → 0x43B610(e, tx, y, −0x400)（tx=(自机x≥x)?0x27F:0，
+        0x40C767..0x40C7A9）
+      4：(t%0x50)<0x36 且 (t&3)==3 → 4 轮 ×2 发 0x43B290（速度 −0x200；
+        A=(0x64,0x5C,0x47,0x26)、B=(0,0x26,0x47,0x5C)（0x40C809..0x40C855 栈表，
+        edi 步 8）；x<自机x → A 取负（0x40C880..0x40C8C4））
+      7：(t&1)==1 → ang=(0x1E−t)*30：0x43B290(e, cos(ang), −sin(ang), −0xE00)
+        （0x40C8CB..0x40C903，0x40C8F4 neg eax 仅对 sin）
+      9：(t&3)==0 → 0x43B070(e, 同 9 式)（0x40C90D）
+      10：t==0x78 → rec={x,y,0x3100001B,&对} 循环 7 架（0x40C94C..0x40CA27，同
+        0x40B040 态10；(A,B)=(0xC,−5)/(5,0)/(0xC,5)/(5,5)/(5,0xC)/(0,5)/(−5,0xC)；
+        自.x≥自机x → A 取负（0x40C9F8）、自.y≥自机y → B 取负（0x40C9E7））
+      11：t==0x78 → 自 [0x20/0x24] = 6×单位向自机（0x40CA2C，[ebp+0x20/0x24]=自）；
+        t>0x78 且 (t&3)==0 → 三连 0x43B290（(vx,vy)/(2vx−vy,vx+2vy)/(vy+2vx,
+        2vy−vx)，−0x380；0x40CA8F..0x40CAD5）
+      12：(t&0x1F)==0 → 环形 0x43B290 ×4（a=0x708 步 −0x64；c/s=cos/sin>>2
+        对称双发，0x1C0；0x40CADC..0x40CB23）
+    收尾见 `_p4_40b040_tail`（004 行：dst=(x−0x28,y−0xC8)、重生 rec={0x1E0,0,
+    0x2A000004,[自 0x1C]}、0x32000006 入 49C、主 [0x28] 车道2 ← 0x1E0）。"""
     links = getattr(self, "p4_links", {})
-    main = links.get((e.s32(0x1C) + 4) & 0x7FFFFFFF)
+    main = links.get(e.s32(0x1C) & 0x7FFFFFFF)   # 0x40C59C：[0x1C]=主指针（+4 只是寻址基）
     if main is None:
         return False
     x = (main.s32(0x04) - 0x90) & 0xFFFFFFFF
     y = (main.s32(0x08) + 0x5A) & 0xFFFFFFFF
     e.d32(0x04, x)
     e.d32(0x08, y)
-    mask = (main.g32(0x24) >> 0x12) & 0x1FF
+    mask = (main.g32(0x28) >> 0x12) & 0x1FF      # 0x40C5B9 [ebx+0x24]=主+0x28 车道2
     if mask != 0:
         nd = e.node
         if nd is not None:
             nd.active = 1 if (mask < 0xF0 and (mask & 1)) else 0
-        dec = 0 if (main.s32(0x1C) >= 0 and mask == 1 and main.s32(0x20) < 7) else 0x40000
-        main.d32(0x24, (main.g32(0x24) - dec) & 0xFFFFFFFF)
+        dec = 0 if (main.s32(0x20) >= 0 and mask == 1
+                    and main.s32(0x24) < 7) else 0x40000
+        main.d32(0x28, (main.g32(0x28) - dec) & 0xFFFFFFFF)
         e.m[0x10] = 1 if mask < 0x3C else 0
     else:
-        if main.s32(0x1C) < 0:
+        if main.s32(0x20) < 0:                   # 0x40C611 [ebx+0x1C]=主+0x20
             return self._p4_40b040_tail(e, main, x, y)
-        mt = main.s32(0x20)
+        mt = main.s32(0x24)                      # 0x40C61C [ebx+0x20]=主+0x24
         if mt == 4:
-            a = (45 * main.s32(0x1C) - 0xDC) & 0xFFFFFFFF
+            a = (40 * main.s32(0x20) - 0xDC) & 0xFFFFFFFF    # 0x40C627 (5t)*8−0xDC
             s_ = page4_sin(a)
             e.d32(0x08, (main.s32(0x08) + ((s_ >> 4) - s_)) & 0xFFFFFFFF)
         elif mt == 0xE:
-            t1 = main.s32(0x1C)
+            t1 = main.s32(0x20)
             if t1 in (0x3C, 0x67, 0x91):
-                # exe 0x40C664 push ebp（=自挂件实体）→ rec3 = 自句柄
+                # 0x40C664..0x40C672：rec={ecx=t−0x3C, 0, 0x32000010, 自}
+                # （0x40C670 push ecx=档位 0/0x2B/0x55、0x40C66A push 0、
+                # 0x40C664 push ebp=自）
                 _h = id(e) & 0x7FFFFFFF
                 self.p4_links[_h] = e
-                self.spawn(self._p4_q("ui49c"), 0x32000010, x, y, _h)
-        sub = (main.s32(0x20) - 1) if main.s32(0x28) == 0 else -1
+                self.spawn(self._p4_q("ui49c"), 0x32000010, t1 - 0x3C, 0, _h)
+        sub = (main.s32(0x24) - 1) if main.s32(0x2C) == 0 else -1   # 0x40C69C..0x40C6B4
         if 0 <= sub <= 0xC:
-            t = main.s32(0x1C)
+            t = main.s32(0x20)
             if sub == 0:
-                if (t & 0x3F) == 0:
+                if (t & 0x3F) == 0:              # 0x40C6BB test byte,0x3F
                     self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
             elif sub == 1:
-                # 0x40C70B：test al,7 / jne ⇒ (t&7)==0；rec={e.x, e.y, 0x2A000005,
-                # t//0x50}（0x40C716 push 0x50 / 0x40C718 push eax / 0x40C721 push
-                # eax=0x462D71 商）——**无随机偏移**（旧实现多加 rand%0x50/%0xC 还
-                # 漏 rec3，令 +0x14 型号/节点行永不换档）
+                # 0x40C70B：test al,7 / jne ⇒ (t&7)==0；rec={x, y, 0x2A000005,
+                # t//0x50}（0x40C716 push 0x50 / 0x40C718 push eax / 0x40C736
+                # push ecx=0x462D71 商）——无随机偏移
                 if (t & 7) == 0:
                     self._p4_ent43c(0x2A000005, x, y, t // 0x50)
             elif sub == 3:
+                # 0x40C767..0x40C7A9：tx = (自机x >= x) ? 0x27F : 0（绝对值）
                 q, r = divmod(t, 0xC)
                 if r == 0xB:
-                    dx = self.p4_player_x() - x
-                    vx = 0x27F if dx >= 0 else -0x27F
-                    self.p4_43B610(e, x + vx, y, -0x400 & 0xFFFFFFFF)
+                    tx = 0x27F if self.p4_player_x() >= x else 0
+                    self.p4_43B610(e, tx, y, -0x400 & 0xFFFFFFFF)
             elif sub == 4:
+                # 0x40C7B3：`t % 0x50 < 0x36` 且 `(t&3)==3` → 4 轮 ×2 发（−0x200）。
+                # 栈表 A=[esp+edi+0x18]=(0x64,0x5C,0x47,0x26)、
+                # B=[esp+edi+0x38]=(0,0x26,0x47,0x5C)（edi 步 8，0x40C879..0x40C8C4）
                 q, r = divmod(t, 0x50)
                 if r < 0x36 and (t & 3) == 3:
-                    for k in range(8):
-                        v = (0x62, 0x64, 0x5C, 0x53, 0x47, 0x38, 0x26, 0x14)[k]
+                    tabA = (0x64, 0x5C, 0x47, 0x26)
+                    tabB = (0, 0x26, 0x47, 0x5C)
+                    for i in range(4):
+                        a = tabA[i]
+                        b = tabB[i]
                         if x < self.p4_player_x():
-                            v = -v
-                        self.p4_43B290(e, -v, v, -0x200 & 0xFFFFFFFF)
-                        self.p4_43B290(e, -v, -v, -0x200 & 0xFFFFFFFF)
+                            a = -a
+                        self.p4_43B290(e, -a, b, -0x200 & 0xFFFFFFFF)
+                        self.p4_43B290(e, -a, -b, -0x200 & 0xFFFFFFFF)
             elif sub == 7:
-                if (t & 1) == 0:
+                # 0x40C8CB：`test cl,1; je` ⇒ t 奇数；0x40C8F4 neg eax ⇒ −sin；
+                # 压栈序 (cos, −sin, −0xE00) → 0x43B290(e, cos, −sin, −0xE00)
+                if (t & 1) == 1:
                     ang = ((0x1E - t) * 30) & 0xFFFFFFFF
-                    c = page4_cos(ang)
-                    s_ = page4_sin(ang)
-                    self.p4_43B290(e, -s_, -c, -0xE00 & 0xFFFFFFFF)
+                    self.p4_43B290(e, page4_cos(ang), -page4_sin(ang),
+                                   -0xE00 & 0xFFFFFFFF)
             elif sub == 9:
                 if (t & 3) == 0:
                     spd = 0x600 if (t & 0xFC) > 0x14 else ((t >> 2) + 1) << 8
                     self.p4_43B070(e, spd & 0xFFFFFFFF)
             elif sub == 10:
                 if t == 0x78:
-                    self.spawn(self._p4_q("ui49c"), 0x3100001B, x, y, 0)
-                    offs = (-5, 0xC, 0, 12, 12, 12, 12, 12, 12, 12, 0, 12, 0xC)
-                    for i in range(7):
-                        dx = offs[i]
-                        dy = offs[i + 1] if i + 1 < len(offs) else 0xC
-                        if y >= self.p4_player_y():
-                            dy = -dy
+                    # 0x40C94C..0x40CA27：rec={x,y,0x3100001B,&对} 复用 7 次
+                    # （0x40C95E arg5=[esp+0x10]），0x3100001B 的 49C ctor 解引用
+                    # rec3 收速度；无单独首发。镜像：自.x≥自机x → A 取负
+                    # （0x40C9F8 jl 跳过取反）、自.y≥自机y → B 取负（0x40C9E7）。
+                    pairs = ((0xC, -5), (5, 0), (0xC, 5), (5, 5), (5, 0xC), (0, 5), (-5, 0xC))
+                    for dx, dy in pairs:
                         if x >= self.p4_player_x():
                             dx = -dx
+                        if y >= self.p4_player_y():
+                            dy = -dy
                         self.spawn(self._p4_q("ui49c"), 0x3100001B,
                                    x, y, (dx, dy))
             elif sub == 11:
@@ -9247,21 +9274,23 @@ def _beh_40C590(self, e) -> bool:
                     e.d32(0x20, (((inv * dx) * 6) >> 12) & 0xFFFFFFFF)
                     e.d32(0x24, (((inv * dy) * 6) >> 12) & 0xFFFFFFFF)
                 if t > 0x78 and (t & 3) == 0:
+                    # 0x40CA8F..0x40CAD5：(vx,vy)/(2vx−vy, vx+2vy)/(vy+2vx, 2vy−vx)
                     vx = e.s32(0x20)
                     vy = e.s32(0x24)
                     self.p4_43B290(e, vx, vy, -0x380 & 0xFFFFFFFF)
-                    self.p4_43B290(e, 2 * vx - vy, 2 * vy - vx,
+                    self.p4_43B290(e, 2 * vx - vy, vx + 2 * vy,
                                    -0x380 & 0xFFFFFFFF)
-                    self.p4_43B290(e, 2 * vy - vx, vx - 2 * vy,
+                    self.p4_43B290(e, vy + 2 * vx, 2 * vy - vx,
                                    -0x380 & 0xFFFFFFFF)
             elif sub == 12:
                 if (t & 0x1F) == 0:
+                    # 0x40CAE2..0x40CB23：esi=cos>>2、edi=sin>>2 对称双发
                     a = 0x708
                     for _ in range(4):
-                        c = page4_cos(a)
-                        s_ = page4_sin(a)
-                        self.p4_43B290(e, c, s_ >> 2, 0x1C0)
-                        self.p4_43B290(e, -(s_ >> 2), -c, 0x1C0)
+                        c = page4_cos(a) >> 2
+                        s_ = page4_sin(a) >> 2
+                        self.p4_43B290(e, c, s_, 0x1C0)
+                        self.p4_43B290(e, -c, -s_, 0x1C0)
                         a -= 0x64
     return self._p4_40b040_tail(e, main, x, y)
 
