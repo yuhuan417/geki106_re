@@ -20066,7 +20066,11 @@ class Page4Mixin:
 
         两次渲染分先后（0x45EEF3 渲 0x4CD4A0 表 → 0x460AE7 渲 0x4CD590 表），
         `keys` 参数用于分段调用。ctor 未写 src 的节点（0x460930 只写节点 1）
-        在原作里是未初始化内存且隐藏 ⇒ 这里直接跳过。"""
+        在原作里是未初始化内存且隐藏 ⇒ 这里直接跳过。
+        blt 宽度 = src.r − src.l（**排他**，0x45A1C4 的右/下边 = dst + (r−l)、
+        0x44D010 → DirectDraw BltFast flags 0x11）——旧复刻 (r+1, b+1) 多取一
+        像素列/行，把图鉴邻格的边缘像素带进画面（"硬"右上角 3 个绿像素的根因，
+        2026-11-21 修）。三处渲染（HUD 节点 / band / 0x4AD43C 实体）同此。"""
         c = self.canvas
         for key in keys:
             for nd in st_nodes(self.p4_stat, key):
@@ -20080,7 +20084,7 @@ class Page4Mixin:
                     continue
                 l, t, r, b = src
                 dx, dy = nd.dst
-                c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+                c.blit(lay.buf, (l, t, r, b), (dx, dy), key=lay.ckey)
 
     def p4_hud_draw(self) -> None:
         """`0x45EED0(0x4CD4A0)` + `0x460A90(0x4CD590)`：HUD 每帧入口（0x458EF0 尾）。
@@ -22337,7 +22341,7 @@ class Page4Mixin:
                     dx -= 0x100000000
                 if dy >= 0x80000000:
                     dy -= 0x100000000
-                c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+                c.blit(lay.buf, (l, t, r, b), (dx, dy), key=lay.ckey)
                 self.p4_stat[0xB6] = self.p4_stat.get(0xB6, 0) + 1
 
     def p4_render_ents(self) -> None:
@@ -22361,7 +22365,7 @@ class Page4Mixin:
                 dx -= 0x100000000
             if dy >= 0x80000000:
                 dy -= 0x100000000
-            c.blit(lay.buf, (l, t, r + 1, b + 1), (dx, dy), key=lay.ckey)
+            c.blit(lay.buf, (l, t, r, b), (dx, dy), key=lay.ckey)
 
     # ---- 特殊类槽行为用到的三个助手（§16.180/§16.181）------------------
     # ---- 0x10008041 锁定准星（0x42DABC ctor + 0x42E460 族行为 + 0x42F4B0 矩形动画）----
