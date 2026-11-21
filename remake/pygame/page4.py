@@ -1311,11 +1311,11 @@ class Ent:
                 # （基构造器按半径 16 留下的是 x−0x10）。
                 self.node.dst = (a - 0x18, b - 0x18)
         if info.get("randpos"):                        # 0x413BA3..0x413BDB：屏幕右侧外随机落点
-            import random as _r
-            self.d32(0x04, ((_r.randrange(0x100) & 0xFF) +
-                            (_r.randrange(0x80) & 0x7F) + 0x2B8) & 0xFFFFFFFF)
-            self.d32(0x08, ((_r.randrange(0x100) & 0xFF) +
-                            (_r.randrange(0x80) & 0x7F) + 0x30) & 0xFFFFFFFF)
+            # 4 次 0x45AD00 LCG（&0xFF / &0x7F）——旧实现用 stdlib random（序列不同）
+            _pg = getattr(self, "_pages", None)
+            _rnd = _pg.p4_rand if _pg is not None else (lambda: 0)
+            self.d32(0x04, ((_rnd() & 0xFF) + (_rnd() & 0x7F) + 0x2B8) & 0xFFFFFFFF)
+            self.d32(0x08, ((_rnd() & 0xFF) + (_rnd() & 0x7F) + 0x30) & 0xFFFFFFFF)
         if info.get("rnd_retarget"):                   # 0x413C13/0x413C3A：随机落点速度（/0x3C）
             import random as _r
             self.d32(0x1C, _idiv_trunc((_r.randrange(0x244) - a), 0x3C) & 0xFFFFFFFF)
@@ -6710,16 +6710,17 @@ def _beh_4145A0(self, e) -> bool:
             return x > -0x18
         self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
         for _ in range(2):                          # 0x41477B esi=2
-            jx = (self.p4_rand() & 0x1F) - 0xF
-            jy = (self.p4_rand() & 0x1F) - 0xF
-            self.spark_spawn(x, y, jx, jy)             # 0x41477B：位置=父体，抖动=速度
+            # 0x414798 0x45A690：arg1=第2发→eax、arg2=第1发→edx；
+            # 0x4147A0/AE：prm[0]=第2发(vx)、prm[1]=第1发(vy)——与死亡火花同序
+            j1 = (self.p4_rand() & 0x1F) - 0xF
+            j2 = (self.p4_rand() & 0x1F) - 0xF
+            self.spark_spawn(x, y, j2, j1)
         return False
     if e.s32(0x24) > 0:                             # 0x4146D4
         if e.node is not None:
             e.node.dst = (x - 0x18, y - 0x18)
         return t < 0x44C
-    # 0x401AE1(0x4CD4A0, 0x7530)：全局长特效件（0x7530=30000）
-    self.p4_other.setdefault("4cd4a0", []).append(0x7530)
+    self.p4_45eea0(0x7530)      # 0x401AE1→0x45EEA0：分数/显示分 += 30000
     return False
 
 
@@ -6764,9 +6765,10 @@ def _beh_4148B0(self, e) -> bool:
             linked.d32(0x28, 0)
         self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
         for _ in range(3):
-            jx = (self.p4_rand() & 0x1F) - 0xF
-            jy = (self.p4_rand() & 0x1F) - 0xF
-            self.spark_spawn(x, y, jx, jy)
+            # 0x414A53..0x414A7B：同 {第2发→vx, 第1发→vy} 序
+            j1 = (self.p4_rand() & 0x1F) - 0xF
+            j2 = (self.p4_rand() & 0x1F) - 0xF
+            self.spark_spawn(x, y, j2, j1)
         return False
     if e.node is not None:                          # 0x414A96 dst.x −= 6
         e.node.dst = (e.node.dst[0] - 6, e.node.dst[1])
@@ -8674,7 +8676,7 @@ def _beh_40A930(self, e) -> bool:
 def _p4_40a930_death(self, e, x: int, y: int) -> bool:
     """`0x40A930` 死亡段：0x4A000006 入 4CC、清位、全局件。"""
     self.spawn(self._p4_q("ui4cc"), 0x4A000006, x, y, 0)
-    self.p4_other.setdefault("4cd4a0", []).append(0xF4240)
+    self.p4_45eea0(0xF4240)     # 0x401AE1→0x45EEA0：分数/显示分 += 1000000
     return False
 
 
@@ -20162,6 +20164,19 @@ class Page4Mixin:
                 if ib is not None:
                     ib.active = 0
                 self.p4_51_spawn(0, 0, 0x51000002, 0)               # 0x460D78 → 0x44B140
+
+    def p4_45eea0(self, v: int) -> None:
+        """`0x401AE1 → 0x45EEA0(mgr=0x4CD4A0, v)`：分数与显示分各加 v、置重绘旗标。
+
+        ```
+        0x45EEA4 [mgr+0x04] += v      ; 分数
+        0x45EEA9 byte[mgr+0xE1] = 1   ; HUD 重绘旗标
+        0x45EEB3 [mgr+0x14] += v      ; 显示分数
+        ```"""
+        m = 0x4CD4A0
+        self.p4_stat[m + 0x04] = (self.p4_stat.get(m + 0x04, 0) + v) & 0xFFFFFFFF
+        self.p4_stat[m + 0x14] = (self.p4_stat.get(m + 0x14, 0) + v) & 0xFFFFFFFF
+        self.p4_stat[m + 0xE1] = 1
 
     def p4_45f660(self) -> None:
         """`0x401FD2` → `0x45F660(0x4CD4A0)`：`[+0x30] = max(0, [+0x30] − 5)`（饱和减 5）。
