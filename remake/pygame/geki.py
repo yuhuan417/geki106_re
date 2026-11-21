@@ -6718,11 +6718,6 @@ class Pages(Page4Mixin):
                     dst = c.buf[dy:dy + hh, dx:dx + ww]
                     dst[src != 0] = src[src != 0]      # 同样色键 0
 
-        # 0x41000004（4CC 队列里的命中火花）：层1 源瓦片、dst 已由行为算好（不缩放）
-        for sp in self.spark4cc:
-            lt = self.layers.tab.get(1)
-            if lt is not None:
-                c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
         import os as _os
         if _os.environ.get("P4_LAYERDUMP") and not getattr(self, "_ldonce", 0):
             self._ldonce = 1
@@ -6740,29 +6735,36 @@ class Pages(Page4Mixin):
             # （2026-10-31 修，页1-3 金标时这些路径本就是空操作，加门不改哈希）。
             # 2026-11-18：页8/9/10 的 0x45349B 也调 0x457CB0（结局背景 129..138 层块）
             self.p4_bg_draw()
-        # 0x458EF0 的六条队列顺序：ui4cc → ui43c → ui49c → 0x4AD40C → ui46c → ui4fc
-        # ⚠ 页4 专属渲染遍（同 p4_bg_draw：加 page 门防跨页污染，2026-10-31）
+        # 0x458EF0 的七条渲染顺序：55C bg槽 → 0x430840(4AD4CC) → (4AD43C) → (4AD49C)
+        # → (4AD40C) → (4AD46C) → (4AD4FC)（空表也调）。⚠ 页4 专属渲染遍
+        # （同 p4_bg_draw：加 page 门防跨页污染，2026-10-31）。
+        if getattr(self, "p4_bg", None) and self.page in (4, 8, 9, 0x0A, 14):
+            # 0x41000004（4CC 队列里的命中火花）：层1 源瓦片、dst 已由行为算好。
+            # exe 里 4CC 链在 0x457CB0(bg) 之后、0x430840(4AD43C) 之前渲染
+            # （0x458EFA→0x430840(0x4AD4CC)）——旧复刻画在 bg 之前被背景盖住。
+            for sp in self.spark4cc:
+                lt = self.layers.tab.get(1)
+                if lt is not None:
+                    c.blit(lt.buf, sp["rect"], (sp["dx"], sp["dy"]), key=lt.ckey)
         if self.page in (4, 14):
             if getattr(self, "p4_q4cc", None) is None:
                 self.p4_q4cc = self._p4_q("ui4cc")
-            self._render_queue(c, self.p4_q4cc)         # 0x4AD4CC 页4 4CC 队列
-            # 0x458EF0 无条件依次调用 6 条链表的渲染（空表也调），不能因列表为空而跳过
-            self.p4_render_ents()                       # 0x4AD43C 页4 实体显示表
-            self._render_queue(c, self._p4_q("ui49c"))  # 0x4AD49C
+            self._render_queue(c, self.p4_q4cc)         # 0x430840(0x4AD4CC)
+            # 0x458EF0 无条件依次调用 7 条链表的渲染（空表也调），不能因列表为空而跳过
+            self.p4_render_ents()                       # 0x430840(0x4AD43C)
+            self._render_queue(c, self._p4_q("ui49c"))  # 0x430840(0x4AD49C)
         if self.page != 4:
             self._render_queue(c, self.trailq)          # 0x430840(0x4AD4CC)（0x458F80 首遍）
-        self._render_queue(c, self._p4_q("ui4fc"))      # 0x4AD4FC（与页1-3 的 ui4fc 同表）
         if DRAW_DISPLAY_NODES:
-            self._render_queue(c, self.actorq)          # 0x4AD40C（层 0 汉字）
-            self._render_queue(c, self.ui46c)           # 0x4AD46C（层 1 特效）
+            self._render_queue(c, self.actorq)          # 0x430840(0x4AD40C)（自机/演员）
+            self._render_queue(c, self.ui46c)           # 0x430840(0x4AD46C)（特效）
+        self._render_queue(c, self._p4_q("ui4fc"))      # 0x430840(0x4AD4FC)（0x458EF0 末位）
         # ⑧ 静态文字页（0x44D010）：0x445A30 的 52C 遍在 4CC 渲染之后 ⇒ 盖在面板之上
         for (lay, src, dst) in self.p2_blits:
             lt = self.layers.tab.get(int(lay))
             if lt is not None:
                 c.blit(lt.buf, src, dst, key=lt.ckey)
         self.p2_blits = []
-        if DRAW_DISPLAY_NODES:
-            self._render_queue(c, self.ui4fc)
         # 0x458F3C if (arg) { 0x45EED0(0x4CD4A0); 0x460A90(0x4CD590) }：HUD 渲染（页4 专属）
         if getattr(self, "p4_bg", None) is not None and self.page in (4, 14):
             self.p4_hud_draw()
