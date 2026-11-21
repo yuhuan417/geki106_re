@@ -10,7 +10,9 @@ import struct, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from huff_fast import huff_decode
 
-GAME = '/home/yuhuan/geki106'
+# 原作目录：env GEKI_DIR 优先，默认本仓库的兄弟目录 ../geki106（zip 解压到这里）
+GAME = os.environ.get('GEKI_DIR') or os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'geki106'))
 OUT  = 'extracted'
 os.makedirs(f'{OUT}/midi', exist_ok=True)
 os.makedirs(f'{OUT}/wave', exist_ok=True)

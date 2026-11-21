@@ -82,12 +82,14 @@ if __name__ == '__main__':
     def getent(idx):
         o = off(idx); e = off(idx+1)
         return d[o:e]
+    import os
+    game = os.environ.get('GEKI_DIR') or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), '..', 'geki106')
     pal = []
-    pb = open('/home/yuhuan/geki106/bmcm/bm_pal.bmp','rb').read()
+    pb = open(os.path.join(game, 'bmcm', 'bm_pal.bmp'), 'rb').read()
     for i in range(256):
         b,g,r,_ = pb[54+i*4:58+i*4]
         pal.append((r,g,b))
-    import os
     os.makedirs('extracted/stage_bg', exist_ok=True)
     for idx in range(83, 90):
         ent = getent(idx)

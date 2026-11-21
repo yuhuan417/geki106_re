@@ -15,7 +15,9 @@ import struct
 
 import pefile
 
-EXE = '/home/yuhuan/geki106/geki106.exe'
+GAME = os.environ.get("GEKI_DIR") or os.path.join(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))), "geki106")
+EXE = os.environ.get("GEKI_EXE") or os.path.join(GAME, "geki106.exe")
 GAME_DIR = '/home/yuhuan/geki106'
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pages_data.json')
 

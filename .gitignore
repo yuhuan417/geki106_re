@@ -22,3 +22,9 @@ state.dat
 
 # 本地录屏、音频和原始帧
 /tmp_work/video/
+
+# 原作解包资源不入公开库（见 README 使用声明）；唯一例外是流程脚本及其文本 dump
+extracted/*
+!extracted/script/
+!extracted/script_txt/
+resource_dec.bin

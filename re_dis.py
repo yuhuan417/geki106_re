@@ -7,7 +7,11 @@ Usage:
 """
 import pefile, capstone, struct, collections
 
-EXE = '/home/yuhuan/geki106/geki106.exe'
+import os as _os
+# 原作目录：env GEKI_DIR 优先（运行时 remake/pygame/geki.py 同一约定），默认兄弟目录 ../geki106
+GAME = _os.environ.get('GEKI_DIR') or _os.path.join(
+    _os.path.dirname(_os.path.abspath(__file__)), '..', 'geki106')
+EXE = _os.environ.get('GEKI_EXE') or _os.path.join(GAME, 'geki106.exe')
 
 
 class Re:
