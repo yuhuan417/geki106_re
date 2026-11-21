@@ -918,8 +918,14 @@ class Input:
         if _cap:
             # 映射键：按住攻击时再按 X，b0 没有新沿（e0=False）→ type8 的
             # [+0x20]+[+0x24] 仍 ≥4，捕获控制器不开火。映射键语义是"同帧双键沿"，
-            # 因此这里强制 e0=e1=1（与从静止同时按 C+V 等价）。
-            r.e0 = r.e1 = True
+            # 因此在 **X 按下那一帧** 强制 e0=e1=1（与从静止同时按 C+V 等价）。
+            # ⚠ 只在 cap 上升沿补沿——旧实现按住期间每帧强制 e0=e1=1，
+            #   凛的锁定控制器（门 = e1 边沿 且 [0x56CC98]==0）在首捕获前的
+            #   整段飞行里每帧 spawn 一个新狙 ⇒ 屏幕拖出一串狙（2026-11-21 用户实测）。
+            cap_rise = _cap and not getattr(self, "_prev_cap", False)
+            if cap_rise:
+                r.e0 = r.e1 = True
+        self._prev_cap = _cap
         r.r0 = (not b0) and self._prev[0]
         r.r1 = (not b1) and self._prev[1]
         self._prev = (b0, b1)
