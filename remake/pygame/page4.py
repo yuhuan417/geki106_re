@@ -17395,13 +17395,17 @@ def _beh_42A400(self, e) -> bool:
             self.spawn(self._p4_q("ui4cc"), 0x41000004,
                        e.s32(0x2C) + sx, e.s32(0x30) + sy, (0, 0))
     elif t == 0x3C:
-        if not self.p4_stat.get(0x4CD590, 0):
+        # 0x42A4E0：0x4011AE→0x460EA0 = **[+0x30] 剩余命**（旧读 +0x00 错位）。
+        # 命≠0（重生在途）→ 落到汇聚段继续追自机；命==0（最终死亡）→
+        # 5 个火花后 return 0 自灭（0x42A56F xor al,al）。
+        if not self.p4_stat.get(0x4CD590 + 0x30, 0):
             for _ in range(5):
                 dx = (self.p4_rand() & 0x1F) - 0xF
                 dy = (self.p4_rand() & 0x1F) - 0xF
                 self.spawn(self._p4_q("ui4cc"), 0x41000004,
                            e.s32(0x2C) + e.s32(0x04), e.s32(0x30) + e.s32(0x08),
                            (dx, dy))
+            return False                              # 0x42A56F xor al,al
     elif t < 0x78:
         k = 0x78 - t
         dx = self.p4_player_x() - e.s32(0x04)
@@ -17832,6 +17836,17 @@ class Page4Mixin:
         self.p4_replay_reset()                    # 0x450B17 0x40224D
         self.p4_layer_params()                    # 0x450B3D..0x450B68（含 0x44CDF0 载调色板 1）
         self.p4_load_palette(1)                   # 0x450B60 0x44CDF0(0x4AA7B0,1,…) = bm_pal
+
+        # 0x451E00（enter 续体）..0x45240D 的层绑定（缺失 ⇒ 死亡特效全画在
+        # 上一页残留的位图上：火花/碎片/爆字用错图鉴）：
+        #   0x451E50 bind(13←9 bm_tilg)、0x4520F3 bind(10←13 bm_st3)、
+        #   0x4523E9 bind(0←11 bm_st1 自机 sprite)、0x4523FB bind(1←12 bm_st2
+        #   汉字图鉴)、0x45240D bind(2←13 bm_st3)。
+        self.layers.bind(13, 9)
+        self.layers.bind(10, 13)
+        self.layers.bind(0, 11)
+        self.layers.bind(1, 12)
+        self.layers.bind(2, 13)
 
         # 0x450B90 0x4013DE(0x4AB454,0,0)=SetBase(0,0)；0x450BA5 首次输入记录
         # 复刻侧：`run.py` 已在每次 `advance()` 之前调过 `0x44EB60`（`inp.build`），
@@ -19383,6 +19398,39 @@ class Page4Mixin:
             e.d32(0x24, 0)                                 # 0x42958A
             e.d32(0x20, _r0 & 0xFFFFFFFF)                  # 0x429585 rec[0]
             e.d32(0x28, _r1 & 0xFFFFFFFF)                  # 0x42958D rec[4]
+        if typ == 0x4100000E:
+            # ctor 0x4291DA（自机死亡"碎片→再合成"体，vel = prm 0..3 选四象限）：
+            # [+0x20]=x<<3、[+0x24]=y<<3（8.8 累加器）、[+0x28]=rand%0xE10（螺旋角）、
+            # [+0x2C/+0x30] = x/y 速度表 {−12,12,−12,12}/{−12,−12,12,12}[vel]；
+            # node.rect = bm_st1 自机 sprite 的四象限 (0,0,0x17,0x17)/(0x18,0,0x2F,0x17)/
+            #   (0,0x18,0x17,0x2F)/(0x18,0x18,0x2F,0x2F)，t/b 再 += 选机*0x30（0x45A790）；
+            # dst = (rect.l, rect.t) + (x−0x18, y−选机*48−0x18)（0x429300..0x429346）；
+            # [+0x0C]=0x18、[+0x18]=1、byte[node+0x1C]=1。
+            _vel = int(prm) & 3
+            _sx = (-12, 12, -12, 12)[_vel]
+            _sy = (-12, -12, 12, 12)[_vel]
+            _quad = ((0, 0, 0x17, 0x17), (0x18, 0, 0x2F, 0x17),
+                     (0, 0x18, 0x17, 0x2F), (0x18, 0x18, 0x2F, 0x2F))[_vel]
+            _lvl = 0
+            if getattr(self, "keys", None) is not None:
+                _lvl = self.keys.field(0xC000) & 3     # 0x45AFC0(0x4AB5B0,0xC000) 选机
+            e.d32(0x0C, 0x18)                          # 0x4291EF
+            e.d32(0x1C, 0)                             # 0x4291F2
+            e.d32(0x20, (e.s32(4) << 3) & 0xFFFFFFFF)  # 0x4291F5 shl 3
+            e.d32(0x24, (e.s32(8) << 3) & 0xFFFFFFFF)  # 0x4291FD shl 3
+            e.d32(0x28, self.p4_rand() % 0xE10 & 0xFFFFFFFF)   # 0x429206..0x429215 idiv 0xE10
+            e.d32(0x2C, _sx & 0xFFFFFFFF)              # 0x429292 速度表
+            e.d32(0x30, _sy & 0xFFFFFFFF)              # 0x429299
+            if e.node is not None:
+                l, t, r, b = _quad
+                t += _lvl * 0x30                       # 0x4292F6..0x4292FB 选机行
+                b += _lvl * 0x30
+                e.node.rect = (l, t, r, b)
+                # 0x429300 dst=(rect.l, rect.t)；0x429329..0x429346 dst += (x−0x18, y−选机*48−0x18)
+                e.node.dst = ((l + e.s32(4) - 0x18) & 0xFFFFFFFF,
+                              (t + e.s32(8) - _lvl * 0x30 - 0x18) & 0xFFFFFFFF)
+                e.node.active = 1                      # 0x429360 byte[node+0x1C]=1
+
         e.node.active = 1
         self._p4_q("ui4cc").append(e)
         return e
@@ -20089,11 +20137,13 @@ class Page4Mixin:
         for i in range(4):                                   # 0x460C9C..0x460CB7
             self.spawn(qfx, 0x4100000E, px, py, i)           # vel = 0,1,2,3
         for _ in range(0x1E):                                # 0x460CCE..0x460D06
-            jx = rng.randrange(0x80) - 0x3F                  # 0x460CD3 / 0x460CD6
-            jy = rng.randrange(0x80) - 0x3F                  # 0x460CDF / 0x460CE2
-            # 0x41000004 的 ctor = 0x428D59 ⇒ 复刻走 spark_spawn（速度取抖动方向，
-            # 幅度 = 抖动原值；4CC 火花渲染/寿命路径现成）
-            self.spark_spawn(px + jx, py + jy, jx * 4, jy * 4)
+            jx = rng.randrange(0x80) - 0x3F                  # 0x460CD3 / 0x460CD6（第 1 发）
+            jy = rng.randrange(0x80) - 0x3F                  # 0x460CDA / 0x460CDE（第 2 发）
+            # 0x460CF2..0x460CF6：prm 块 {第2发, 第1发}（eax=jy→+0xC、edx=jx→+0x10）
+            # ⇒ ctor [0x1C]=第2发(x 速)、[0x20]=第1发(y 速)；出生点 = **自机位置**
+            # （rec0/rec1 沿用 0x41000001 的记录，无抖动）；速度原值（幅 8.8÷4 累加器）。
+            # 旧实现出生点带抖动、速度 ×4 且未换序 ⇒ 火花乱飞 4 倍距。
+            self.spark_spawn(px, py, jy, jx)
         self.p4_spawn_actor1(px, py, 1)                      # 0x460D1F 演员队列（0x445ECE，param=1 ⇒ 完整入场闪烁）
         self.p4_stat[M + 0x34] = self.p4_stat.get(M + 0x34, 0) + 1   # 0x460D2D
         self.p4_stat[M + 0x38] = self.p4_stat.get(M + 0x38, 0) + 1   # 0x460D32
