@@ -317,7 +317,7 @@
 | `0x450AD5` | `word[0x56CCB0] = ax` | **等级（Level）初值**（`0x45EA1A` 用格式串 `"Level                    %4d"`@`0x4A4B94` 输出它） |
 | `0x450ADB/0x450AE1/0x450AE7` | `byte[0x56CCB2/0x56CCB3/0x56CCB4] = 0` | 三个旗标字节清零 |
 | `0x450AED..0x450AFA` | `byte[0x56CCB5] = ([esi+0x2BC]==0xB)` | 回放播放中旗标 |
-| `0x450AF3 push ebx(0)` / `0x450B00 ecx=0x56CCB8` / `0x450B05 call 0x401AAA`(=0x45AF10) | `0x45AF10(obj,0)` ⇒ `[0x56CCB8+4]=0` | **【勘误】对象是 `0x56CCB8`，不是 `0x56CCC0`**；清的是该位域对象的 flags dword（`+4`） |
+| `0x450AF3 push ebx(0)` / `0x450B00 ecx=0x56CCB8` / `0x450B05 call 0x401AAA`(=0x45AF10) | `0x45AF10(obj,0)` ⇒ `[0x56CCB8+4]=0` | 清的是该位域对象的 flags dword（`+4`） |
 | `0x450B0A push ebx(0)` / `0x450B0B ecx=0x4AB570` / `0x450B17 call 0x40224D`(=0x45A630) | `[0x4AB570+0x20] = 0` | 帧门对象的 `+0x20` dword（setter `0x45A630`、getter `0x45A610`；另一处写点 `0x440E14` 也是写 0） |
 | `0x450B10` | `byte[0x56CCC8] = 1` | 该字节置 1（其它写点 `0x453B4E`=1、`0x45814D`=cl） |
 | `0x450B2B/0x450B31/0x450B37` | dword `0x56CCCC/0x56CCD0/0x56CCD4 = 0` | 三个 dword 清零 |
@@ -416,8 +416,7 @@
 7. 21 个脚本槽预载按 §7 顺序；任一失败 `0x4AB5C0 |= 8` 但不中止。
 8. 返回 `(0x4AB5C0==0)`。
 
-### 附：与既有一致性交叉验证
+### 附：`remake/p4_block.json` 对照
 
 `remake/p4_block.json`（由 `remake/build_p4_block.py` 机械提取，键为 `esp` 位移、需减 `0x10`）
-与本文 §3 的表值逐项相同（A1 32 项、A2 32 项、C 表 20 项），`size=212` 亦与 §0.1 的 `0xD4` 一致 ⇒
-两套独立推导互证，零误差。
+与本文 §3 的表值逐项相同（A1 32 项、A2 32 项、C 表 20 项），`size=212` 亦与 §0.1 的 `0xD4` 一致。
