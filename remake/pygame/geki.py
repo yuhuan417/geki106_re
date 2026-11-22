@@ -4892,12 +4892,12 @@ class Pages(Page4Mixin):
         0x120E112D: ((0x100, 0xD0, 0x10F, 0xDF), "burst", 0x180, 0xA, 0x401C26, 8),
         0x120F112A: ((0xC0, 0xE0, 0xDF, 0xFF), "pulse", 0, 0x10, 0x401BE5, 0x10),
         # 0x42B62E：rect(l,t,r,b)=(0x100,0xF0,0x10F,0xFF)、层 1、16×16、
-        # 速度 [+0x2C]=rec[0]/4（有符号）、[+0x18]=-1、
+        # 速度 [+0x2C]=vy/4（有符号，见 fx12_spawn 内注）、[+0x18]=-1、
         # 行为 0x4021B2→0x42C210（落体抛物线 + 每帧 0x41000018）
-        0x120C112C: ((0x100, 0xF0, 0x10F, 0xFF), "arc2", "x/4", 0xC, 0x4021B2, 8),
-        # 0x42B6B8：rect(l,t,r,b)=(0x78,0x1F8,0x8F,0x20F)、层 0、24×24、速度 rec[0]/4、
+        0x120C112C: ((0x100, 0xF0, 0x10F, 0xFF), "arc2", "vy/4", 0xC, 0x4021B2, 8),
+        # 0x42B6B8：rect(l,t,r,b)=(0x78,0x1F8,0x8F,0x20F)、层 0、24×24、速度 vy/4、
         # 行为 0x4022F2→0x42C120（dst 减 0xC、可见性 m=8、每帧 0x41000017）
-        0x120D112B: ((0x78, 0x1F8, 0x8F, 0x20F), "arc1", "x/4", 0xC, 0x4022F2, 0xC, 0, 8),
+        0x120D112B: ((0x78, 0x1F8, 0x8F, 0x20F), "arc1", "vy/4", 0xC, 0x4022F2, 0xC, 0, 8),
         # 0x42B2A3：rect(l,t,r,b)=(0x100,0xD0,0x10F,0xDF)、层 1、16×16、
         # 行为 0x401D43→0x42BC40（**每帧**塞一条 0x41000015 入 0x4AD4CC 再积分）
         0x12061124: ((0x100, 0xD0, 0x10F, 0xDF), "trail", 0, 0xA, 0x401D43, 8),
@@ -4944,8 +4944,15 @@ class Pages(Page4Mixin):
         e.raw[0x10] = 1                                # 0x42B220
         e.d32(0x0C, life)                              # 各子构造器的碰撞半径
         e.d32(0x18, -1 if kind == "arc2" else 1)        # 0x42B245 / 0x42B663
-        # 0x42B62E/0x42B6B8：速度 = 生成记录 x（有符号 /4，cdq+and 3+sar 2）
-        e.p["spd"] = int(int(x) >> 2) if speed == "x/4" else int(speed or 0)
+        # 0x42B62E/0x42B6B8：arc1/arc2 的 [+0x2C] = **vy**（=[+0x20]=vel 高 16 位）
+        # 有符号 /4（cdq+and 3+sar 2 向零截断）——旧注释"rec[0]/4"误读了 [edi]
+        # （[edi]=[esi+0x20]，不是 rec+0）；0x120C112C 存储后 and 0xFFFF、
+        # 行为里 movsx 读回，0x120D112B 存 dword 读 dword，两种写法同值。
+        if speed == "vy/4":
+            _vy0 = e.p["vy"]
+            e.p["spd"] = ((_vy0 + 3) >> 2) if _vy0 < 0 else (_vy0 >> 2)
+        else:
+            e.p["spd"] = int(speed or 0)
         e.p["half"] = int(half)
         e.p["m"] = int(m)
         e.p["life"] = int(life)
@@ -5685,7 +5692,7 @@ class Pages(Page4Mixin):
             w["pos"] = (cur % 0x50) << 3                   # 0x439C1D..0x439C2A idiv 0x50, shl 3
 
     def _kanji_actor(self, e: UiEntity) -> None:
-        """行为 `0x448230`：槽变了就自尽；t<0x5A 走每槽效果分派；t≥0x39C 结束。
+        """行为 `0x448230`：槽变了就自尽；t<0x5A 走每槽效果分派；t≥0x39C 归零循环。
 
         公共尾 `0x44898B`：表 `0x448A24` 的每槽时间窗 `{0x286,0x28E,0x216,0x39D}`，
         在 `[th, th+0x1C)` 内按 `t&2` 把源矩形在列 0 / 列 0x30 之间抖动（`rect.l=0 or 0x30`）。
@@ -5695,15 +5702,21 @@ class Pages(Page4Mixin):
             return
         t = e.t
         if t >= 0:                                     # 0x44825F cmp ecx,0x5A / jge 0x44843F
-            self._kanji_slot_effect(e, e.p["slot"], t)
+            se = self._kanji_slot_effect(e, e.p["slot"], t)
+            if se is not None:
+                # 0x4489E2..0x4489F2：ebx=音效槽（A/C 段发射=0、B 段发射=1、D 段/未发射=0xFF 不发）
+                self.p4_se_pan(se, 0)                  # 0x4013A2→0x450350(0x4AB4B0, se, 0)
         th = (0x286, 0x28E, 0x216, 0x39D)[e.p["slot"] & 3]
         if e.disp and th <= t < th + 0x1C:             # 0x4489AD..0x4489DF
             l = 0x30 if (t & 2) else 0
             e.disp.rect[0] = l
             e.disp.rect[2] = l + 0x2F
-        e.t += 1
-        if e.t >= 0x39C:                               # 0x4489FB
-            e.alive = False
+        # 0x4489F7..0x448A22：life ≥ 0x39C → 归零循环（neg eax/add ecx,eax ⇒ 0，al=1 存活），
+        # 否则 +1。旧实现 ≥0x39C 直接 alive=False ⇒ 演示只放一轮就消失（槽不变不会重建）。
+        if e.t >= 0x39C:
+            e.t = 0
+        else:
+            e.t += 1
 
     def _kanji_slot_effect(self, e: UiEntity, slot: int, t: int) -> None:
         """`0x448277 jmp [slot*4 + 0x448A30]` = `{0x44827E, 0x4482DA, 0x448356, 0x4483AC}`。
@@ -5712,22 +5725,30 @@ class Pages(Page4Mixin):
         命中则 `0x4023C4(dst, x=0xB0, y=0x78, type, a3)` 造 5-dword 记录，`0x40100F(0x4AD46C)`
         入弹队列（`0x40100F`→`0x430290`，节点 ctor `0x401DCA`→`0x42D780`）。
         槽1/槽3 各投**两发**：先投一发，再把记录第 4 个 dword（a3）改写成另一值投第二发。
+        返回值 = 音效槽（0x448263 ebx）：A/C 段发射=0（xor ebx,ebx）、B 段发射=1
+        （0x448506/0x4485C9/0x448734 mov ebx,1，槽2 借槽1 的入队尾同得 1）、
+        D 段与帧门未命中=None（ebx 保持 0xFF，0x4489E8 je 不发）。
         """
         recs = []
+        se = None
         if slot == 0 and t < 0x5A:                     # 0x44827E：t%6==0
             if t % 6 == 0:                             # 0x448280..0x44828A
                 recs = [(0x120B1121, 0x78, 0xE00)]
+                se = 0                                 # 0x4482D3 xor ebx,ebx
         elif slot == 1 and t < 0x5A:                   # 0x4482DA：t%6==0，两发
             if t % 6 == 0:                             # 0x4482DC..0x4482E6
                 recs = [(0x12071126, 0x78, 0xF4000A00),
                         (0x12071126, 0x78, 0x0C000A00)]   # 0x44833C 改写 a3 后再投
+                se = 0
         elif slot == 2 and t < 0x5A:                   # 0x448356：t%5==0
             if t % 5 == 0:                             # 0x448358..0x448362
                 recs = [(0x120F112A, 0x78, 0xF00)]
+                se = 0
         elif slot == 3 and t < 0x5A:                   # 0x4483AC：t%7==0，两发
             if t % 7 == 0:                             # 0x4483AE..0x4483B8
                 recs = [(0x120E112D, 0x78, 0xFA000A64),
                         (0x120E112D, 0x78, 0x06000A64)]   # 0x4483FB 第二发
+                se = 0
         elif 0x78 <= t < 0xD2:                         # 0x44843F：中段按槽跳 0x448A40
             if slot == 0:                              # 0x448464：t&7==0，四发
                 if (t & 7) == 0:                       # 0x448464 test cl,7
@@ -5735,17 +5756,20 @@ class Pages(Page4Mixin):
                             (0x12091122, 0x78, 0x07900C80),  # 0x4484C3 只改 a3
                             (0x12091122, 0x75, 0xFBD80D00),  # 0x4484DA 改 y=0x75 + a3
                             (0x12091122, 0x75, 0xF8700C80)]  # 0x4484F3 只改 a3
+                    se = 1                             # 0x448506 mov ebx,1
             elif slot == 1:                            # 0x448510：t%6==0，四发
                 if t % 6 == 0:                         # 0x448512..0x44851C
                     recs = [(0x12061127, 0x78, 0xF6000A00),  # 0x448522
                             (0x12061127, 0x78, 0x0A000A00),  # 0x448572 只改 a3
                             (0x12061127, 0x88, 0x0A0008E0),  # 0x448585 y+=0x10 + a3
                             (0x12061127, 0x68, 0xF60008E0)]  # 0x4485A7 y-=0x20 + a3
+                    se = 1                             # 0x4485C9 mov ebx,1
             elif slot == 2:                            # 0x4485D3：t%3==0，一发（借槽1 的入队尾 0x4485BE）
                 if t % 3 == 0:                         # 0x4485D5 mov ecx,3 / idiv
                     v = self._rng() & 0x1FFF           # 0x4485E5 and eax,0x1FFF
                     a3 = (((v - 0xFFF) & 0xFFFF) << 16) | 0x0400   # 0x4485F6..0x448603
                     recs = [(0x120D112B, 0x78, a3)]    # 0x448607
+                    se = 1                             # 0x4485C9（jmp 0x4485BE 落槽1 尾）
             else:                                      # 0x44862F：t%0xA==0，四发（a3 = ~a3 交替）
                 if t % 0xA == 0:                       # 0x448631 mov esi,0xA / idiv
                     def _pair(n: int) -> int:          # 0x448641..0x44866F / 0x4486D2..0x448706
@@ -5759,28 +5783,37 @@ class Pages(Page4Mixin):
                             (0x120C112E, 0x78, ~a3a & 0xFFFFFFFF),   # 0x4486C1 not edx
                             (0x120C112E, 0x78, a3b),
                             (0x120C112E, 0x78, ~a3b & 0xFFFFFFFF)]   # 0x448723 not ecx
+                    se = 1                             # 0x448734 mov ebx,1
         elif 0xF0 <= t < 0x14A:                        # 0x44873E：晚段，跳表 0x448A50
             if slot == 0:                              # 0x448766：t%3==0，一发
                 if t % 3 == 0:                         # 0x448768 mov ecx,3 / idiv
                     recs = [(0x12081123, 0x78, 0x1000)]      # 0x448778
+                    se = 0                             # 0x4487B5 xor ebx,ebx
             elif slot == 1:                            # 0x4487BC：t%3==0，两发
                 if t % 3 == 0:                         # 0x4487BE mov ecx,3 / idiv
                     recs = [(0x12061128, 0x78, 0xFA000C00),  # 0x4487CE
                             (0x12061128, 0x78, 0x06000C00)]  # 0x44881A
+                    se = 0                             # 0x448866 xor ebx,ebx
             elif slot == 2:                            # 0x44886D：t%7==0，一发
                 if t % 7 == 0:                         # 0x44886F mov ecx,7 / idiv
                     v = self._rng() & 0x1FFF           # 0x44887F and eax,0x1FFF
                     recs = [(0x120C112C, 0x78,
                              (((v - 0xFFF) & 0xFFFF) << 16) | 0x0400)]  # 0x448890..0x44889D
+                    se = 0                             # 0x4488D2 xor ebx,ebx
             else:                                      # 0x4488D9：t%4==0，一发
                 if (t & 3) == 0:                        # 0x4488D9 and ecx,0x80000003 取模判零
                     recs = [(0x120A112F, 0x78, 0xF000)]      # 0x4488EC
+                    se = 0
         elif 0x180 <= t < 0x220 and (t & 0xF) == 0:    # 0x44892D：与槽无关的位置对象
-            # `0x4023C4(rec, 0x298, (t&0x10)?0x28:0xC8, 0x2300001A, 0)`，队列 0x4AD43C、插入 0x401FA5→0x43BDC0
-            y = 0x28 if (t & 0x10) else 0xC8           # 0x448942..0x44895D
+            # `0x4023C4(rec, 0x298, (t&0x10)?0xC8:0x28, 0x2300001A, 0)`，队列 0x4AD43C、插入 0x401FA5→0x43BDC0
+            # 0x448942..0x44895D：and cl,0x10 / neg / sbb / and 0xA0 / add 0x28 ⇒ (t&0x10)?0xC8:0x28
+            # （旧实现两值对调；posq 的追踪方向按 y<0x78 分上下，对调即空投上下相位反了）
+            y = 0xC8 if (t & 0x10) else 0x28
             self.posq_spawn(0x298, y, slot)             # 0x4AD43C / 0x401FA5→0x43BDC0
+            # ebx 保持 0xFF ⇒ 不发音效
         for ty, yy, a3 in recs:
             self.actor_spawn(0xB0, yy, ty, a3)
+        return se
 
     def _psel(self, e: UiEntity) -> None:
         """0x43EDB0：页13 选择画面总控（7 态机）。

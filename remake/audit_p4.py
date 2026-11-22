@@ -1297,18 +1297,33 @@ def main():
     check("窗口 C 跳表 0x448A50 = 448766/4487BC/44886D/4488D9 且与转写表逐项一致",
           [u32(0x448A50 + 4 * k) for k in range(4)] == [0x448766, 0x4487BC, 0x44886D, 0x4488D9]
           and [t for _m, t, _r in page4.P4_448230_C] == [0x12081123, 0x12061128, 0x120C112C, 0x120A112F], "")
-    check("三张相位表的模数与 type 与反汇编一致",
+    check("三张相位表的模数与 type 与反汇编一致（B[3] mod=10：0x448631 mov esi,0xa）",
           [m for m, _t, _r in page4.P4_448230_A] == [6, 6, 5, 7]
-          and [m for m, _t, _r in page4.P4_448230_B] == [8, 6, 3, 0]
+          and [m for m, _t, _r in page4.P4_448230_B] == [8, 6, 3, 10]
           and [m for m, _t, _r in page4.P4_448230_C] == [3, 3, 7, 4]
           and [t for _m, t, _r in page4.P4_448230_A]
           == [0x120B1121, 0x12071126, 0x120F112A, 0x120E112D]
           and [t for _m, t, _r in page4.P4_448230_B]
           == [0x12091122, 0x12061127, 0x120D112B, 0x120C112E], "")
-    check("窗口 B 相位的四发 x 偏移 0xB0/0xB0/0xC0/0x90 与 vel 序列一致",
-          page4.P4_448230_B[1][2] == ((0xB0, 0xF6000A00), (0xB0, 0xA000A00),
-                                     (0xC0, 0xA0008E0), (0x90, 0xF60008E0))
+    check("窗口 B 撃相位四发：y=0x78×2/0x75×2、vel 4280D00/7900C80/FBD80D00/F8700C80"
+          "（0x4484DA mov [esp+0x18],0x75 改 y）",
+          page4.P4_448230_B[0][2] == ((0xB0, 0x78, 0x4280D00), (0xB0, 0x78, 0x7900C80),
+                                     (0xB0, 0x75, 0xFBD80D00), (0xB0, 0x75, 0xF8700C80))
+          and img[0x4484DA - ib:0x4484E2 - ib] == bytes([0xC7, 0x44, 0x24, 0x18, 0x75, 0x00, 0x00, 0x00]), "")
+    check("窗口 B 凛相位四发：x 恒 0xB0、y=0x78/0x78/0x88/0x68"
+          "（0x448585 mov edi,[esp+0x14]+0x10 / 0x4485B3 sub edx,0x20）与 vel 序列一致",
+          page4.P4_448230_B[1][2] == ((0xB0, 0x78, 0xF6000A00), (0xB0, 0x78, 0xA000A00),
+                                     (0xB0, 0x88, 0xA0008E0), (0xB0, 0x68, 0xF60008E0))
+          and img[0x448585 - ib:0x448589 - ib] == bytes([0x8B, 0x7C, 0x24, 0x14])
+          and img[0x4485B3 - ib:0x4485B6 - ib] == bytes([0x83, 0xEA, 0x20])
           and page4.P4_448230_BLINK == (0x286, 0x28E, 0x216, 0x39D), "")
+    check("窗口 B/C 漢相位＝随机 vel（recs vel=None；0x4485EA/0x448884 and eax,0x1fff）",
+          page4.P4_448230_B[2][2] == ((0xB0, 0x78, None),)
+          and page4.P4_448230_C[2][2] == ((0xB0, 0x78, None),)
+          and img[0x4485EA - ib:0x4485EF - ib] == bytes([0x25, 0xFF, 0x1F, 0x00, 0x00]), "")
+    check("窗口 C 凛相位两发 vel FA000C00/06000C00（0x44881A push 0x6000c00）",
+          page4.P4_448230_C[1][2] == ((0xB0, 0x78, 0xFA000C00), (0xB0, 0x78, 0x6000C00))
+          and img[0x44881A - ib:0x44881F - ib] == bytes([0x68, 0x00, 0x0C, 0x00, 0x06]), "")
 
     # ---- §16.208 0x43CCC0 的命中处置分流 ----
     check("0x43CCC0 的 idx 跳表 0x43D0D8 = 43CDC7/43CE54/43CE1B/43CDE2/43CD37/43CD7F/43CE68/43CE9E",
