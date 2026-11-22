@@ -2888,9 +2888,20 @@ class Pages(Page4Mixin):
                 e.beh = "seq_gate"
                 self.sysf.bits |= 2
             elif type_word == 0x61000003:
-                # init 0x4272B1：[+0x1C]=0；一次性 0x45B0A0(0x56CCB8, rec3, rec0!=0)，行为 0x430520 首帧死
-                e.beh = "stat_bits"
-                e.aux, e.a3 = int(x), int(a3)
+                # init 0x4272B1（0x4272B1..0x4272DA 反汇编）：ctor 期**立即**执行
+                # 0x45B0A0(0x56CCB8, rec3=mask, rec0!=0) 写位，[+0x40]=0x4022F7→0x430520、
+                # [+0x1C]=0 ⇒ 行为首帧死。写位必须先于本帧任何队列 tick——流76 的
+                # 0x5F00001E 板（0x426C14 门）与生成记录同帧，4fc 队列 tick 先于 52c。
+                # 旧实现把写位推迟到实体 tick 且只写 sysb8 镜像，而板门 0x45B030 读
+                # _p4_sys ⇒ 板生成帧即死、页10 全黑（2026-11-23 修）。
+                _msk = int(a3) & 0xFFFFFFFF
+                _new = ((int(getattr(self, "_p4_sys", 0)) & ~_msk)
+                        | (_msk if int(x) != 0 else 0)) & 0xFFFFFFFF
+                self._p4_sys = _new
+                self.sysb8.bits = _new          # 0x61 族其余型（_seq_gate 等）读 sysb8 镜像
+                self.p4_stat[0x56CCB8] = _new
+                e.beh = 0x430520
+                e.d32(0x1C, 0)
             elif type_word == 0x61000006:
                 e.beh = "check_1000"            # init 0x427332：0x45AF30(0x56CCB8,0x1000)→[0x56CCB3]=1
             elif type_word == 0x61000008:
@@ -3964,8 +3975,6 @@ class Pages(Page4Mixin):
                 self._seq_gate(e)
             elif e.beh == "crowd_spawn":
                 self._crowd_spawn(e)
-            elif e.beh == "stat_bits":
-                self._stat_bits(e)
             elif e.beh == "check_1000":
                 self._check_1000(e)
             elif e.beh == "recdrv":
@@ -5977,15 +5986,6 @@ class Pages(Page4Mixin):
                 self.sysb8.bits = (self.sysb8.bits & ~0x8000) & 0xFFFFFFFF
                 self.p4_stat[0x56CCB8] = self.sysb8.bits   # 0x4274BF bit15 清
                 e.alive = False                            # 0x4274CE 死
-
-    def _stat_bits(self, e: UiEntity) -> None:
-        """0x4272B1（0x61000003）：一次性 `0x45B0A0(0x56CCB8, rec3, rec0!=0)`；行为 0x430520 首帧死。
-        0x56CCB8 在复刻里双存（sysb8 位测 + p4_stat 镜像），两处都写。"""
-        mask = e.a3 & 0xFFFFFFFF
-        new = ((self.sysb8.bits & ~mask & 0xFFFFFFFF) | (mask if e.aux else 0)) & 0xFFFFFFFF
-        self.sysb8.bits = new
-        self.p4_stat[0x56CCB8] = new
-        e.alive = False
 
     def _check_1000(self, e: UiEntity) -> None:
         """0x427332（0x61000006）：`0x45AF30(0x56CCB8,0x1000)` → `byte[0x56CCB3]=1`；首帧死。"""
