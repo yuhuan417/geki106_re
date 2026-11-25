@@ -61,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
+    ap.add_argument("--page9-preview", type=int, default=-1, metavar="N",
+                    help="调试：--page 9 直跳时先跑页4 第 N 关（1..7）直到场景快照环"
+                         "录满，再用该块立即回放（正常流程不受影响；空环直跳时页9 只剩色带）")
     ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
     ap.add_argument("--audio-driver", default="", help="强制 SDL 音频驱动（pulseaudio / alsa / dummy）")
     args = ap.parse_args(argv)
@@ -280,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
 
     pages.frame_input = _frame_input
     pages.frame_present = _present_frame
+
     pages.start(args.page)
 
     out_dir = Path(args.out)
@@ -300,6 +304,42 @@ def main(argv: list[str] | None = None) -> int:
     pend_shot = pend_lock = pend_capture = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
     pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
     _t_last = time.perf_counter()
+    if args.page9_preview > 0:
+        # 调试开关（非原作流程）：页9 直跳时没有"上一页"留下的快照环，画面只剩脚本色带。
+        # 这里按正式流程先跑一关（单关链 12+4(N-1)），让页4 的 0x61000008(mode0)
+        # 把真实的 0x56B95C 场景快照环录满；再把第一个回放的块号改成本关块。
+        if args.page != 9:
+            print("[preview] --page9-preview 只对 --page 9 生效（忽略）", file=sys.stderr)
+        else:
+            _stage = max(1, min(7, args.page9_preview))
+            _target = _stage if _stage <= 6 else 8      # 关7 由流52 同时录块8/9
+            pages.theatre = 0x20000 + (_stage - 1)
+            print(f"[preview] 先跑页4 第 {_stage} 关（目标环块 {_target}）录制快照…", flush=True)
+            pages.start(4)
+            # 调试捷径：整局链 0 会把 45..52 串起来（要跑 5 万帧才到关7）；这里换成
+            # 单关链 12+4(N-1)（表 0x499798：12→46、16→47…36→52），只跑该关。
+            # 该关自己的 OP0D/OP0B/录制记录与整局逐字节相同，录出的窗口也相同。
+            pages.vm.load_chain(12 + 4 * (_stage - 1))
+            _cap = 12000
+            for _i in range(_cap):
+                _build_record()
+                timer.consumed += 1
+                pages.advance()
+                if pages.page != 4:
+                    break
+                if _i % 120 == 0 and _i:
+                    _n = sum(1 for x in pages.snap_ring[_target] if x is not None)
+                    print(f"[preview]   {_i} 帧，块{_target} {_n}/120", flush=True)
+                if all(x is not None for x in pages.snap_ring[_target]):
+                    break
+            _blocks = [b for b in range(10)
+                       if any(x is not None for x in pages.snap_ring[b])]
+            print(f"[preview] 已录块 {_blocks}", flush=True)
+            pages.p9_preview_block = _blocks[-1] if _blocks else None
+            pages.flags.clear()
+            pages.start(9)          # 录完环后重新进页9（环不清）
+
+
     while running and pages.page != 0 and not pages.quit:
         # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
         _pump_events(full=True)

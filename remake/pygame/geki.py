@@ -233,6 +233,32 @@ def fade_palette(pal: np.ndarray, a: int, b: int) -> np.ndarray:
     return out
 
 
+def palette_c(pal: np.ndarray, value: int, prev: np.ndarray | None = None) -> np.ndarray:
+    """`0x44B8A0`（`0x44DC50` 的 `[mgr+0xC9C]` 槽，`0x44D740` bit2 调它）：
+
+    逐项（0x44B8A7..0x44B8F7 逐指令）：
+
+    - 项 0..217：`and eax,0xFF000000` 后写回 ⇒ **RGB 全 0**（只剩 peFlags）；
+    - 项 218：`or 0xFFFFFF` ⇒ 纯白；
+    - 项 219..234：每个 RGB 字节 `+value`（有符号加、钳 0..255），peFlags 跳过
+      （`WWWS` 步进：3 字节写 + 1 字节跳，共 16 项 63 字节）；
+    - 项 235..255：**不写**（保留 dst 原值 = 上一帧的 slot-C 结果）。
+
+    这正对应结局贴图的索引域：`bm_end1/2` 用 0/217，`bm_end3/4` 用 0/218..233，
+    `bm_exed1/2` 用 0/218 ⇒ 该槽把底图压成黑、白 218、219.. 随 value 提亮。
+
+    `prev` 是上一帧的本槽输出（dst 的旧内容）；首次调用传基础色表。
+    """
+    import numpy as _np
+    out = (prev if prev is not None else pal).copy()
+    out[:218] = 0
+    out[218] = 255
+    v = pal[219:235].astype(_np.int32) + int(value)
+    _np.clip(v, 0, 255, out=v)
+    out[219:235] = v.astype(_np.uint8)
+    return out
+
+
 class Canvas:
     """640x480 8bpp 索引画布（= 原作的离屏表面 + 主表面合成结果）。"""
 
@@ -1358,6 +1384,8 @@ class Pages(Page4Mixin):
         self.fade_a = 0
         self.fade_b = 0
         self.pal_frame = 0
+        self.pal_slot_c = 0        # [mgr+0xC9C]（0x44DC50 写的值）
+        self.pal_c_out = None      # 上一帧 slot-C 输出（0x44B8A0 的 dst 旧内容）
         self.pal_now = palette
         self.text = text
         self.canvas = canvas
@@ -1392,6 +1420,13 @@ class Pages(Page4Mixin):
         self.p13_src = None          # res_79 的 60×320 原始字节（瓦片索引，滚动源）
         self.p13_mono = False        # 0x43F246 的 16 色近似标志
         self.p13_tiles = None        # 层4 的 (2,2,256,8,8) 瓦片表
+        # 0x56B95C 场景快照环：10 块 × 120 帧（每 4 帧一帧 ⇒ 每块约 8 秒）。
+        # 页4 各关脚本 t=0 的 0x61000008(mode0, rec3=块号) 录制，页9 Edg2 的
+        # 0x61000008(mode1) 逐块回放（0x459AE0/0x459BC0）。
+        self.snap_ring = [[None] * 120 for _ in range(10)]
+        self.snap_cur = 0            # [0x56B95C+0x12C4]
+        self.snap_start = 0          # [0x56B95C+0x12C8]
+        self.p9_preview_block = None # 调试：--page9-preview 用，首个回放改用该块
         self.posq = []               # 0x4AD43C 位置对象队列（0x2300001A）
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.spark4cc = []           # 0x41000004：4AD4CC 里的命中火花（行为 0x429D40）
@@ -1900,6 +1935,7 @@ class Pages(Page4Mixin):
         self.band_speed = 0
         self.band_frames = 0
         self.stream_cursor = 0          # 0x56B95C 记录流复位
+        self.snap_reset()               # 0x458E15 → 0x459A80（含 0x459950 释放 10×120）
         self.replay_pos = 0             # 0x4CD5D8 回放复位
         self.sysf.clear()                              # 0x458E1C [0x56CC84]=0
 
@@ -2225,6 +2261,9 @@ class Pages(Page4Mixin):
             self.band_draw()                          # 0x453481 0x4562A0
             self.p4_bg_update()                       # 0x458E70 第一条 0x458E75→0x457BD0
             self.p4_dispatch()                        # 0x45348D 0x458E70 全队列
+            # 0x4AD4CC 在页8/9/10 的复刻侧别名是 trailq（快照回放节点落这里）
+            self.tick_ui(self.trailq)
+            self.trailq = [e for e in self.trailq if e.alive]
             self.draw()                               # 渲染遍（页≠4 分支 = bg 需下述门）
             # 0x45349B 0x457CB0 背景 12 槽 + 0x4534A5/0x4534AF 0x430840(4CC/4FC) 显示表
             # —— 复刻侧集中在 draw()（bg 走 p4_bg_draw，门扩到 8/9/10）
@@ -2912,13 +2951,21 @@ class Pages(Page4Mixin):
             elif type_word == 0x61000006:
                 e.beh = "check_1000"            # init 0x427332：0x45AF30(0x56CCB8,0x1000)→[0x56CCB3]=1
             elif type_word == 0x61000008:
-                # init 0x427385：[+0x1C]=(rec0+0xF)<<5、[+0x20]=rec0(mode)、[+0x24]=-256、[+0x28]=8；
-                # 行为 0x427710：mode 0 = 每 4 帧 0x459AE0(0x56B95C)（输入录像 tick）+ 倒计时，无视觉
+                # init 0x427385：[+0x1C]=(rec0+0xF)<<5、[+0x20]=rec0(mode)、[+0x24]=-256、
+                # [+0x28]=8，并 `0x459AB0(0x56B95C, rec3)` 选快照环块号。
+                # 行为 0x427710：mode 0 = 每 4 帧 0x459AE0 录制场景快照；mode 1 = 0x459BC0
+                # 逐帧回放（见 ANALYSIS §18）。
                 e.beh = "recdrv"
                 e.aux = (int(x) + 0xF) << 5
                 e.a3 = int(x)
                 e.a4 = -256
                 e.t = 8
+                _blk = int(a3) & 0xFFFF
+                if self.p9_preview_block is not None:      # 调试开关：只顶第一个回放
+                    _blk = int(self.p9_preview_block) & 0xFFFF
+                    self.p9_preview_block = None
+                e.p["ring_block"] = _blk
+                self.snap_seek(_blk)
             elif type_word == 0x61000001:
                 # ctor 0x427259：`push 0x8000; 0x45AF30(0x56CCB8)`（bit15 置 → 0x427510 门
                 # 保持关闭）；[+0x20]=rec0(掩码)、[+0x24]=rec1(生成数)、[+0x28]=rec3(生成型)。
@@ -6024,7 +6071,7 @@ class Pages(Page4Mixin):
         if _sg32(e.a3) != 0:                          # 0x427713 test eax; je 0x42777d
             b = _sg32(e.a4)
             if (cnt & 3) == 0:                       # 0x42771a and 3; je
-                # self._snapshot_ring_tick()          # 0x459BC0（未移植）
+                self.snap_play()                     # 0x459BC0（快照环回放）
                 self.fade_to(b, 0)
             elif (cnt & 3) == 2:                     # 0x427725 sub 2
                 self.fade_to(b - 0x10, 0)
@@ -6036,7 +6083,7 @@ class Pages(Page4Mixin):
             e.alive = (cnt - 1) != 0
             return
         if (cnt & 3) == 0:                           # 0x42777d test byte; jne
-            self.replay_record()                     # 0x459AE0（run.py 已每帧记录）
+            self.snap_record()                       # 0x459AE0（场景快照环录制）
         e.aux = cnt - 1
         e.alive = (cnt - 1) != 0
 
@@ -6386,6 +6433,110 @@ class Pages(Page4Mixin):
             e.alive = False
             if e.disp:
                 e.disp.active = False
+
+    # ---- 0x56B95C 场景快照环（0x459A80/0x459AB0/0x459AE0/0x459BC0/0x45FE10） ----
+    def snap_reset(self) -> None:
+        """`0x459A80`：先清两个游标，再 `0x459950` 释放全部 10×120 项。"""
+        self.snap_cur = 0
+        self.snap_start = 0
+        for blk in self.snap_ring:
+            for i in range(120):
+                blk[i] = None
+
+    def snap_seek(self, block: int) -> None:
+        """`0x459AB0`：`[+0x12C4]=0`、`[+0x12C8]=block`（rec3）。"""
+        self.snap_cur = 0
+        self.snap_start = int(block) & 0xFFFF
+
+    def scene_capture(self) -> dict:
+        """`0x45FBF0` + `0x45FCB0`（`0x45FB80` 的局部队列）→ 场景记录字典。
+
+        布局与 `apply_scene` 的入参一致：`+4` 层数 14、`+8` 色带数、`+0xC` 实体数、
+        `+0x10/+0x14` 色带 start/scroll、`+0x18` 层 id[14]、色带[count]、实体[count]
+        （每项 0x20 字节：层/rect4/dst2/active）。实体来源与 `0x45FCB0` 同序：
+        12 个背景槽（`0x457D20(i)` 的显示链）→ 0x4AD4CC → 0x4AD43C → 0x4AD49C →
+        0x4AD40C → 0x4AD46C → 0x4AD4FC。
+        """
+        layers = []
+        for i in range(14):
+            lay = self.layers.tab.get(i)
+            bid = int(getattr(lay, "bind_id", -1)) if lay is not None else -1
+            layers.append(bid if bid and bid > 0 else 0)
+        cnt = max(0, int(getattr(self, "band_count", 0)))
+        bands = [[int(c) & 0xFF, int(h)] for c, h in self.band_table[:cnt]]
+        ents = []
+
+        def _node(d) -> None:
+            if d is None:
+                return
+            ents.append((int(d.layer), int(d.rect[0]), int(d.rect[1]),
+                         int(d.rect[2]), int(d.rect[3]),
+                         int(d.dst[0]), int(d.dst[1]), 1 if d.active else 0))
+
+        for slot in tuple(getattr(self, "p4_bg", ()))[:12]:
+            for band in reversed(slot.bands):          # 链头 = 最新带
+                if band.layer is None:
+                    continue
+                ents.append((int(band.layer), int(band.src[0]), int(band.src[1]),
+                             int(band.src[2]), int(band.src[3]),
+                             int(band.dst[0]), int(band.dst[1]),
+                             1 if band.visible else 0))
+        q4cc = self.trailq if getattr(self, "page", 4) != 4 else self._p4_q("ui4cc")
+        for q in (q4cc, self.p4_q43c, self.p4_ui49c, self.actorq,
+                  self.ui46c, self.ui4fc):
+            for e in q:
+                if not getattr(e, "alive", True):
+                    continue
+                _node(getattr(e, "disp", None))
+        return {"layers": layers, "bands": bands,
+                "band_args": [int(self.band_start), int(self.band_scroll)],
+                "ents": ents, "tiles": []}
+
+    def snap_record(self) -> None:
+        """`0x459AE0`：mode 0 —— 环形缓冲未满（<0x78）时抓一帧场景快照。"""
+        if self.snap_cur >= 120:
+            return
+        self.snap_ring[self.snap_start % 10][self.snap_cur] = self.scene_capture()
+        self.snap_cur += 1
+
+    def snap_play(self) -> None:
+        """`0x459BC0`：mode 1 —— 取当前块的当前帧场景并应用；首帧 type=0x41000013
+        （重建层），其余 0x41000012（只更新色带/显示节点）；游标到 0x78 后钳在 0x77。"""
+        rec = self.snap_ring[self.snap_start % 10][min(self.snap_cur, 119)]
+        if rec is not None:
+            self.apply_snapshot(rec, 0x41000013 if self.snap_cur == 0 else 0x41000012)
+        self.snap_cur += 1
+        if self.snap_cur >= 120:
+            self.snap_cur = 119
+
+    def apply_snapshot(self, rec: dict, typ: int) -> None:
+        """`0x45FE10(rec, typ)`：typ≠0x41000012 先释放 14 层；重新绑层/色键；
+        装色带；把记录里的显示节点按 0x430400+0x43A3C0 重建为 `typ` 实体入 0x4AD4CC。
+        实体 `[+0x40]=0x4022F7`（→0x430520 倒计时）、`[+0x1C]=3`（3 帧存活）。"""
+        if typ != 0x41000012:
+            self.layers.free_all()                     # 0x45FE56
+        for i, rid in enumerate(rec.get("layers") or []):
+            rid = int(rid)
+            if not rid:
+                continue
+            lay = self.layers.tab.get(i)
+            if lay is None or int(getattr(lay, "bind_id", -1)) != rid:
+                self.layers.load(i, rid)               # 0x44C640
+            self.layers.color_key(i, 0)                # 0x44CE60
+        bands = rec.get("bands") or []
+        if bands:
+            args = rec.get("band_args") or [0, 0]
+            self.band_push(bands, len(bands), int(args[0]), int(args[1]))  # 0x4561D0
+        q = self.trailq if getattr(self, "page", 4) != 4 else self._p4_q("ui4cc")
+        for r in rec.get("ents") or []:
+            lay, l, t, rr, bb, x, y, on = (int(v) for v in r)
+            if not (on & 0xFF) or lay == 0x0D:         # 0x45FEA8 / 0x45FEB6
+                continue
+            e = UiEntity(type_word=int(typ))
+            e.beh = 0x430520                           # 0x4295FF ctor 的 [+0x40]=0x4022F7
+            e.d32(0x1C, 3)                             # 0x4295FF
+            e.disp = DisplayNode(lay, [l, t, rr, bb], [x, y])
+            q.append(e)
 
     # 0x45FE10（= 0x402072）：把"当前场景"重新应用一遍
     def apply_scene(self, sc: dict) -> None:
@@ -6740,8 +6891,16 @@ class Pages(Page4Mixin):
         # 这一帧延迟是原行为（玩家实测"字很亮很完整 → 全黑 → 渐入"正是它），
         # 旧版为消除它去掉了奇偶门，属偏离，已按原码改回（勘误 A-47）。
         if self.pal_flags and (self.pal_frame & 1):
+            base = self.pal
+            if self.pal_flags & 2:
+                # 0x44D78A：`0x44B8A0(dst=+0x487, src=+0x87, [0xC9C])`
+                self.pal_c_out = palette_c(self.pal, self.pal_slot_c, self.pal_c_out)
+                base = self.pal_c_out
             if self.pal_flags & 1:
-                self.pal_now = fade_palette(self.pal, self.fade_a, self.fade_b)
+                # 0x44D7AD：`0x44B790(dst=+0x487, src=上面那步的结果, [0xC94], [0xC98])`
+                self.pal_now = fade_palette(base, self.fade_a, self.fade_b)
+            else:
+                self.pal_now = base
             self.pal_flags = 0
         # ±255 的整屏填充在 0x44D740 里，而 0x44D740 是**帧首**（0x458CB0）调的，
         # 所以放在 present() 里会盖掉本帧的绘制 ⇒ 移到 begin_frame()。

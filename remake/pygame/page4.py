@@ -24110,6 +24110,7 @@ class Page4Mixin:
             arr = fade_palette(arr, br, ct)
         self.p4_pal_adj = (br, ct)
         self.pal = arr
+        self.pal_c_out = arr                        # 0x44CAA0 尾：+0x487 = 本次结果
         self.pal_flags = 0                          # 0x44CD1B [mgr+0xC8C]=0
         if fade is None:
             self.pal_now = arr
@@ -24366,10 +24367,11 @@ class Page4Mixin:
         if e.s32(0x20) == 0:                         # 0x42623D je
             return self.p4_bit_any(0x80)
         # 0x426244 0x401E6A → 0x44DC50：`[mgr+0xC9C] = ([0x1C]−0x10)−0x100`、`[0xC8C] |= 2`。
-        # [0xC9C] 是 0x44D740 的第 2 号调色板槽 → `0x44B8A0`（不是 0x44B790 的亮度/对比）。
-        # 0x44B8A0 的语义尚未定案（§15），复刻侧不映射到 fade_a（旧实现把 −0x100 后的
-        # 无符号 dword 直接塞进 fade_a，页9 的汉字卡时段整屏变黑）。
-        self.p4_pal_slot_c = _p4_s32((t2 - 0x100) & 0xFFFFFFFF)
+        # [0xC9C] 是 0x44D740 的 bit2 槽 → `0x44B8A0`（黑底/白218/219..234+value，见 palette_c），
+        # 不是 0x44B790 的亮度/对比（旧实现把它塞进 fade_a ⇒ 页9 汉字卡整屏变黑）。
+        # 值域：0x200−0x10 → 0xF0（240）逐帧 −0x10，直到 0。
+        self.pal_slot_c = _p4_s32((t2 - 0x100) & 0xFFFFFFFF)
+        self.pal_flags |= 2
         return self.p4_bit_any(0x80)
 
     def _beh_441550(self, e) -> bool:
