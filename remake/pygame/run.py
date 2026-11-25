@@ -61,9 +61,6 @@ def main(argv: list[str] | None = None) -> int:
                     help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
-    ap.add_argument("--page9-preview", nargs="?", type=int, const=0, choices=range(8), metavar="N",
-                    help="调试：预跑页4，按原时间表预览页9快照。省略 N 录开场及各关，"
-                         "给定 N=1..7 仅预跑该关")
     ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
     ap.add_argument("--audio-driver", default="", help="强制 SDL 音频驱动（pulseaudio / alsa / dummy）")
     args = ap.parse_args(argv)
@@ -284,10 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     pages.frame_input = _frame_input
     pages.frame_present = _present_frame
 
-    preview = args.page == 9 and args.page9_preview is not None
-    pages.save_replays = not preview
-    if not preview:
-        pages.start(args.page)
+    pages.start(args.page)
 
     out_dir = Path(args.out)
     shot_frames: set[int] = set()
@@ -307,52 +301,6 @@ def main(argv: list[str] | None = None) -> int:
     pend_shot = pend_lock = pend_capture = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
     pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
     _t_last = time.perf_counter()
-    if args.page9_preview is not None:
-        if args.page != 9:
-            print("[preview] --page9-preview 只对 --page 9 生效（忽略）", file=sys.stderr)
-        else:
-            stage = args.page9_preview
-            targets = {6: (6, 7), 7: (8, 9)}.get(stage, (stage,)) if stage else tuple(range(10))
-            print(f"[preview] 预跑页4，录制快照块 {list(targets)}", flush=True)
-            # 走正常开局路径。单关调试选用 0x499798 对应的无开场分关链。
-            pages.keys.bits &= ~1
-            pages.theatre = 0x20000
-            pages.start(4)
-            if stage:
-                pages.scene_reset()
-                pages.vm.load_chain(12 + 4 * (stage - 1))
-
-            def _warm_input() -> None:
-                inp.build({"shot": True}, (False, False, False))
-                pages.p4_stat[0x4CD590 + 0x3C] = 0
-                pages.p4_stat[0x4CD590 + 0x30] = 6
-                # 固定输入无法保证击破 Boss 或操作结算面板。
-                pages.sysf.clear()
-
-            def _warm_continue() -> None:
-                inp.build({"shot": not inp.rec.b0}, (False, False, False))
-
-            pages.frame_input = _warm_continue
-            pages.p4_warmup_invincible = True
-            recorded = set()
-            try:
-                for _ in range(75000 if not stage else 14000):
-                    _warm_input()
-                    keep_going = pages.p4_step()
-                    for block in targets:
-                        if block not in recorded and pages.snap_ring[block][-1] is not None:
-                            recorded.add(block)
-                            print(f"[preview] 块 {block} 已录满 120 帧", flush=True)
-                    if len(recorded) == len(targets) or not keep_going:
-                        break
-            finally:
-                pages.p4_warmup_invincible = False
-                pages.frame_input = _frame_input
-            if len(recorded) != len(targets):
-                ap.exit(1, f"[preview] 快照未录满，已完成 {sorted(recorded)}，"
-                           f"当前流 {pages.vm.cur_id} @ {pages.vm.frame}\n")
-            pages.start(9)
-
 
     while running and pages.page != 0 and not pages.quit:
         # ---- 泵消息（0x458B80 的 PeekMessage/Translate/Dispatch 等价物）
@@ -388,8 +336,7 @@ def main(argv: list[str] | None = None) -> int:
         elif not args.headless:
             pygame.time.wait(1)
 
-    if not preview:
-        pages.grcd_write()       # 0x458640：程序退出写 state.dat
+    pages.grcd_write()           # 0x458640：程序退出写 state.dat
     print(f"[end] page={pages.page} frame={frame} flags=0x{flags.bits:X}")
     for line in pages.trace:
         print("[trace]", line)

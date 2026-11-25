@@ -17732,7 +17732,6 @@ P4_BEH: dict[int, object] = {
 
 
 class Page4Mixin:
-    save_replays = True
     @staticmethod
     def _p4_block_data() -> dict:
         """`remake/p4_block.json` 的**其它**数据（目前只有 `vm_chains`）。
@@ -18758,8 +18757,6 @@ class Page4Mixin:
         st["45d460_soa_bytes"] = 3 * n                      # 三 SoA 块（0x34BC0 步距）
         st["45d460_rec32"] = (slot, score)                  # 0x455640 的 0x2C 字节记录头
         st["45d460_calls"] = st.get("45d460_calls", 0) + 1
-        if not self.save_replays:
-            return
         # —— 2026-11-18 落地：真文件写（GRPD 容器 + 三平面 LZ）——
         import os as _os
         from pathlib import Path as _Path
@@ -19918,10 +19915,6 @@ class Page4Mixin:
         旧笔记把“自机”写成 `0x10000001`，那是另一类实体（`0x43F7D8`/`0x43FE59`/`0x440054`）。
         """
         t = b.s32(0x14)
-        if t == 1 and getattr(self, "p4_warmup_invincible", False):
-            # 调试专用（run.py --page9-preview 的预热跑）：不触发 0x460C00 死亡演出，
-            # 让预热能跑到关卡中段的快照录制点。正常流程该标志恒 False。
-            return
         if t == 1:                                        # 0x43C344
             if b.g32(0x30) or b.s32(0x20) <= 0x12C:
                 return
