@@ -320,18 +320,38 @@ def main(argv: list[str] | None = None) -> int:
             # 单关链 12+4(N-1)（表 0x499798：12→46、16→47…36→52），只跑该关。
             # 该关自己的 OP0D/OP0B/录制记录与整局逐字节相同，录出的窗口也相同。
             pages.vm.load_chain(12 + 4 * (_stage - 1))
-            _cap = 12000
-            for _i in range(_cap):
+
+            def _warm_input() -> None:
+                # 预热期（调试专用）：持续射击 + 无敌 + 不触发 continue 流程，
+                # 只为把该关脚本跑到快照录制点。正常流程不会走这里。
                 _build_record()
+                rec = pages.inp.rec
+                rec.b1 = True
+                st = pages.p4_stat
+                st[0x4CD590 + 0x3C] = 0          # 继续门（避免 continue 提示挂起）
+                st[0x4CD590 + 0x30] = 6          # 残机（0x423B89 用 0 判定失败）
+                pages.sysf.bits = 0              # 继续总控会置 0x10 冻结 VM
+
+            pages.frame_input = _warm_input
+            pages.p4_warmup_invincible = True
+            _cap = 12000
+            _t0 = time.time()
+            for _i in range(_cap):
+                _warm_input()
                 timer.consumed += 1
                 pages.advance()
                 if pages.page != 4:
+                    break
+                if time.time() - _t0 > 60:   # 兜底：关 1..6 的录制点在关卡中段
+                    print("[preview] 预热超时（60s），改用已录到的块", flush=True)
                     break
                 if _i % 120 == 0 and _i:
                     _n = sum(1 for x in pages.snap_ring[_target] if x is not None)
                     print(f"[preview]   {_i} 帧，块{_target} {_n}/120", flush=True)
                 if all(x is not None for x in pages.snap_ring[_target]):
                     break
+            pages.p4_warmup_invincible = False
+            pages.frame_input = _frame_input
             _blocks = [b for b in range(10)
                        if any(x is not None for x in pages.snap_ring[b])]
             print(f"[preview] 已录块 {_blocks}", flush=True)

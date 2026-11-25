@@ -19915,6 +19915,10 @@ class Page4Mixin:
         旧笔记把“自机”写成 `0x10000001`，那是另一类实体（`0x43F7D8`/`0x43FE59`/`0x440054`）。
         """
         t = b.s32(0x14)
+        if t == 1 and getattr(self, "p4_warmup_invincible", False):
+            # 调试专用（run.py --page9-preview 的预热跑）：不触发 0x460C00 死亡演出，
+            # 让预热能跑到关卡中段的快照录制点。正常流程该标志恒 False。
+            return
         if t == 1:                                        # 0x43C344
             if b.g32(0x30) or b.s32(0x20) <= 0x12C:
                 return
