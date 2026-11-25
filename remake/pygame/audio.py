@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import time
@@ -43,20 +44,19 @@ FREQ_TABLE = bytes([
     0xCC, 0xCC, 0xAC, 0x90, 0x83, 0x6B, 0x56, 0x3B, 0x4C, 0x56,
 ])                        # 表尾 0x498FEC+40 处是 0x00
 
-# BGM 渲染设置。原作是 DirectMusic + 系统 GM 合成器；复刻侧用 fluidsynth 离线渲染成
-# 波形后交给 pygame.mixer.music 无限循环。曲目 MIDI 的 EOT 常带数秒**数字静音**尾
-# （bgm_08 有 9s、bgm_20 有 8s），直接整段循环会在每圈末尾静音一段——用户实测
-# "音乐放完没声音，过一会才继续"。渲染后裁掉尾部纯静音即可无缝循环。
+# BGM 渲染设置。原作使用 DirectMusic 系统 GM 合成器；复刻侧用 FluidSynth 生成波形。
+# 保留 MIDI 的 tick 0 到 EOT，以及 EOT 后仍有信号的合成尾音，只移除其后的静音填充。
 BGM_RATE = 44100
 # 渲染质量（"最佳采样水平"，2026-11-21）：
 #   fluidsynth 以 32bit（s32）离线渲染 → 逐轨峰值归一（≤0.95、增益上限 3×）→
 #   TPDF 抖动回 16bit。32bit 中间态避免了 16bit 直出的一次性舍入损失，
 #   归一化把每轨电平推满且顺带修复源里偶发的过零削波。
-BGM_SETTINGS_VERSION = 4
+BGM_SETTINGS_VERSION = 6
 BGM_PEAK_TARGET = 0.95     # 归一化目标峰值（≈ -0.45dBFS）
 BGM_PEAK_MAX_GAIN = 3.0    # 归一化增益上限（≈ +9.5dB，防静音轨过度放大）
 
 SF2_ENV = "GEKI_SF2"
+GM_DLS_SF2 = Path.home() / ".cache/geki106_re/soundfonts/windows_gm_dls.sf2"
 SF2_CANDIDATES = (
     # 用户自备/本仓库脚本装到用户目录的高质量音色库优先（MuseScore General）。
     str(Path.home() / ".local/share/geki106/soundfonts/MuseScore_General_Full.sf3"),
@@ -80,6 +80,133 @@ def bgm_path(track: int) -> Path:
 
 def midi_path(track: int) -> Path:
     return REPO / "extracted" / "midi" / f"bgm_{track:02d}.mid"
+
+
+def midi_duration_seconds(path: Path) -> float:
+    """Return the SMF End-of-Track time in seconds, honoring tempo events.
+
+    Format 0 and 1 MIDI files share one event timeline. The duration retains all
+    leading and trailing rests encoded in the SMF and excludes synthesizer tails
+    rendered after End-of-Track.
+    """
+    data = path.read_bytes()
+    if data[:4] != b"MThd" or len(data) < 14:
+        raise ValueError(f"invalid MIDI header: {path}")
+    header_size = int.from_bytes(data[4:8], "big")
+    if header_size < 6:
+        raise ValueError(f"short MIDI header: {path}")
+    midi_format, track_count, division = struct.unpack_from(">HHH", data, 8)
+    if midi_format not in (0, 1):
+        raise ValueError(f"unsupported MIDI format {midi_format}: {path}")
+    if division & 0x8000:
+        raise ValueError(f"SMPTE time division is unsupported: {path}")
+    ticks_per_quarter = division
+    if ticks_per_quarter == 0:
+        raise ValueError(f"zero MIDI ticks per quarter note: {path}")
+
+    offset = 8 + header_size
+    tempo_events: list[tuple[int, int, int, int]] = []
+    end_tick = 0
+    for track_index in range(track_count):
+        if data[offset:offset + 4] != b"MTrk" or offset + 8 > len(data):
+            raise ValueError(f"invalid MIDI track {track_index}: {path}")
+        track_size = int.from_bytes(data[offset + 4:offset + 8], "big")
+        track = data[offset + 8:offset + 8 + track_size]
+        if len(track) != track_size:
+            raise ValueError(f"truncated MIDI track {track_index}: {path}")
+        offset += 8 + track_size
+
+        cursor = 0
+        tick = 0
+        running_status = 0
+        event_index = 0
+        while cursor < len(track):
+            delta, cursor = _read_midi_vlq(track, cursor)
+            tick += delta
+            if cursor >= len(track):
+                raise ValueError(f"truncated MIDI event in track {track_index}: {path}")
+
+            status = track[cursor]
+            if status & 0x80:
+                cursor += 1
+            else:
+                if running_status == 0:
+                    raise ValueError(f"invalid MIDI running status: {path}")
+                status = running_status
+
+            if status == 0xFF:
+                if cursor >= len(track):
+                    raise ValueError(f"truncated MIDI meta event: {path}")
+                meta_type = track[cursor]
+                cursor += 1
+                size, cursor = _read_midi_vlq(track, cursor)
+                end = cursor + size
+                if end > len(track):
+                    raise ValueError(f"truncated MIDI meta payload: {path}")
+                payload = track[cursor:end]
+                cursor = end
+                if meta_type == 0x51 and size == 3:
+                    tempo = int.from_bytes(payload, "big")
+                    if tempo:
+                        tempo_events.append((tick, track_index, event_index, tempo))
+                elif meta_type == 0x2F:
+                    end_tick = max(end_tick, tick)
+                    break
+                event_index += 1
+                continue
+
+            if status in (0xF0, 0xF7):
+                size, cursor = _read_midi_vlq(track, cursor)
+                cursor += size
+                if cursor > len(track):
+                    raise ValueError(f"truncated MIDI SysEx payload: {path}")
+                running_status = 0
+                event_index += 1
+                continue
+
+            if status < 0xF0:
+                running_status = status
+                data_size = 1 if (status & 0xF0) in (0xC0, 0xD0) else 2
+            else:
+                data_size = {0xF1: 1, 0xF2: 2, 0xF3: 1, 0xF6: 0}.get(status)
+                if data_size is None:
+                    raise ValueError(f"unsupported MIDI status 0x{status:02X}: {path}")
+                running_status = 0
+            cursor += data_size
+            if cursor > len(track):
+                raise ValueError(f"truncated MIDI event payload: {path}")
+            event_index += 1
+
+    if midi_format == 0 and track_count != 1:
+        raise ValueError(f"format-0 MIDI must contain one track: {path}")
+    if midi_format == 1 and track_count == 0:
+        raise ValueError(f"format-1 MIDI has no tracks: {path}")
+
+    tempo_events.sort(key=lambda event: event[:3])
+    elapsed = 0.0
+    previous_tick = 0
+    tempo = 500_000
+    index = 0
+    while index < len(tempo_events) and tempo_events[index][0] <= end_tick:
+        tick = tempo_events[index][0]
+        elapsed += (tick - previous_tick) * tempo / ticks_per_quarter / 1_000_000
+        previous_tick = tick
+        while index < len(tempo_events) and tempo_events[index][0] == tick:
+            tempo = tempo_events[index][3]
+            index += 1
+    elapsed += (end_tick - previous_tick) * tempo / ticks_per_quarter / 1_000_000
+    return elapsed
+
+
+def _read_midi_vlq(data: bytes, offset: int) -> tuple[int, int]:
+    value = 0
+    while offset < len(data):
+        byte = data[offset]
+        offset += 1
+        value = (value << 7) | (byte & 0x7F)
+        if not byte & 0x80:
+            return value, offset
+    raise ValueError("truncated MIDI variable-length quantity")
 
 
 _SINC_HALF_TAPS = 16      # 32 抽头窗式 sinc（半宽）
@@ -121,6 +248,8 @@ def _find_soundfont() -> Path | None:
         p = Path(env).expanduser()
         if p.exists():
             return p
+    if GM_DLS_SF2.exists():
+        return GM_DLS_SF2
     user_dir = Path.home() / ".local/share/geki106/soundfonts"
     for pat in ("*.sf3", "*.sf2"):
         for p in sorted(user_dir.glob(pat)):
@@ -160,61 +289,34 @@ def _normalize_and_dither(src: Path, dst: Path) -> None:
         w.writeframes(pcm.tobytes())
 
 
-def _trim_trailing_silence(src: Path, dst: Path) -> None:
-    """把 fluid 渲染出的 WAV 尾部**纯数字静音**裁掉，保留 80ms 余量。
+def _trim_rendered_audio_to_midi_end(src: Path, dst: Path, midi: Path) -> None:
+    """Set the rendered PCM length to the exact SMF End-of-Track time."""
+    duration = midi_duration_seconds(midi)
+    with wave.open(str(src), "rb") as reader:
+        channels = reader.getnchannels()
+        sample_width = reader.getsampwidth()
+        sample_rate = reader.getframerate()
+        frame_count = reader.getnframes()
+        raw = reader.readframes(frame_count)
+    if sample_width != 2 or channels < 1:
+        raise ValueError(f"expected 16-bit PCM render, got {sample_width * 8}-bit")
 
-    只裁 `sample == 0` 的尾巴（不含混响衰减），因此不会吃掉真实的弱音尾；
-    裁完的波形让 `mixer.music.play(-1)` 的循环点贴住最后一个发声样本，
-    消除 MIDI EOT 多余静音造成的循环空档。顺带把整体峰值归一到 0.89，
-    避免不同曲目音量差过大（原件由系统合成器统一增益）。
-    """
-    try:
-        with wave.open(str(src), "rb") as w:
-            ch, sw, rate, n = (w.getnchannels(), w.getsampwidth(),
-                               w.getframerate(), w.getnframes())
-            raw = w.readframes(n)
-    except Exception:
+    target_frames = int(round(duration * sample_rate))
+    if frame_count < target_frames:
+        raise ValueError(
+            f"render ended at {frame_count / sample_rate:.6f}s before MIDI EOT "
+            f"at {duration:.6f}s ({midi.name})"
+        )
+    if frame_count == target_frames:
         shutil.copyfile(src, dst)
         return
-    if sw != 2 or ch < 1 or not raw:
-        shutil.copyfile(src, dst)
-        return
-    a = np.frombuffer(raw, dtype="<i2")
-    frames = a.reshape(-1, ch)
-    # 找首/尾的**可闻**样本（整段 300s 也不会爆内存）。
-    # 不能判 `!= 0`：MuseScore 渲染尾部有 -90dB 级稀疏抖动样本，会把 9s 静音误当
-    # "还有声音"。曲目开头普遍还有 1.3–1.7s 数字静音（GS Reset 后的空拍），
-    # 不裁掉的话每圈循环都会先静 1 秒多——用户听到的"过一会才继续"就是它。
-    block = 1 << 20
-    first = -1
-    for start in range(0, len(frames), block):
-        end = min(len(frames), start + block)
-        nz = np.flatnonzero(np.any(np.abs(frames[start:end].astype(np.int32)) > 3, axis=1))
-        if nz.size:
-            first = start + int(nz[0])
-            break
-    last = -1
-    for end in range(len(frames), 0, -block):
-        start = max(0, end - block)
-        nz = np.flatnonzero(np.any(np.abs(frames[start:end].astype(np.int32)) > 3, axis=1))
-        if nz.size:
-            last = start + int(nz[-1])
-            break
-    if first < 0 or last < first:
-        shutil.copyfile(src, dst)
-        return
-    lo = max(0, first - int(0.04 * rate))           # 保留 40ms 起音余量
-    keep = min(len(frames), last + 1 + int(0.15 * rate))
-    out = frames[lo:keep].astype(np.float32)
-    peak = float(np.abs(out).max()) / 32768.0
-    if peak > 0.0:
-        out *= min(1.0, 0.89 / peak)
-    pcm = np.clip(out, -32768, 32767).astype("<i2")
-    with wave.open(str(dst), "wb") as w:
-        w.setnchannels(ch)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(pcm.tobytes())
+
+    frame_bytes = channels * sample_width
+    with wave.open(str(dst), "wb") as writer:
+        writer.setnchannels(channels)
+        writer.setsampwidth(sample_width)
+        writer.setframerate(sample_rate)
+        writer.writeframes(raw[:target_frames * frame_bytes])
 
 
 class Audio:
@@ -503,6 +605,7 @@ class Audio:
             self._say(f"BGM #{track}：缺 fluidsynth")
             return None
         tmp = out.with_suffix(".raw.wav")
+        normalized = out.with_suffix(".normalized.wav")
         def _child_prio() -> None:
             # 流畅优先（2026-11-21 用户反馈）：nice 19 压不住 sf3 样本加载的多线程
             # 峰值（实测 400-650% CPU）——再把整个渲染子进程钉到最后 2 个核，
@@ -535,8 +638,9 @@ class Audio:
                  "-F", str(tmp), str(sf2), str(mid)],
                 check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 preexec_fn=pre)
-            _normalize_and_dither(tmp, out)               # 32bit → 归一 → 抖动 s16
-            self._say(f"BGM #{track} ← {sf2.name} → {out.name}（s32 归一化）")
+            _normalize_and_dither(tmp, normalized)        # 32bit → 归一 → 抖动 s16
+            _trim_rendered_audio_to_midi_end(normalized, out, mid)
+            self._say(f"BGM #{track} ← {sf2.name} → {out.name}（MIDI EOT 精确时长）")
             return out
         except Exception as exc:
             self._say(f"BGM #{track} fluidsynth 渲染失败：{exc}")
@@ -544,6 +648,10 @@ class Audio:
         finally:
             try:
                 tmp.unlink()
+            except OSError:
+                pass
+            try:
+                normalized.unlink()
             except OSError:
                 pass
 

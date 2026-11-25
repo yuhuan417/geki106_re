@@ -1,0 +1,8 @@
+{
+  "name": "geki106-dls-to-sf2",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "spessasynth_core": "4.4.12"
+  }
+}

@@ -3,10 +3,11 @@
 
 运行期（remake/pygame/audio.py）优先直接播放 `remake/godot/assets/bgm/bgm_XX.ogg`；
 本脚本把它们全部预生成，此后游戏启动零渲染、零 CPU 占用。仅当 OGG 缺失
-（或音色库/渲染参数变更）时才需要重跑。
+（或音色库/渲染参数变更）时才需要重跑。每份输出长度精确匹配 MIDI End-of-Track 时长。
 
   python3 remake/build_bgm.py            # 全量 20 首，并行吃满全部 CPU（默认，尽快完成）
   python3 remake/build_bgm.py --nice     # 温柔模式：单进程 nice 19 钉最后 2 核（边玩游戏边构建用）
+  python3 remake/build_bgm.py --force       # 全曲库按当前 MIDI 时值重新构建
   python3 remake/build_bgm.py 8 15       # 只构建指定曲目
 """
 import argparse
@@ -45,9 +46,9 @@ def _child_prio(gentle: bool):
     return _prio
 
 
-def build_track(track: int, sf2: Path, exe: str, gentle: bool) -> str:
+def build_track(track: int, sf2: Path, exe: str, gentle: bool, force: bool) -> str:
     out = OUT_DIR / f"bgm_{track:02d}.ogg"
-    if out.exists():
+    if out.exists() and not force:
         return f"#{track:02d} 已有 → 跳过"
     mid = audio.midi_path(track)
     if not mid.exists():
@@ -56,6 +57,7 @@ def build_track(track: int, sf2: Path, exe: str, gentle: bool) -> str:
         tmp = Path(tmp)
         wav = tmp / "n.wav"
         raw = tmp / "r.wav"
+        midi_timed = tmp / "midi-timed.wav"
         subprocess.run(
             [exe, "-ni", "-q", "-g", "0.62", "-r", str(audio.BGM_RATE),
              "-o", "synth.polyphony=512",
@@ -72,9 +74,10 @@ def build_track(track: int, sf2: Path, exe: str, gentle: bool) -> str:
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=_child_prio(gentle))
         audio._normalize_and_dither(raw, wav)
+        audio._trim_rendered_audio_to_midi_end(wav, midi_timed, mid)
         subprocess.run(
             ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-             "-i", str(wav), "-c:a", "libvorbis", "-q:a", "4", str(out)],
+             "-i", str(midi_timed), "-c:a", "libvorbis", "-q:a", "4", str(out)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return f"#{track:02d} ← {mid.name} → {out.name}（{out.stat().st_size // 1024} KiB）"
 
@@ -84,6 +87,7 @@ def main() -> None:
     ap.add_argument("tracks", nargs="*", type=int, help="只构建这些曲目（默认全部 1..20）")
     ap.add_argument("--nice", action="store_true",
                     help="温柔模式：单进程 nice 19 钉最后 2 核（默认并行吃满全部 CPU）")
+    ap.add_argument("--force", action="store_true", help="覆盖已存在的 OGG")
     args = ap.parse_args()
     tracks = args.tracks or list(range(1, 21))
     sf2 = audio._find_soundfont()
@@ -97,7 +101,8 @@ def main() -> None:
     print(f"[build_bgm] 音色库 {sf2.name}｜fluidsynth {exe}｜并行 {jobs}｜输出 {OUT_DIR}")
     done = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-        futs = {pool.submit(build_track, t, sf2, exe, args.nice): t for t in tracks}
+        futs = {pool.submit(build_track, t, sf2, exe, args.nice, args.force): t
+                for t in tracks}
         for fut in concurrent.futures.as_completed(futs):
             try:
                 print("[build_bgm]", fut.result(), flush=True)

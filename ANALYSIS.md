@@ -727,13 +727,13 @@ ctor 置 0@`0x445F45`，由重生状态机 `0x446540` 在 timer=-1 与 t=120 两
   `[+0x58]`=当前 MIDI-out 设备 id——设值函数 `0x44F390`：**50(0x32)=特殊硬件 MIDI-out
   模式**（`+0x1C` 流对象 `0x44B340` 直写，不走段播放），其余=DirectMusic 端口并清零。
   复位 `0x44FFD0`、释放 `0x44FE60`。
-- **复刻侧 BGM 后端**（非 exe 逻辑，只实现 `0x44F600` 的"无限循环播放"语义）：
-  `fluidsynth` 离线渲染 `extracted/midi/bgm_XX.mid`，音色库优先
-  `~/.local/share/geki106/soundfonts/MuseScore_General_Full.sf3`（其次 FluidR3_GM），
-  可用 `GEKI_SF2` 指定；44.1kHz、512 复音、混响/合唱。音色库可用
-  `tools/install_bgm_soundfont.sh` 免 root 安装（Debian/Ubuntu）。渲染后**裁掉首尾数字静音**
-  （曲目开头常有 1–2s 空拍、EOT 又带 5–9s 静音，如 `bgm_08` 尾约 9s）再交给
-  `pygame.mixer.music.play(-1)`，否则每圈首尾都会静音一段。缓存文件名带 MIDI/音色库 mtime 与设置版本，换库即重渲。
+- **复刻侧 BGM 后端**（非 exe 逻辑）：使用 Windows `gm.dls` 转换出的 SF2 音色库
+  `~/.cache/geki106_re/soundfonts/windows_gm_dls.sf2`，由 `tools/dls_to_sf2/convert.mjs`
+  从 `C:\\Windows\\System32\\drivers\\gm.dls` 生成；`GEKI_SF2` 可显式覆盖。FluidSynth
+  以 44.1kHz、512 复音离线合成。PCM 精确截到 SMF End-of-Track 时长，保留 tick 0 的曲首延迟和
+  谱面休止，不增加前后空白，也不把混响尾音延长到 MIDI 时长之外。
+  DLS 采样/预置被使用，但 FluidSynth 合成器算法和 DirectMusic 运行时不同，不能称为逐样本等同。
+  原作 DirectMusic 使用系统 GM port 或特殊 MIDI-out。音色来源与合成器需分开说明。
 - **渲染必须在后台线程**：fluidsynth 同步渲一首 40–300s 的曲子要 6–20s。若在
   `0x44F600` 的调用帧里同步渲，切 BGM 的那一帧整局卡住；脚本在 boss 前和击破后
   各有一次 `0x0C` 切曲，正好落在这两个时点。复刻侧
