@@ -2435,14 +2435,20 @@ def main():
     import numpy as _np
     from geki import fade_palette as _fp
     _p = _np.arange(1024, dtype=_np.uint8).reshape(256, 4)
-    check("0x44CDF0 的对比/亮度已接进 p4_load_palette(ident, ct, br)："
-          "ct→b(乘性)、br→a(加性)，(0,0) 是恒等；cfg 未定位时不得施加强压暗",
-          list(_sig.parameters) == ["self", "ident", "ct", "br"]
+    _src_p = open(page4.__file__, encoding="utf-8").read()
+    check("0x44CDF0(ident, ct, br, fade)：ct→b(乘性)、br→a(加性)，(0,0) 恒等；"
+          "第 5 参 fade 是 0x44CAA0 第二遍 0x44B790 的亮度（0x4530D6 页10 传 0xFF、"
+          "0x44171C 页9 传 0xFFFFFF01）；cfg 未定位时（0）不得施加强压暗",
+          list(_sig.parameters) == ["self", "ident", "ct", "br", "fade"]
           and (_fp(_p, 0, 0) == _p).all()
           and _fp(_p, -200, -200)[0, 0] == 55
+          and (_fp(_p, 255, 0)[:255, :3] == 255).all()
           and page4.Page4Mixin.p4_451630_adjust(0) == (-200, -200)
-          and "self.p4_pal_adj = (br, ct)" in open(page4.__file__, encoding="utf-8").read()
-          and "只登记" in open(page4.__file__, encoding="utf-8").read(), "")
+          and "self.p4_pal_adj = (br, ct)" in _src_p
+          and "if ct or br:" in _src_p
+          and "self.pal_now = fade_palette(arr, self.fade_a, 0)" in _src_p
+          and img[0x4530D6 - ib:0x4530D6 - ib + 5] == bytes([0x68, 0xFF, 0x00, 0x00, 0x00])
+          and img[0x44171C - ib:0x44171C - ib + 5] == bytes([0x68, 0x01, 0xFF, 0xFF, 0xFF]), "")
     _adj = page4.Page4Mixin.p4_451630_adjust
     check("0x451657..0x45168E 阶段首帧的对比/亮度：两个 7 位字段 ×4−200；"
           "亮度取 (w&0x1FC0000)>>18、对比取 (w&0xFE000000)>>25；"

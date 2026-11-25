@@ -24085,29 +24085,38 @@ class Page4Mixin:
         ct = ((w & 0xFE000000) >> 25) * 4 - 0xC8
         return br, ct
 
-    def p4_load_palette(self, ident: int, ct: int = 0, br: int = 0) -> bool:
-        """`0x44CDF0(mgr, id, 对比, 亮度)`：按 RT_STRING id 载调色板，再按 `0x44B790` 施加强度。
+    def p4_load_palette(self, ident: int, ct: int = 0, br: int = 0,
+                        fade=None) -> bool:
+        """`0x44CDF0(mgr, id, A=亮度, B=对比, fade=淡入起点)`（ret 0x10，4 实参）。
 
-        `0x44CDF0` 把对比写 `[mgr+0xC98]`、亮度写 `[mgr+0xC94]`，`0x44B790` 的公式是
+        `0x44CDF0 → 0x44CAA0` 的两遍 0x44B790 变换（0x44CCA4 与 0x44CCDA）：
+        1) 配置遍：`out = fade_palette(src, a=A, b=B)`（A/B 来自 0x4AB5B8 的 7 位字段 ×4−0xC8）；
+        2) 淡入遍：`out = 0x44B790(src', a=fade, b=[mgr+0xC98])`，并令 `[mgr+0xC94]=fade`；
+           最后 `[mgr+0xC8C]=0`（操作位清空）后 SetPalette。
 
-            v = src + ((src - 0x80) * b >> 6)      ; b = [mgr+0xC98] = 对比
-            out = clamp(v + a, 0, 255)             ; a = [mgr+0xC94] = 亮度
-
-        即 `fade_palette(pal, a=亮度, b=对比)`。页4 阶段首帧载 id 2（bm_pald，暗版）并施加
-        `0x451630` 算出的两个 7 位字段；退出时恢复 id 1（bm_pal，不施加）。
+        页10 进场 `0x4530D6..0x453110` 传 **fade=0xFF**（全白起），页9 的 Edg2 控制器
+        `0x44171C` 传 **fade=0xFFFFFF01（-255，全黑起）**，0x4416E8 传 0。
+        旧实现把第 5 参丢掉了 ⇒ 页9 一进来就是全亮（纯红）、页10 一进来就是黑。
         """
         pal = self.data.get("palettes", {}).get(str(ident))
         if not pal:
             return False
         import numpy as np
+        from geki import fade_palette          # geki 侧 0x44B790 公式
         arr = np.array(pal, dtype=np.uint8)
-        # 0x451630 传进来的对比/亮度先**只登记**，不在此处施加：
-        # `0x44CDF0 → 0x44CAA0(mgr, buf, 对比, 亮度, 淡入)` 之后才是 `0x44CCBD → 0x44B790`
-        # 的一次变换，但 `[0x4AB5B8+4]` 的静态初值是 0 ⇒ 一旦在此施加就是 (-200,-200) 的
-        # 极重压暗，与实机可玩画面矛盾。故本函数只记录，等定位该字的写入方后再按原样施加。
+        # 0x451630 传进来的对比/亮度：`[0x4AB5B8+4]` 的静态初值是 0 ⇒ 解出 (-200,-200)，
+        # 那是很重的压暗、并不等价于「不调整」；复刻侧 cfg 尚未定位写入方，故 0 时跳过。
+        if ct or br:
+            arr = fade_palette(arr, br, ct)
         self.p4_pal_adj = (br, ct)
         self.pal = arr
-        self.pal_now = self.pal
+        self.pal_flags = 0                          # 0x44CD1B [mgr+0xC8C]=0
+        if fade is None:
+            self.pal_now = arr
+        else:
+            self.fade_a = _p4_s32(int(fade))
+            self.fade_b = 0
+            self.pal_now = fade_palette(arr, self.fade_a, 0)   # 第二遍（0x44CCDA）
         return True
 
     # -- 0x458D60 / 进场里尚未定案的四段（显式占位，不猜行为）
@@ -24356,13 +24365,11 @@ class Page4Mixin:
         e.d32(0x1C, t2)
         if e.s32(0x20) == 0:                         # 0x42623D je
             return self.p4_bit_any(0x80)
-        # 0x426244 0x401E6A → 0x44DC50：[mgr+0xC9C] = ([0x1C]−0x10)−0x100、
-        # [mgr+0xC8C] |= 2（亮度槽）——复刻映射到 fade_a/pal_flags。
-        ta = t2 - 0x100                              # 0x426244 的 add eax,-0x100
-        if ta & 0x80000000:
-            ta -= 0x100000000
-        self.fade_a = ta
-        self.pal_flags |= 2
+        # 0x426244 0x401E6A → 0x44DC50：`[mgr+0xC9C] = ([0x1C]−0x10)−0x100`、`[0xC8C] |= 2`。
+        # [0xC9C] 是 0x44D740 的第 2 号调色板槽 → `0x44B8A0`（不是 0x44B790 的亮度/对比）。
+        # 0x44B8A0 的语义尚未定案（§15），复刻侧不映射到 fade_a（旧实现把 −0x100 后的
+        # 无符号 dword 直接塞进 fade_a，页9 的汉字卡时段整屏变黑）。
+        self.p4_pal_slot_c = _p4_s32((t2 - 0x100) & 0xFFFFFFFF)
         return self.p4_bit_any(0x80)
 
     def _beh_441550(self, e) -> bool:
@@ -24423,92 +24430,103 @@ class Page4Mixin:
         return False                                 # 一次性，撒完自灭
 
     def _beh_426C10(self, e) -> bool:
-        """`0x426C10`（0x5F00001E Edg2/元祖文字板，thunk 0x4024C3）六态：
+        """`0x426C10`（0x5F00001E Edg2/元祖文字板，thunk 0x4024C3）六态。
+
+        2026-11-25 逐指令重核（0x426C10..0x426E00）：
+        **state 是 `[+0x1C]`**（ctor 从 `rec+0xC` 的 movsx word 写入，>5 一律走尾），
+        `[+0x24]` 只是"该态首帧"标志、`[+0x28]`=步进、`[+0x2C]`=持续计数。
+        旧实现把 `[+0x24]` 当 state ⇒ 每块板都跑态 0（dst.y-=2）约 2 秒自灭，
+        流 76 的 227 块文字板整段不出现（用户实测页 10 黑屏）。
 
         ```
-        0x426C14 0x45B030(0x56CCB8, 0x100)（bit8 清零测试）置位 → return 0（隐藏）
-        0x426C2C state = [0x24]；≤5 查表 0x426E04 {0xC3F,0xC5C,0xCB9,0xD08,0xD57,0xDA2}，>5 → 0x426DF5
-        态0 0x426C3F：node.dst.y -= 2；>= -0x20 继续（return dst.y>=-0x20）
-        态1 0x426C5C：[0x28]==0 → [0x28] = (dst.x >= [0x20] ? +6 : -6)；
-            dst.x 向 [0x20] 步进，到达 → return dst.x < [0x20]（0=定格）
-        态2 0x426CB9：dst.x 向 rect 中线 ((l+r+1)>>1) 收敛 ≤0xA0 侧 → −6；
-            过中线且 dst.y > [0x20] → dst.y -= 4 → 定格 return 0
-        态3 0x426D08：中线收敛 ≥0x1E0 侧 → +6；过中线且 dst.y < [0x20] → +4 → 定格
-        态4 0x426D57：[0x24]==0 → [0x28]=0xC、[0x20]-=0x4E；[0x2C]>=0x5A 且
-            [0x28]<0xC → ++；dst.x>[0x20] 且 [0x28]≠0 → --；[0x28]==0 → [0x2C]++
-        态5 0x426DA2：[0x24]==0 → [0x28]=-0xC、[0x20]+=0x4E；对称版态4
-        尾 0x426DF5：[0x24]++；return 1
+        0x426C14 0x45B030(0x56CCB8,0x100)：位8 清 → return 0（摘链、隐藏）
+        0x426C2C eax=[+0x1C]；cmp 5; ja 尾；jmp 跳表 0x426E04
+        态0 0x426C3F dst.y-=2；return dst.y >= -0x20
+        态1 0x426C5C 首帧 [0x28]=(dst.x>=[0x20] ? -6 : +6)；dst.x!=目标 →
+            dst.x+=step、dst.y+=step、[0x24]++；相等 → return step<0
+        态2 0x426CB9 mid=dst.x+(r-l+1)/2；mid>0xA0 → dst.x-=6（[0x24]++）；
+            否则 dst.y>[0x20] → dst.y-=4（[0x24]++）；否则尾
+        态3 0x426D08 对称：mid<0x1E0 → dst.x+=6；否则 dst.y<[0x20] → dst.y+=4
+        态4 0x426D57 首帧 [0x28]=0xC、[0x20]-=0x4E；[0x2C]>=0x5A 且 [0x28]<0xC → ++；
+            否则 dst.x>[0x20] 且 [0x28]!=0 → --；[0x28]==0 → [0x2C]++；dst.x+=[0x28]
+        态5 0x426DA2 对称版态4（初值 -0xC、[0x20]+=0x4E）
+        尾 0x426DF5 [0x24]++；return 1
         ```"""
-        if self.p4_bit_none(0x100):                  # 0x45B030(0x56CCB8,0x100)
+        if self.p4_bit_none(0x100):                  # 0x426C14 0x45B030(0x56CCB8,0x100)
             return False
-        st = e.s32(0x24)
+        st = e.g32(0x1C)                             # 0x426C2C：unsigned cmp eax,5
         nd = e.node
         if nd is None:
-            e.d32(0x24, st + 1)
-            return True
+            return self._plate_tail(e)
+        if st > 5:
+            return self._plate_tail(e)               # 0x426C32 ja
         if st == 0:                                  # 0x426C3F
             x, y = nd.dst
             nd.dst = (x, y - 2)
-            return y - 2 >= -0x20
+            return y - 2 >= -0x20                    # 0x426C52 setge
         if st == 1:                                  # 0x426C5C
-            if e.s32(0x28) == 0:
-                e.d32(0x28, 6 if nd.dst[0] >= e.s32(0x20) else -6)
-            if nd.dst[0] == e.s32(0x20):
-                return nd.dst[0] < e.s32(0x20)       # 0x426CAC setl
-            nd.dst = (nd.dst[0] + e.s32(0x28), nd.dst[1] + e.s32(0x28))
-            e.d32(0x24, st + 1)
+            if e.s32(0x24) == 0:                     # 0x426C5F
+                e.d32(0x28, -6 if nd.dst[0] >= e.s32(0x20) else 6)
+            if nd.dst[0] == e.s32(0x20):             # 0x426C88 je
+                return e.s32(0x28) < 0               # 0x426CB5 setl
+            step = e.s32(0x28)
+            nd.dst = (nd.dst[0] + step, nd.dst[1] + step)   # 0x426C90/0x426C9E
+            e.d32(0x24, e.s32(0x24) + 1)             # 0x426CA1
             return True
         if st == 2:                                  # 0x426CB9
-            mid = (nd.rect[0] + nd.rect[2] + 1) // 2  # 0x426CBF cdq/sub = C 截断
-            nx = mid - 6 if mid > 0xA0 else mid
-            if nx <= 0xA0:
-                nd.dst = (nx, nd.dst[1])
-                e.d32(0x24, st + 1)
+            mid = nd.dst[0] + (nd.rect[2] - nd.rect[0] + 1) // 2   # 0x426CBF..CD
+            if mid > 0xA0:                           # 0x426CD4 jle
+                nd.dst = (nd.dst[0] - 6, nd.dst[1])
+                e.d32(0x24, e.s32(0x24) + 1)
                 return True
-            if nd.dst[1] > e.s32(0x20):              # 0x426CE8
-                nd.dst = (nx, nd.dst[1] - 4)
-                e.d32(0x24, st + 1)
+            if nd.dst[1] > e.s32(0x20):              # 0x426CF0 jle
+                nd.dst = (nd.dst[0], nd.dst[1] - 4)
+                e.d32(0x24, e.s32(0x24) + 1)
                 return True
-            return False                             # 0x426DF5 定格继续
+            return self._plate_tail(e)
         if st == 3:                                  # 0x426D08
-            mid = (nd.rect[0] + nd.rect[2] + 1) // 2
-            nx = mid + 6 if mid < 0x1E0 else mid
-            if nx >= 0x1E0:
-                nd.dst = (nx, nd.dst[1])
-                e.d32(0x24, st + 1)
+            mid = nd.dst[0] + (nd.rect[2] - nd.rect[0] + 1) // 2
+            if mid < 0x1E0:                          # 0x426D23 jge
+                nd.dst = (nd.dst[0] + 6, nd.dst[1])
+                e.d32(0x24, e.s32(0x24) + 1)
                 return True
-            if nd.dst[1] < e.s32(0x20):
-                nd.dst = (nx, nd.dst[1] + 4)
-                e.d32(0x24, st + 1)
+            if nd.dst[1] < e.s32(0x20):              # 0x426D3F jge
+                nd.dst = (nd.dst[0], nd.dst[1] + 4)
+                e.d32(0x24, e.s32(0x24) + 1)
                 return True
-            return False
+            return self._plate_tail(e)
         if st == 4:                                  # 0x426D57
-            if e.s32(0x24) == 0:
+            if e.s32(0x24) == 0:                     # 0x426D5a
                 e.d32(0x28, 0xC)
                 e.d32(0x20, e.s32(0x20) - 0x4E)
-            if e.s32(0x2C) >= 0x5A and e.s32(0x28) < 0xC:
-                e.d32(0x28, e.s32(0x28) + 1)
-            elif nd.dst[0] > e.s32(0x20) and e.s32(0x28) != 0:
-                e.d32(0x28, e.s32(0x28) - 1)
-            if e.s32(0x28) == 0:
+            step = e.s32(0x28)
+            if e.s32(0x2C) >= 0x5A and step < 0xC:   # 0x426D71..0x426D7C
+                step += 1
+            elif nd.dst[0] > e.s32(0x20) and step != 0:   # 0x426D8A..0x426D93
+                step -= 1
+            e.d32(0x28, step)
+            if step == 0:                            # 0x426D9e
                 e.d32(0x2C, e.s32(0x2C) + 1)
-            nd.dst = (nd.dst[0] + e.s32(0x28), nd.dst[1])
-            e.d32(0x24, st + 1)
-            return True
-        if st == 5:                                  # 0x426DA2
-            if e.s32(0x24) == 0:
-                e.d32(0x28, 0xFFFFFFF4)
-                e.d32(0x20, e.s32(0x20) + 0x4E)
-            if e.s32(0x2C) >= 0x5A and e.s32(0x28) > -0xC:
-                e.d32(0x28, e.s32(0x28) - 1)
-            elif nd.dst[0] < e.s32(0x20) and e.s32(0x28) != 0:
-                e.d32(0x28, e.s32(0x28) + 1)
-            if e.s32(0x28) == 0:
-                e.d32(0x2C, e.s32(0x2C) + 1)
-            nd.dst = (nd.dst[0] + e.s32(0x28), nd.dst[1])
-            e.d32(0x24, st + 1)
-            return True
-        e.d32(0x24, st + 1)                          # 0x426DF5
+            nd.dst = (nd.dst[0] + step, nd.dst[1])   # 0x426DF2
+            return self._plate_tail(e)
+        # st == 5                                    # 0x426DA2
+        if e.s32(0x24) == 0:
+            e.d32(0x28, -0xC)
+            e.d32(0x20, e.s32(0x20) + 0x4E)
+        step = e.s32(0x28)
+        if e.s32(0x2C) >= 0x5A and step > -0xC:      # 0x426DC4 jle
+            step -= 1
+        elif nd.dst[0] < e.s32(0x20) and step != 0:  # 0x426DD7 jge
+            step += 1
+        e.d32(0x28, step)
+        if step == 0:                                # 0x426DE7
+            e.d32(0x2C, e.s32(0x2C) + 1)
+        nd.dst = (nd.dst[0] + step, nd.dst[1])
+        return self._plate_tail(e)
+
+    def _plate_tail(self, e) -> bool:
+        """`0x426DF5`：`[+0x24]++`（首帧标志置位）并返回 1（定格存活）。"""
+        e.d32(0x24, e.s32(0x24) + 1)
         return True
 
     def _beh_426EB0(self, e) -> bool:
@@ -25034,17 +25052,23 @@ class Page4Mixin:
                 # case17 @ 0x424BB3：居中卡片——beh 0x4022F7 → 0x430520（[+0x1C]=param
                 # 倒数自灭）；层 13；rec0=(l,t) 打包、rec1=(w&0xFFF, h) 打包 ⇒
                 # rect = (l, t, l+w, t+h)；dst = 0x45A690(0x140−w>>1, 0xF0−h>>1)。
-                _l, _t = (a >> 16) & 0xFFFF, a & 0xFFFF
-                _w, _h = b & 0xFFF, (b >> 16) & 0xFFFF
+                # 2026-11-25 逐指令重核（0x424BB3..0x424C46）：
+                #   rec0 = (x0:high16, y0:low16)、rec1 = (hspan:high16, vspan:low12)
+                #   rect = (x0, y0, x0+hspan, y0+vspan)
+                #   dst  = (0x140 − hspan/2, 0xF0 − vspan/2)
+                # 旧实现把两个跨度写反（rect 宽=vspan、高=hspan）⇒ 页8 的卡片刻成
+                # 48×144 竖条，只露出「全音」「つ」这类碎片（用户实测"后面的文字每页都不全"）。
+                _x0 = (a >> 16) & 0xFFFF
+                _y0 = a & 0xFFFF
+                _hs = (b >> 16) & 0xFFFF             # 水平跨度（exe 里叫 edi/h）
+                _vs = b & 0xFFF                      # 垂直跨度（exe 里叫 ebx/w）
                 _e = Ent(a, b, c, d)
                 _e.d32(0x1C, d & 0xFFFFFFFF)      # 0x424BC4 [esi+0x1C] = rec[0xC]
                 _e.d32(0x40, 0x4022F7)
                 _e.beh = 0x430520
-                _e.node = DNode(0xD, _l, _t)
-                _e.node.rect = (_l, _t, _l + _w, _t + _h)
-                # 0x424C21/0x424C32：x = 0x140 − **h**>>1、y = 0xF0 − **w**>>1
-                # （exe 的居中把 w/h 交叉使用——逐字节核对，非笔误修正）
-                _e.node.dst = (0x140 - (_h >> 1), 0xF0 - (_w >> 1))
+                _e.node = DNode(0xD, _x0, _y0)
+                _e.node.rect = (_x0, _y0, _x0 + _hs, _y0 + _vs)
+                _e.node.dst = (0x140 - (_hs >> 1), 0xF0 - (_vs >> 1))
                 _e.node.active = 1
                 self._p4_q("ui4fc").append(_e)
             elif c == 0x5F000018:
@@ -25092,7 +25116,9 @@ class Page4Mixin:
                 _e.beh = 0x426C10
                 # 0x425021/0x425028: movsx word[rec+0xC]→[0x1C]、movsx word[rec+0xE]→[0x20]
                 _e.d32(0x1C, (d & 0xFFFF) - (0x10000 if d & 0x8000 else 0))
-                _e.d32(0x20, ((d >> 16) & 0xFFFF) - (0x10000 if d & 0x8000 else 0))
+                # 0x425028 movsx ecx, word[rec+0xE]：高 16 位的符号位是 d 的 bit31，
+                # 旧实现误用 d & 0x8000（低半字）判符号 ⇒ 负目标值变成 +0x7EC0 之类。
+                _e.d32(0x20, ((d >> 16) & 0xFFFF) - (0x10000 if d & 0x80000000 else 0))
                 _e.d32(0x24, 0)
                 _e.d32(0x28, 0)
                 _e.d32(0x2C, 0)

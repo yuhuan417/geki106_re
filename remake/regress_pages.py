@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import struct
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,35 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 RUN = HERE / "pygame" / "run.py"
 GOLDEN = HERE / "golden_pages.json"
+STATE = HERE / "pygame" / "state.dat"
+
+# 金标生成时的存档基线（0x4AB5B0/0x4AB5B8 两个位域字）。页13 的解锁/选机
+# 会随 state.dat 变化 ⇒ 跑页9/10（0x453050 会写 0x80/0x70000）或页4 存分
+# 之后再回归会得到完全不同的哈希。回归必须固定这份基线，跑完再还原。
+BASELINE_KEYS = 0xB21189E          # 解锁档：0x70000=3、0x800000、0x80 …
+BASELINE_CFG = 0x64C80210          # 明度/彩度中性（各 50 → ×4−0xC8 = 0）
+TBL_4AB5CC = 0x740 + 0x40 * 0x54   # 排行表 7232 字节
+
+
+def _pin_state() -> bytes | None:
+    """把 state.dat 换成金标基线；返回原文件内容（跑完由调用方还原）。"""
+    saved = STATE.read_bytes() if STATE.exists() else None
+    tbl = bytes(TBL_4AB5CC)
+    if saved is not None:
+        try:
+            sys.path.insert(0, str(HERE))
+            from grod_encode import grod_decode, grod_encode
+            body = grod_decode(saved[0x18:])
+            if len(body) >= 8:
+                tbl = body[8:][:TBL_4AB5CC]
+        except Exception:
+            pass
+    sys.path.insert(0, str(HERE))
+    from grod_encode import grod_encode
+    body = struct.pack("<II", BASELINE_KEYS, BASELINE_CFG) + tbl
+    STATE.write_bytes(b"GRCD106A" + struct.pack("<I", len(body))
+                      + struct.pack("<III", 0, 0, 0) + grod_encode(body))
+    return saved
 
 # 每个页选几个有代表性的帧（覆盖：淡入中、稳定、文字出现、收尾前）
 CASES: dict[int, list[int]] = {
@@ -65,7 +95,14 @@ def main() -> int:
     ap.add_argument("--update", action="store_true", help="重打金标")
     args = ap.parse_args()
 
-    cur = collect()
+    saved = _pin_state()
+    try:
+        cur = collect()
+    finally:
+        if saved is None:
+            STATE.unlink(missing_ok=True)
+        else:
+            STATE.write_bytes(saved)
     if args.update:
         GOLDEN.write_text(json.dumps(cur, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(f"金标已写入 {GOLDEN}")

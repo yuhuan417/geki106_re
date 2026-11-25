@@ -34,6 +34,12 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 REMAKE = HERE.parent
 GAME_DIR = Path(os.environ.get("GEKI_DIR", REMAKE.parent.parent / "geki106"))
+def _sg32(v: int) -> int:
+    """dword → 有符号 int32（exe 的 `jl/jle/cmp` 全部按有符号 dword）。"""
+    v = int(v) & 0xFFFFFFFF
+    return v - 0x100000000 if v & 0x80000000 else v
+
+
 DATA_PATH = REMAKE / "pages_data.json"
 
 from page4 import Page4Mixin, P4_REMAP_A, P4_REMAP_B, P4_SE_SLOTS, _p4_11_nearest, page4_cos, page4_sin
@@ -2163,7 +2169,7 @@ class Pages(Page4Mixin):
             # 0x4530D6..0x453117：页10 载调色板 2（暗），失败 → flags |= 2
             _w = self.p4_cfg_word()
             _br, _ct = self.p4_451630_adjust(_w) if _w else (0, 0)
-            if not self.p4_load_palette(2, _ct, _br):
+            if not self.p4_load_palette(2, _ct, _br, 0xFF):   # 0x4530D6 push 0xFF（全白起）
                 self.flags.set(2)
         self.sysf.clear()                             # 0x453125 0x45AF10(0x56CC84,0)
         self.vm_step_frame()                          # 0x453131 0x402149 → 0x460350
@@ -2217,6 +2223,7 @@ class Pages(Page4Mixin):
         self.p4_frames += 1                           # 0x453470 [0x56CCA8]++
         if bl:
             self.band_draw()                          # 0x453481 0x4562A0
+            self.p4_bg_update()                       # 0x458E70 第一条 0x458E75→0x457BD0
             self.p4_dispatch()                        # 0x45348D 0x458E70 全队列
             self.draw()                               # 渲染遍（页≠4 分支 = bg 需下述门）
             # 0x45349B 0x457CB0 背景 12 槽 + 0x4534A5/0x4534AF 0x430840(4CC/4FC) 显示表
@@ -4645,15 +4652,15 @@ class Pages(Page4Mixin):
         [0x1C]++、返り値 = 新フレーム != 0（永生）。"""
         f = e.s32(0x1C)
         if f == 0xB4:
+            # 0x44171C：0x44CDF0(mgr, 3, 明度×4−0xC8, 彩度×4−0xC8, -255)
             b = self.disp_cfg.field(0x1FC0000)
             c = self.disp_cfg.field(0xFE000000)
-            self.pal = self._load_pal(3)
-            self.pal_now = fade_palette(self.pal, b * 4 - 0xC8, c * 4 - 0xC8)
+            self.p4_load_palette(3, c * 4 - 0xC8, b * 4 - 0xC8, -255)
         elif f == 0x1884:
+            # 0x4416E8：0x44CDF0(mgr, 1, 明度, 彩度, 0)
             b = self.disp_cfg.field(0x1FC0000)
             c = self.disp_cfg.field(0xFE000000)
-            self.pal = self._load_pal(1)
-            self.pal_now = fade_palette(self.pal, b * 4 - 0xC8, c * 4 - 0xC8)
+            self.p4_load_palette(1, c * 4 - 0xC8, b * 4 - 0xC8, 0)
         elif f == 0x33AE:
             if self.keys.bits & 0x400:                       # 0x441624 画像要素
                 ship = self.keys.field(0xC000) & 3
@@ -5917,19 +5924,28 @@ class Pages(Page4Mixin):
             e.t -= 1
 
     def _flash(self, e: UiEntity) -> None:
-        """0x427600（0x61000005 的亮度渐变）：cur=[0x1C]、target=[0x20]、step=[0x24]。"""
-        if self.sysf.consume(SYS_FLAG_LEAVE):         # 0x45AFF0(0x56CC84, 0x10)
+        """0x427600（0x61000005 的亮度渐变）：cur=[0x1C]、target=[0x20]、step=[0x24]。
+
+        2026-11-25 修：三个字段在 exe 里都是**有符号 dword**（`jl/jle` 比较），
+        复刻侧此前直接拿无符号值比较 ⇒ 负起点/负目标的渐变第一帧就被钳到目标值
+        （页10 的 `(-255,0,2)`、`(0,-255,-2)` 全变成瞬跳，整段频闪全黑）。
+        另：0x427603 是 `0x45AFF0(0x56CC84,0x10)` **只测不写**，旧实现用 consume 会把
+        离页旗标吃掉。"""
+        if self.sysf.test(SYS_FLAG_LEAVE):            # 0x427603 0x45AFF0(0x56CC84, 0x10)
             self.fade_to(0, 0)                        # 0x44DC10(mgr, 0, 0)
             e.alive = False
             return
-        cur = e.aux + e.a4
-        if e.a4 > 0 and cur > e.a3:
-            cur = e.a3
-        elif e.a4 < 0 and cur < e.a3:
-            cur = e.a3
+        step = _sg32(e.a4)
+        tgt = _sg32(e.a3)
+        cur = _sg32(e.aux) + step
+        if step > 0 and cur > tgt:
+            cur = tgt
+        elif step < 0 and cur < tgt:
+            cur = tgt
         e.aux = cur
+        e.a3 = tgt
         self.fade_to(cur, 0)                          # 0x44DC10(mgr, cur, 0)
-        if cur == e.a3:
+        if cur == tgt:                                # 0x427661 setne
             e.alive = False
 
     # ---- 0x61 族其余型（页4 开场/关末；0x427690/0x427510/0x4272B1/0x427332/0x427710）----
@@ -5994,11 +6010,35 @@ class Pages(Page4Mixin):
         e.alive = False
 
     def _recdrv(self, e: UiEntity) -> None:
-        """0x427710 的 mode 0 路径（0x61000008）：每 4 帧 0x459AE0(0x56B95C)——输入录像 tick，
-        复刻侧 run.py 已每帧记录 ⇒ 空操作；`[e+0x1C]--` 减到 0 死。"""
-        e.aux -= 1
-        if e.aux == 0:
-            e.alive = False
+        """0x427710（0x61000008 状态快照环驱动）：[+0x1C]=倒计时、[+0x20]=mode、
+        [+0x24]=亮度、[+0x28]=步进（ctor 0x427385：`((rec0+0xF)<<5, rec0, -256, 8)`）。
+
+        mode != 0（页9 Edg2 用 rec0=1）：
+          cnt&3==0 → 0x459BC0(0x56B95C) 快照环推进 + `0x44DC10([+0x24], 0)`
+          cnt&3==2 → `0x44DC10([+0x24]−0x10, 0)`
+          [+0x24] += [+0x28]；到 0 时步进改为 0（cnt≠0x20）或 0xF8=248（cnt==0x20，32 帧白闪）
+        mode == 0：每 4 帧只推记录流，无视觉。
+        旧实现只做 `[+0x1C]--` ⇒ 页9 的调色板淡入/白闪全部缺失（进入后一直纯红）。
+        快照环（0x459BC0 生成 0x41000012/13）复刻侧尚未移植，见 ANALYSIS §15。"""
+        cnt = _sg32(e.aux)
+        if _sg32(e.a3) != 0:                          # 0x427713 test eax; je 0x42777d
+            b = _sg32(e.a4)
+            if (cnt & 3) == 0:                       # 0x42771a and 3; je
+                # self._snapshot_ring_tick()          # 0x459BC0（未移植）
+                self.fade_to(b, 0)
+            elif (cnt & 3) == 2:                     # 0x427725 sub 2
+                self.fade_to(b - 0x10, 0)
+            nb = b + _sg32(e.t)                       # 0x42774f..0x427757
+            e.a4 = nb
+            if nb == 0:                              # 0x42775a jne
+                e.t = 248 if cnt == 0x20 else 0      # 0x42775c..0x42776a
+            e.aux = cnt - 1                          # 0x42778d
+            e.alive = (cnt - 1) != 0
+            return
+        if (cnt & 3) == 0:                           # 0x42777d test byte; jne
+            self.replay_record()                     # 0x459AE0（run.py 已每帧记录）
+        e.aux = cnt - 1
+        e.alive = (cnt - 1) != 0
 
     # 0x427710（0x61000008 = 状态快照环驱动，页2 不用）
     def _fade_in(self, e: UiEntity) -> None:
