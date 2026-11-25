@@ -147,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     inp = geki.Input()
     inp.kbd_move = not bool(args.no_kbd_menu)   # 真机默认：方向键一按一档
     timer = geki.Timer()
+    timer.fixed = args.fixed
     flags = geki.Flags()
     aud = audio_mod.Audio(enabled=not args.mute)
     print(f"[audio] {aud.reason}", flush=True)

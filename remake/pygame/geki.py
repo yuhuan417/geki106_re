@@ -1029,6 +1029,9 @@ class Timer:
         self.consumed = 0
         self.catchup = 0
         self._t0 = time.perf_counter()
+        self.fixed = False
+        self._elapsed_origin = self._t0
+        self._elapsed_frame_origin = 0
         self._frozen_at: float | None = None
 
     def set_period(self, period: int) -> bool:
@@ -1036,8 +1039,22 @@ class Timer:
         self.period = int(period) or 60
         self.consumed = 0
         self._t0 = time.perf_counter()
+        self._elapsed_origin = self._t0
+        self._elapsed_frame_origin = 0
         self._frozen_at = None          # 0x45A490 重建定时器
         return True
+
+    def reset_elapsed(self) -> None:
+        """0x45A630：复位 [+0x20]，不重置帧门计数。"""
+        self._elapsed_origin = time.perf_counter()
+        self._elapsed_frame_origin = self.consumed
+
+    def elapsed_ms(self) -> int:
+        """0x45A610：读取页2校时使用的 elapsed milliseconds。"""
+        if self.fixed:
+            frames = self.consumed - self._elapsed_frame_origin
+            return int(frames * 1000 / self.period)
+        return int((time.perf_counter() - self._elapsed_origin) * 1000)
 
     def kill(self) -> bool:
         """0x45A510。"""
@@ -1755,6 +1772,7 @@ class Pages(Page4Mixin):
         self.scene_reset()
         self.sky_color = 0xB4
         self.p2_loaded.clear(); self.p2_sky.clear()
+        self.p2_resync_waiting: int | None = None
         # 0x452D3E：0x459C90(0x56B95C, cfg) —— CHANGEDISPLAY==0 或 OPMOVIE!=0 时挂上资源 77 记录流
         self.p2_stream = None
         p = REMAKE / "pygame" / str(p2.get("stream", "assets/p2_stream.bin"))
@@ -6857,19 +6875,30 @@ class Pages(Page4Mixin):
                 e2.disp = self._p2_panel_node(pc)
                 self.log(f"page2 t={t} 4F 面板 a={pa} b={pb} c=0x{pc:02X} 层{e2.disp.layer}")
 
-        # ⑬ 计时器校正表（0x440D3F..0x440E07）：t 落入窗口 ⇒ 把 [ent+0x1C] 拉到 t2
+        # ⑬ 计时器校正表（0x440D3F..0x440E07）：到窗口末帧后按 elapsed-ms 等待。
         for (t1, t2, ms) in P2_RESYNC:
             if t1 <= t <= t2:
-                # 0x440DF2：`ms >= [0x4AB570+0x20]` 时写 t2-1（差 1 帧）；复刻版定时器不记该计数，
-                # 取"帧门已跟上"分支 → t2，并在日志里注明分支。
-                # 本行为在开头就 e.t += 1（等价于原作结尾的 [ent+0x1C]=t+1），
-                # 所以这里要写 t2+1 才能让下一帧从 t2+1 继续（写 t2 会卡在窗口里死循环）。
-                e.t = int(t2) + 1
-                self.log(f"page2 t={t} 计时器校正 → {t2}（ms=0x{ms:X}）")
+                t2, ms = int(t2), int(ms)
+                elapsed = self.timer.elapsed_ms()  # 0x45A610
+                if ms >= elapsed:
+                    # 原行为体在末尾递增：deadline 未到时写 t2-1，下一帧停在 t2。
+                    # 复刻体在函数开头递增，因此直接将下一帧设为 t2。
+                    e.t = t2
+                    if self.p2_resync_waiting != t2:
+                        self.log(f"page2 t={t} 校时窗末帧 t={t2} 等待 "
+                                 f"deadline=0x{ms:X} elapsed={elapsed}ms")
+                    self.p2_resync_waiting = t2
+                else:
+                    # deadline 已过：原行为体写 t2，函数末尾递增到 t2+1。
+                    e.t = t2 + 1
+                    if self.p2_resync_waiting == t2:
+                        self.log(f"page2 校时窗 t={t2} 继续 elapsed={elapsed}ms")
+                    self.p2_resync_waiting = None
                 break
 
-        # ⑭ 0x440E09：t == 0 → 0x45A630(0x4AB570, 0) 帧门基准清零（复刻版定时器无该计数，只记日志）
+        # ⑭ 0x440E09：t == 0 → 0x45A630(0x4AB570, 0) 重置 [+0x20] elapsed ms。
         if t == 0:
+            self.timer.reset_elapsed()
             self.log(f"page2 t={t} 帧门基准清零（0x45A630(0x4AB570,0)）")
 
         # ⑮ 0x440E19：t == 0x10F7 → flags |= 0x10000（去页3）
