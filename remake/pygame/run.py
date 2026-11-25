@@ -61,9 +61,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
-    ap.add_argument("--page9-preview", type=int, default=-1, metavar="N",
-                    help="调试：--page 9 直跳时先跑页4 第 N 关（1..7）直到场景快照环"
-                         "录满，再用该块立即回放（正常流程不受影响；空环直跳时页9 只剩色带）")
+    ap.add_argument("--page9-preview", nargs="?", type=int, const=0, choices=range(8), metavar="N",
+                    help="调试：预跑页4，按原时间表预览页9快照。省略 N 录开场及各关，"
+                         "给定 N=1..7 仅预跑该关")
     ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
     ap.add_argument("--audio-driver", default="", help="强制 SDL 音频驱动（pulseaudio / alsa / dummy）")
     args = ap.parse_args(argv)
@@ -284,7 +284,10 @@ def main(argv: list[str] | None = None) -> int:
     pages.frame_input = _frame_input
     pages.frame_present = _present_frame
 
-    pages.start(args.page)
+    preview = args.page == 9 and args.page9_preview is not None
+    pages.save_replays = not preview
+    if not preview:
+        pages.start(args.page)
 
     out_dir = Path(args.out)
     shot_frames: set[int] = set()
@@ -304,60 +307,51 @@ def main(argv: list[str] | None = None) -> int:
     pend_shot = pend_lock = pend_capture = False  # 自上一帧以来是否出现过按下（防慢帧漏采样）
     pend_dir = {"left": 0, "right": 0, "up": 0, "down": 0}   # 方向键的点按次数
     _t_last = time.perf_counter()
-    if args.page9_preview > 0:
-        # 调试开关（非原作流程）：页9 直跳时没有"上一页"留下的快照环，画面只剩脚本色带。
-        # 这里按正式流程先跑一关（单关链 12+4(N-1)），让页4 的 0x61000008(mode0)
-        # 把真实的 0x56B95C 场景快照环录满；再把第一个回放的块号改成本关块。
+    if args.page9_preview is not None:
         if args.page != 9:
             print("[preview] --page9-preview 只对 --page 9 生效（忽略）", file=sys.stderr)
         else:
-            _stage = max(1, min(7, args.page9_preview))
-            _target = _stage if _stage <= 6 else 8      # 关7 由流52 同时录块8/9
-            pages.theatre = 0x20000 + (_stage - 1)
-            print(f"[preview] 先跑页4 第 {_stage} 关（目标环块 {_target}）录制快照…", flush=True)
+            stage = args.page9_preview
+            targets = {6: (6, 7), 7: (8, 9)}.get(stage, (stage,)) if stage else tuple(range(10))
+            print(f"[preview] 预跑页4，录制快照块 {list(targets)}", flush=True)
+            # 走正常开局路径。单关调试选用 0x499798 对应的无开场分关链。
+            pages.keys.bits &= ~1
+            pages.theatre = 0x20000
             pages.start(4)
-            # 调试捷径：整局链 0 会把 45..52 串起来（要跑 5 万帧才到关7）；这里换成
-            # 单关链 12+4(N-1)（表 0x499798：12→46、16→47…36→52），只跑该关。
-            # 该关自己的 OP0D/OP0B/录制记录与整局逐字节相同，录出的窗口也相同。
-            pages.vm.load_chain(12 + 4 * (_stage - 1))
+            if stage:
+                pages.scene_reset()
+                pages.vm.load_chain(12 + 4 * (stage - 1))
 
             def _warm_input() -> None:
-                # 预热期（调试专用）：持续射击 + 无敌 + 不触发 continue 流程，
-                # 只为把该关脚本跑到快照录制点。正常流程不会走这里。
-                _build_record()
-                rec = pages.inp.rec
-                rec.b1 = True
-                st = pages.p4_stat
-                st[0x4CD590 + 0x3C] = 0          # 继续门（避免 continue 提示挂起）
-                st[0x4CD590 + 0x30] = 6          # 残机（0x423B89 用 0 判定失败）
-                pages.sysf.bits = 0              # 继续总控会置 0x10 冻结 VM
+                inp.build({"shot": True}, (False, False, False))
+                pages.p4_stat[0x4CD590 + 0x3C] = 0
+                pages.p4_stat[0x4CD590 + 0x30] = 6
+                # 固定输入无法保证击破 Boss 或操作结算面板。
+                pages.sysf.clear()
 
-            pages.frame_input = _warm_input
+            def _warm_continue() -> None:
+                inp.build({"shot": not inp.rec.b0}, (False, False, False))
+
+            pages.frame_input = _warm_continue
             pages.p4_warmup_invincible = True
-            _cap = 12000
-            _t0 = time.time()
-            for _i in range(_cap):
-                _warm_input()
-                timer.consumed += 1
-                pages.advance()
-                if pages.page != 4:
-                    break
-                if time.time() - _t0 > 60:   # 兜底：关 1..6 的录制点在关卡中段
-                    print("[preview] 预热超时（60s），改用已录到的块", flush=True)
-                    break
-                if _i % 120 == 0 and _i:
-                    _n = sum(1 for x in pages.snap_ring[_target] if x is not None)
-                    print(f"[preview]   {_i} 帧，块{_target} {_n}/120", flush=True)
-                if all(x is not None for x in pages.snap_ring[_target]):
-                    break
-            pages.p4_warmup_invincible = False
-            pages.frame_input = _frame_input
-            _blocks = [b for b in range(10)
-                       if any(x is not None for x in pages.snap_ring[b])]
-            print(f"[preview] 已录块 {_blocks}", flush=True)
-            pages.p9_preview_block = _blocks[-1] if _blocks else None
-            pages.flags.clear()
-            pages.start(9)          # 录完环后重新进页9（环不清）
+            recorded = set()
+            try:
+                for _ in range(75000 if not stage else 14000):
+                    _warm_input()
+                    keep_going = pages.p4_step()
+                    for block in targets:
+                        if block not in recorded and pages.snap_ring[block][-1] is not None:
+                            recorded.add(block)
+                            print(f"[preview] 块 {block} 已录满 120 帧", flush=True)
+                    if len(recorded) == len(targets) or not keep_going:
+                        break
+            finally:
+                pages.p4_warmup_invincible = False
+                pages.frame_input = _frame_input
+            if len(recorded) != len(targets):
+                ap.exit(1, f"[preview] 快照未录满，已完成 {sorted(recorded)}，"
+                           f"当前流 {pages.vm.cur_id} @ {pages.vm.frame}\n")
+            pages.start(9)
 
 
     while running and pages.page != 0 and not pages.quit:
@@ -372,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
             # 注意：不能放在帧门之外 —— Input.build 会推进按键的"上帧状态"，
             # 非到期帧也调用会把按下沿（e0/e1）吃掉，导致"按 C 没反应"。
             _build_record()
+            page_before_step = pages.page
             pages.advance()
             aud.poll()          # BGM 后台渲染完成 → 主线程开始播放（不阻塞切曲帧）
             frame += 1
@@ -382,7 +377,8 @@ def main(argv: list[str] | None = None) -> int:
                 _t_last = _now
                 print(f"[fps] frame={frame} page={pages.page} {_fps:.1f} fps", flush=True)
             # ---- 显示（0x44C350 索引→RGB + present）
-            _present_frame()
+            if page_before_step not in (8, 9, 10) or pages.page != page_before_step:
+                _present_frame()
             if frame in shot_frames:
                 out_dir.mkdir(parents=True, exist_ok=True)
                 pygame.image.save(screen, str(out_dir / f"page{pages.page}_f{frame}.png"))
@@ -392,7 +388,8 @@ def main(argv: list[str] | None = None) -> int:
         elif not args.headless:
             pygame.time.wait(1)
 
-    pages.grcd_write()           # 0x458640：程序退出写 state.dat
+    if not preview:
+        pages.grcd_write()       # 0x458640：程序退出写 state.dat
     print(f"[end] page={pages.page} frame={frame} flags=0x{flags.bits:X}")
     for line in pages.trace:
         print("[trace]", line)

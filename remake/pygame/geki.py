@@ -34,6 +34,12 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 REMAKE = HERE.parent
 GAME_DIR = Path(os.environ.get("GEKI_DIR", REMAKE.parent.parent / "geki106"))
+if str(REMAKE.parent) not in sys.path:
+    sys.path.append(str(REMAKE.parent))
+
+from layer_decode import layer_decode
+
+
 def _sg32(v: int) -> int:
     """dword → 有符号 int32（exe 的 `jl/jle/cmp` 全部按有符号 dword）。"""
     v = int(v) & 0xFFFFFFFF
@@ -1421,12 +1427,11 @@ class Pages(Page4Mixin):
         self.p13_mono = False        # 0x43F246 的 16 色近似标志
         self.p13_tiles = None        # 层4 的 (2,2,256,8,8) 瓦片表
         # 0x56B95C 场景快照环：10 块 × 120 帧（每 4 帧一帧 ⇒ 每块约 8 秒）。
-        # 页4 各关脚本 t=0 的 0x61000008(mode0, rec3=块号) 录制，页9 Edg2 的
+        # 页4 各关脚本定点生成 0x61000008(mode0, rec3=块号) 录制，页9 Edg2 的
         # 0x61000008(mode1) 逐块回放（0x459AE0/0x459BC0）。
         self.snap_ring = [[None] * 120 for _ in range(10)]
         self.snap_cur = 0            # [0x56B95C+0x12C4]
         self.snap_start = 0          # [0x56B95C+0x12C8]
-        self.p9_preview_block = None # 调试：--page9-preview 用，首个回放改用该块
         self.posq = []               # 0x4AD43C 位置对象队列（0x2300001A）
         self.wipe4f = []             # 0x4F000009 ×2：0x4AD4CC 里擦切开窗（行为 0x439BD0）
         self.spark4cc = []           # 0x41000004：4AD4CC 里的命中火花（行为 0x429D40）
@@ -2187,13 +2192,13 @@ class Pages(Page4Mixin):
     def page_results_enter(self) -> None:
         """`0x453050`（页8/9/10 共用进场）：清 7 队列 → 按页号装结局链
         （8→0x5A=流61 Edg1、9→0x5C=流62 Edg2、10→0x62=流76 ExtrEnding）
-        → 页10 额外载暗调色板 → 清 VM 冻结门 → VM 走一步 → [0x56CCA8]=0
+        → 页10 载 palette 2 并从全白起 → 清 VM 冻结门 → VM 走一步 → [0x56CCA8]=0
         → 页9 解锁档提升 → 速度=1 → 计时器。"""
         self.flags.clear()
         self.screen_fill = -1
         # 0x453053..0x453094：清 0x4AD40C/43C/46C/49C/4CC/4FC/52C 七队列
         for q in (self.actorq, self.p4_q43c, self.ui46c, self.p4_ui49c,
-                  self._p4_q("ui4cc"), self.ui4fc, self.ui52c):
+                  self._p4_q("ui4cc"), self.ui4fc, self.ui52c, self.trailq):
             q.clear()
         self.spark4cc.clear()
         self.wipe4f.clear()
@@ -2240,11 +2245,15 @@ class Pages(Page4Mixin):
         skip = self.p4_speed != 0 and (self.p4_frames % self.p4_speed) != 0
         bl = not skip
         n = 1 if self.p4_speed != 0 else 4            # 0x45332D neg/sbb/and 0xFD/add 4
-        self.p4_pump(n)                               # 0x453342（含 0x56CCAC 计数）
-        if not skip:
+        if bl:
+            self.p4_pump(n)                           # 0x453342（含 0x56CCAC 计数）
+            self.present()                            # 0x45335B → 0x44D740
             self.begin_frame()                        # 0x45335B 0x458CB0
-        self.vm_step_frame()                          # 0x453360 0x460350
-        vm_done = self.vm.term != 0 or not self.vm.buf
+            frame_present = getattr(self, "frame_present", None)
+            if frame_present is not None:
+                frame_present()
+        self.vm.flags = self.sysf.bits
+        vm_done = self.vm_step_frame()                # 0x453360 0x460350
         if self.replay_mode:                          # 0x453377 byte[0x56CCB5]
             self.replay_play()                        # 0x4533A5 0x45D2B0 路径
         else:
@@ -2259,23 +2268,18 @@ class Pages(Page4Mixin):
         self.p4_frames += 1                           # 0x453470 [0x56CCA8]++
         if bl:
             self.band_draw()                          # 0x453481 0x4562A0
-            self.p4_bg_update()                       # 0x458E70 第一条 0x458E75→0x457BD0
-            self.p4_dispatch()                        # 0x45348D 0x458E70 全队列
-            # 0x4AD4CC 在页8/9/10 的复刻侧别名是 trailq（快照回放节点落这里）
-            self.tick_ui(self.trailq)
-            self.trailq = [e for e in self.trailq if e.alive]
-            self.draw()                               # 渲染遍（页≠4 分支 = bg 需下述门）
-            # 0x45349B 0x457CB0 背景 12 槽 + 0x4534A5/0x4534AF 0x430840(4CC/4FC) 显示表
-            # —— 复刻侧集中在 draw()（bg 走 p4_bg_draw，门扩到 8/9/10）
-        if self.page == 0x0A and vm_done:             # 0x4534C1 页10 且流耗尽
-            self.p4_45e020()                          # 0x4534C9 0x45EED0 HUD 链
-            self.p4_460a90_stub()                     # 0x4534D3 0x460A90 命数字
+        self.p4_bg_update()                           # 0x45348D → 0x458E70，快进也执行
+        self.p4_dispatch()
+        self.band_advance()                           # 0x458EC0 → 0x456270
+        if bl:
+            self.p4_bg_draw()                         # 0x45349B → 0x457CB0
+            self._render_queue(self.canvas, self._p4_q("ui4cc"))
+            self._render_queue(self.canvas, self.ui4fc)
+            if vm_done and self.page != 0x0A:         # 0x4534C7 页10 跳过 HUD
+                self.p4_hud_draw()                    # 0x4534C9/0x4534D3
+        if self.page == 0x0A and vm_done:
             self.flags.set(0x10000)                   # 0x4534F0
         return self.flags.is_empty()                  # 0x4534FF 0x45AFF0(0x4AB5C0,0)
-
-    def p4_460a90_stub(self) -> None:
-        """`0x460A90(0x4CD590)`：命数字形矩形重写（页10 收尾用；复刻侧暂记日志）。"""
-        self.log("page10: 0x460A90（命数字形）—— 未逐字节落地")
 
     def page_results_finish(self) -> None:
         """`0x4535A0`：停 BGM → KillTimer → **非回放页把本局输入落盘 rp_last**
@@ -2960,12 +2964,7 @@ class Pages(Page4Mixin):
                 e.a3 = int(x)
                 e.a4 = -256
                 e.t = 8
-                _blk = int(a3) & 0xFFFF
-                if self.p9_preview_block is not None:      # 调试开关：只顶第一个回放
-                    _blk = int(self.p9_preview_block) & 0xFFFF
-                    self.p9_preview_block = None
-                e.p["ring_block"] = _blk
-                self.snap_seek(_blk)
+                self.snap_seek(int(a3))
             elif type_word == 0x61000001:
                 # ctor 0x427259：`push 0x8000; 0x45AF30(0x56CCB8)`（bit15 置 → 0x427510 门
                 # 保持关闭）；[+0x20]=rec0(掩码)、[+0x24]=rec1(生成数)、[+0x28]=rec3(生成型)。
@@ -4694,8 +4693,8 @@ class Pages(Page4Mixin):
         0xB4   → 0x44171C：0x44CDF0(mgr, 3, 彩度', 明度', -255) パレット3＋配置淡入
         0x1884 → 0x4416E8：0x44CDF0(mgr, 1, 彩度', 明度', 0)　パレット1
         0x33AE → 0x44161A：0x45AFF0(0x4AB5B0, 0x400)（画像要素）置時
-                 層3 ← 資源 0x53+選機[+0x57 週目0x4000且選機≠3]（640×480 表面作成、
-                 0x4022E3 GGD 展開、0x44CE60 色键）＋ 0x4F00000C 全画面表示体生成。
+                 層3 ← GROD 0x53+選機[+4 週目0x4000且選機≠3]（640×480 表面作成、
+                 0x44C350 → 0x45BC00 字典 RLE 展開、0x44CE60 色键）＋ 0x4F00000C。
         [0x1C]++、返り値 = 新フレーム != 0（永生）。"""
         f = e.s32(0x1C)
         if f == 0xB4:
@@ -4711,12 +4710,11 @@ class Pages(Page4Mixin):
         elif f == 0x33AE:
             if self.keys.bits & 0x400:                       # 0x441624 画像要素
                 ship = self.keys.field(0xC000) & 3
-                if self.p4_sys_bits() & 0x4000 and ship != 3:  # 0x441653 週目バリアント
-                    res = 0x53 + ship + 0x57
-                else:
-                    res = 0x53 + ship
-                if not self.layers.load(3, res):
-                    self.flags.set(2)                        # 0x4520xx 系の失敗旗
+                base = 0x57 if self.sysb8.test(0x4000) and ship != 3 else 0x53
+                pixels, _, _ = layer_decode(self.vm.bank.get(base + ship), W, H)
+                self.layers.create(3, W, H)                 # 0x441675 → 0x44C560
+                self.layers.tab[3].buf[:] = np.frombuffer(pixels, dtype=np.uint8).reshape(H, W)
+                self.layers.tab[3].dirty = True
                 self.layers.color_key(3, 0)                  # 0x441699 0x44CE60(3,0)
                 self.spawn(self._p4_q("ui4cc"), 0x4F00000C, 0, 0, 0)  # 0x4416C8
         e.d32(0x1C, (f + 1) & 0xFFFFFFFF)
@@ -6063,10 +6061,9 @@ class Pages(Page4Mixin):
         mode != 0（页9 Edg2 用 rec0=1）：
           cnt&3==0 → 0x459BC0(0x56B95C) 快照环推进 + `0x44DC10([+0x24], 0)`
           cnt&3==2 → `0x44DC10([+0x24]−0x10, 0)`
-          [+0x24] += [+0x28]；到 0 时步进改为 0（cnt≠0x20）或 0xF8=248（cnt==0x20，32 帧白闪）
+          [+0x24] += [+0x28]；到 0 时步进改为 0，倒数 32 帧时改为 -8 以淡出。
         mode == 0：每 4 帧只推记录流，无视觉。
-        旧实现只做 `[+0x1C]--` ⇒ 页9 的调色板淡入/白闪全部缺失（进入后一直纯红）。
-        快照环（0x459BC0 生成 0x41000012/13）复刻侧尚未移植，见 ANALYSIS §15。"""
+        """
         cnt = _sg32(e.aux)
         if _sg32(e.a3) != 0:                          # 0x427713 test eax; je 0x42777d
             b = _sg32(e.a4)
@@ -6078,7 +6075,7 @@ class Pages(Page4Mixin):
             nb = b + _sg32(e.t)                       # 0x42774f..0x427757
             e.a4 = nb
             if nb == 0:                              # 0x42775a jne
-                e.t = 248 if cnt == 0x20 else 0      # 0x42775c..0x42776a
+                e.t = -8 if cnt == 0x20 else 0       # 0x427767 dec eax; and al,0xf8
             e.aux = cnt - 1                          # 0x42778d
             e.alive = (cnt - 1) != 0
             return
@@ -6481,8 +6478,9 @@ class Pages(Page4Mixin):
                              int(band.src[2]), int(band.src[3]),
                              int(band.dst[0]), int(band.dst[1]),
                              1 if band.visible else 0))
-        q4cc = self.trailq if getattr(self, "page", 4) != 4 else self._p4_q("ui4cc")
-        for q in (q4cc, self.p4_q43c, self.p4_ui49c, self.actorq,
+        for spark in self.spark4cc:
+            ents.append((1, *spark["rect"], spark["dx"], spark["dy"], 1))
+        for q in (self._p4_q("ui4cc"), self.p4_q43c, self.p4_ui49c, self.actorq,
                   self.ui46c, self.ui4fc):
             for e in q:
                 if not getattr(e, "alive", True):
@@ -6496,13 +6494,13 @@ class Pages(Page4Mixin):
         """`0x459AE0`：mode 0 —— 环形缓冲未满（<0x78）时抓一帧场景快照。"""
         if self.snap_cur >= 120:
             return
-        self.snap_ring[self.snap_start % 10][self.snap_cur] = self.scene_capture()
+        self.snap_ring[self.snap_start][self.snap_cur] = self.scene_capture()
         self.snap_cur += 1
 
     def snap_play(self) -> None:
         """`0x459BC0`：mode 1 —— 取当前块的当前帧场景并应用；首帧 type=0x41000013
         （重建层），其余 0x41000012（只更新色带/显示节点）；游标到 0x78 后钳在 0x77。"""
-        rec = self.snap_ring[self.snap_start % 10][min(self.snap_cur, 119)]
+        rec = self.snap_ring[self.snap_start][self.snap_cur]
         if rec is not None:
             self.apply_snapshot(rec, 0x41000013 if self.snap_cur == 0 else 0x41000012)
         self.snap_cur += 1
@@ -6517,20 +6515,23 @@ class Pages(Page4Mixin):
             self.layers.free_all()                     # 0x45FE56
         for i, rid in enumerate(rec.get("layers") or []):
             rid = int(rid)
-            if not rid:
+            if rid in (0, 5):
+                # 0x44C770 释放当前表面，即使这不是该块的首帧。
+                if self.layers.tab[i].bind_id != rid:
+                    self.layers.create(i, W, H)
+                    self.layers.tab[i].bind_id = rid
                 continue
-            lay = self.layers.tab.get(i)
-            if lay is None or int(getattr(lay, "bind_id", -1)) != rid:
-                self.layers.load(i, rid)               # 0x44C640
+            if not self.layers.bind(i, rid):           # 0x45FE5D → 0x44C640
+                self.flags.set(2)                     # 0x45FF19
+                return
             self.layers.color_key(i, 0)                # 0x44CE60
-        bands = rec.get("bands") or []
-        if bands:
-            args = rec.get("band_args") or [0, 0]
-            self.band_push(bands, len(bands), int(args[0]), int(args[1]))  # 0x4561D0
-        q = self.trailq if getattr(self, "page", 4) != 4 else self._p4_q("ui4cc")
-        for r in rec.get("ents") or []:
+        bands = rec["bands"]
+        start, scroll = rec["band_args"]
+        self.band_push(bands, len(bands), start, scroll)  # 0x4561D0
+        q = self._p4_q("ui4cc")
+        for r in rec["ents"]:
             lay, l, t, rr, bb, x, y, on = (int(v) for v in r)
-            if not (on & 0xFF) or lay == 0x0D:         # 0x45FEA8 / 0x45FEB6
+            if not (on & 0xFF) or lay == 0x0D:         # 0x45FEAC / 0x45FEB6
                 continue
             e = UiEntity(type_word=int(typ))
             e.beh = 0x430520                           # 0x4295FF ctor 的 [+0x40]=0x4022F7

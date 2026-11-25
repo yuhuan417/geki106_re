@@ -1197,20 +1197,17 @@ class Ent:
         if info.get("s20_seed"):                       # 0x403AC4（0x2C000001）
             self.d32(0x20, ((((a & 0xFFF) | 0xFFFA0000) << 4)) & 0xFFFFFFFF)
         if info.get("s2907"):                          # 0x41C16E：0x29000007..0B 共用
-            tgt = self._deref_link(d) if d else None
             if a != 0:                                  # rec0 != 0：普通僚机
                 self.d32(0x18, 0x14)
-                if tgt is not None:
-                    self.d32(0x1C, tgt.g32(0))
-                    self.d32(0x20, tgt.g32(4))
-                    self.d32(0x24, tgt.g32(8))
+                if isinstance(d, tuple):                # 0x41DDC0..0x41DDC7 的三 dword 参数
+                    for offset, value in zip((0x1C, 0x20, 0x24), d):
+                        self.d32(offset, value & 0xFFFFFFFF)
                 self.d32(0x28, 0)
                 self.d32(0x2C, 0)
                 self.d32(0x30, 0)
             else:                                       # rec0==0：Boss 入场体
                 # 0x41C1B9 分支：rec3 是**标量**（sar 8 = 入场态 1..7），不解引用。
-                # 脚本记录 (x=0, prm=0x330/0x260/0x590/0x6C0) 全走此支——§16.385 的
-                # "rec3 当指针"矛盾由此闭合（x≠0 的普通支对随附脚本为死码）。
+                # 脚本用标量进入此支，0x41DD70 生成护卫时传递三 dword 记录。
                 self.d32(0x40, 0x4016C7)
                 self.beh = 0x41DD70
                 self.d32(0x04, 0x298)
@@ -7133,8 +7130,8 @@ def _beh_419A30(self, e) -> bool:
     [0x24] += [0x28]（纵摆累积）、y = [0x24]>>4；
     [0x28] += ([0x20] ≥ y ? +1 : −1)（setge; dec; and 0xFFFFFFFE; inc）；
     x −= 1；0x401BA4(0x10,1,0x30) 特效。
-    [0x2C]（伴随句柄）==0 → 发 0x28000008 @ (x+0x60, y+0xC0) 入 0x4AD43C、
-    [0x2C]=新体指针（复刻存句柄）；
+    [0x2C]（伴随句柄）==0 → 发 0x28000008 @ (x+0x60, y+0xC0) 入 0x4AD43C，
+    rec3=父体指针（0x419A84），[0x2C]=新体指针；
     [0x2C]==−1 → (x&0x1F)==0 → 0x43B070(e,0)；
     否则链体死（byte[+0x34]）→ [0x2C]=−1。
     node dst=(x−0x18,y−0x18)；return HP≠0 且 x>−0x18。"""
@@ -7148,9 +7145,12 @@ def _beh_419A30(self, e) -> bool:
     self.p4_4193e0(e, 0x10,1,0x30)
     h = e.s32(0x2C)
     if h == 0:
-        c = self._p4_ent43c(0x28000008, e.s32(0x04) + 0x60, e.s32(0x08) + 0xC0)
-        e.d32(0x2C, (id(c) & 0x7FFFFFFF))
-        getattr(self, "p4_links", {})[id(c) & 0x7FFFFFFF] = c
+        parent = id(e) & 0x7FFFFFFF
+        self.p4_links[parent] = e
+        c = self._p4_ent43c(0x28000008, e.s32(0x04) + 0x60, e.s32(0x08) + 0xC0, parent)
+        child = id(c) & 0x7FFFFFFF
+        e.d32(0x2C, child)
+        self.p4_links[child] = c
     elif h == -1:
         if (e.s32(0x04) & 0x1F) == 0:
             self.p4_43B070(e, 0)
@@ -7396,11 +7396,11 @@ def _beh_41A480(self, e) -> bool:
             while esi + 0x15 < 0x1B:
                 if t28 & 0x20:
                     # 0x41A70A cmp esi+0x15,0xF（带符号 jge）
-                    base = (self._p4_41a480_abs2(esi) + 2 if esi + 0x15 >= 0xF
-                            else self._p4_41a480_abs2(esi + 0xC) + 2)
+                    base = (_p4_41a480_abs2(esi) + 2 if esi + 0x15 >= 0xF
+                            else _p4_41a480_abs2(esi + 0xC) + 2)
                 else:
-                    base = (8 - self._p4_41a480_abs2(esi) if esi + 0x15 >= 0xF
-                            else 8 - self._p4_41a480_abs2(esi + 0xC))
+                    base = (8 - _p4_41a480_abs2(esi) if esi + 0x15 >= 0xF
+                            else 8 - _p4_41a480_abs2(esi + 0xC))
                 ang = edi & 0xFFFFFFFF
                 self.p4_43B290(e, page4_cos(ang), page4_sin(ang),
                                (-(base << 8)) & 0xFFFFFFFF)
@@ -7427,7 +7427,7 @@ def _beh_41A480(self, e) -> bool:
             esi = da - 0x384                                # 带符号（可负）
             edi = 0
             while edi < 0xD00:
-                spd = self._p4_41a480_abs2(edi - 0x600) - 0x700   # 0x41A8F4 sub 0x700
+                spd = _p4_41a480_abs2(edi - 0x600) - 0x700   # 0x41A8F4 sub 0x700
                 self.p4_43B290(e, page4_cos(esi), page4_sin(esi), spd)
                 edi += 0x100
                 esi += 0x96
@@ -7443,7 +7443,7 @@ def _beh_41A480(self, e) -> bool:
                 edi = 0
                 while edi <= 0xC00:                         # 13 发
                     self.p4_43B290(e, page4_cos(da), page4_sin(da),
-                                   self._p4_41a480_abs2(edi - 0x600) - 0x800)
+                                   _p4_41a480_abs2(edi - 0x600) - 0x800)
                     edi += 0x100
                     da += 0x96
                 self.p4_se_pan(0x0B, (x - 0x140) << 4)      # 0x41ABC4 0x450350
@@ -17732,6 +17732,7 @@ P4_BEH: dict[int, object] = {
 
 
 class Page4Mixin:
+    save_replays = True
     @staticmethod
     def _p4_block_data() -> dict:
         """`remake/p4_block.json` 的**其它**数据（目前只有 `vm_chains`）。
@@ -18757,6 +18758,8 @@ class Page4Mixin:
         st["45d460_soa_bytes"] = 3 * n                      # 三 SoA 块（0x34BC0 步距）
         st["45d460_rec32"] = (slot, score)                  # 0x455640 的 0x2C 字节记录头
         st["45d460_calls"] = st.get("45d460_calls", 0) + 1
+        if not self.save_replays:
+            return
         # —— 2026-11-18 落地：真文件写（GRPD 容器 + 三平面 LZ）——
         import os as _os
         from pathlib import Path as _Path
@@ -25026,7 +25029,7 @@ class Page4Mixin:
             # 0x460411：0x430400(&rec,…) 后 0x43A3C0(0x4AD4CC,&rec) ⇒ ui4cc
             if (c & 0xFF000000) == 0x42000000:      # ctor 0x4355E0 的 0x42 家族分支
                 self.p4_spawn42(a, b, c, d)
-            elif (c & 0xFFFF0000) == 0x4F0000 and (c & 0xFF) >= 2:
+            elif 0x4F000002 <= c <= 0x4F000008:
                 # ctor 0x4355E0 表 0x437074 case2..8（0x436A5D..0x436DEF）：
                 # 结局演出实体。case1 = 0x4F000001（調整砖）仍走 geki.spawn。
                 self.p4_4f_spawn(a, b, c, d)
