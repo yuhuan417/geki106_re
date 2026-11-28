@@ -6,6 +6,7 @@
     python3 remake/pygame/run.py --page 2            # 直接进页2（3/13 同理）
     python3 remake/pygame/run.py --frames 300 --headless --fixed   # 无窗口跑 300 帧（脚本/CI）
     python3 remake/pygame/run.py --frames 300 --shot 250 --out /tmp   # 第 250 帧存 PNG
+    python3 remake/pygame/run.py --wait-enter        # 先出窗口显示提示，按回车才真正开始
 """
 from __future__ import annotations
 
@@ -40,6 +41,51 @@ for i in range(1, 13):
     KEYCODES[getattr(pygame, f"K_F{i}")] = 0x0F + i   # F1→0x10 … F12→0x1B
 
 
+def _wait_enter_screen(screen, page: int) -> bool:
+    """`--wait-enter` 的窗口内等待：屏上显示提示，按回车（或 ESC 退出）才继续。
+
+    供录屏用：窗口先就绪并显示提示，架好录屏软件后按回车，游戏才真正开始。
+    返回 True=开始游戏，False=用户要求退出。中文用系统 CJK 字体（按 metrics
+    判定是否真有字形），一个都没有就退回英文默认字体。
+    """
+    lines = [f"页 {page} 已就绪 — 按回车开始", "Ready - press ENTER to start"]
+    font = None
+    try:
+        cjk = pygame.font.SysFont(
+            "microsoftyahei,simhei,msyh,pingfangsc,hiraginosansgb,"
+            "notosanscjksc,notosanscjkjp,wenquanyimicrohei,droidsansfallback",
+            28, bold=True)
+        m = cjk.metrics(lines[0])
+        if m and all(g is not None for g, _bbox in m):
+            font = cjk                                   # 确认 CJK 字形齐全
+    except Exception:
+        font = None
+    if font is None:                                     # 无 CJK 字体 → 英文兜底
+        font = pygame.font.Font(None, 34)
+        lines = [f"page {page} ready - press ENTER to start"]
+    screen.fill((0, 0, 0))
+    y = 196
+    for text in lines:
+        surf = font.render(text, True, (255, 255, 255))
+        screen.blit(surf, surf.get_rect(center=(320, y)))
+        y += 48
+    pygame.display.flip()
+    print("[wait] 窗口已就绪 —— 按回车开始（可先启动录屏；ESC=退出）", flush=True)
+    while True:
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                return False
+            if ev.type == pygame.KEYDOWN:
+                if ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    screen.fill((0, 0, 0))               # 清掉提示，别录进开头
+                    pygame.display.flip()
+                    print("[wait] 收到回车，开始。", flush=True)
+                    return True
+                if ev.key == pygame.K_ESCAPE:
+                    return False
+        pygame.time.wait(10)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="撃破伝 页1/2/3/13 复刻（pygame）")
     ap.add_argument("--page", type=int, default=1, help="起始页（1/2/3/13）")
@@ -61,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="不开相对鼠标/抓取（调试用；WSLg 下相对模式才是原作的采样方式）")
     ap.add_argument("--no-kbd-menu", action="store_true",
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
+    ap.add_argument("--wait-enter", action="store_true",
+                    help="窗口就绪后显示提示，按回车才真正开始（方便先启动录屏）")
     ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
     ap.add_argument("--audio-driver", default="", help="强制 SDL 音频驱动（pulseaudio / alsa / dummy）")
     args = ap.parse_args(argv)
@@ -281,6 +329,23 @@ def main(argv: list[str] | None = None) -> int:
 
     pages.frame_input = _frame_input
     pages.frame_present = _present_frame
+
+    if args.wait_enter:
+        # 窗口先就绪并显示提示，按回车才真正进页（方便先架好录屏软件）。
+        if args.headless:
+            try:
+                input("[wait] headless 模式：按终端回车继续…")
+            except EOFError:
+                pass                                    # 无标准输入（CI）→ 直接开跑
+        else:
+            if not _wait_enter_screen(screen, args.page):
+                print("[wait] 用户退出。", flush=True)
+                aud.close()
+                pygame.quit()
+                return 0
+        # 帧门基准重置到回车时刻：各页进场虽会 SetPeriod 重置 _t0，
+        # 这里再兜一道底，防等待期间积压 tick 在开局爆发追帧。
+        timer.set_period(timer.period)
 
     pages.start(args.page)
 
