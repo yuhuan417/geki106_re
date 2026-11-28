@@ -7,6 +7,7 @@
     python3 remake/pygame/run.py --frames 300 --headless --fixed   # 无窗口跑 300 帧（脚本/CI）
     python3 remake/pygame/run.py --frames 300 --shot 250 --out /tmp   # 第 250 帧存 PNG
     python3 remake/pygame/run.py --wait-enter        # 先出窗口显示提示，按回车才真正开始
+    python3 remake/pygame/run.py --video x11 --window-pos 200,120   # WSLg 下可拖动/定位窗口
 """
 from __future__ import annotations
 
@@ -109,10 +110,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="禁用方向键选菜单（默认开启，与真机一致：一按一档）")
     ap.add_argument("--wait-enter", action="store_true",
                     help="窗口就绪后显示提示，按回车才真正开始（方便先启动录屏）")
+    ap.add_argument("--window-pos", default="", metavar="X,Y",
+                    help="窗口初始位置（如 200,120；默认 80,80；"
+                         "wayland 驱动忽略，配 --video x11 才生效）")
     ap.add_argument("--mute", action="store_true", help="不初始化音频（SDL_AUDIODRIVER=dummy）")
     ap.add_argument("--audio-driver", default="", help="强制 SDL 音频驱动（pulseaudio / alsa / dummy）")
     args = ap.parse_args(argv)
 
+    if args.window_pos:
+        os.environ["SDL_VIDEO_WINDOW_POS"] = args.window_pos
     if args.video:
         os.environ["SDL_VIDEODRIVER"] = args.video
     if args.headless:

@@ -15,6 +15,7 @@ python3 run.py --frames 300 --headless --fixed          # 无窗口
 python3 run.py --frames 300 --shot 250 --out shots      # 第 250 帧存 PNG
 python3 run.py --mute                 # 不初始化音频
 python3 run.py --wait-enter           # 先出窗口显示提示，按回车才真正开始（方便先启动录屏）
+python3 run.py --video x11 --window-pos 200,120   # WSLg：强制 XWayland（窗口可拖动）+ 定初始位置
 ```
 
 ## 模块
