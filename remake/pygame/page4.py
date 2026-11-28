@@ -3597,7 +3597,8 @@ def _beh_416680(self, e) -> bool:
 
 def _beh_41F610(self, e) -> bool:
     """`0x41F610`（0x29000012 ×44）：纵摆右移 + x > 0x1E0 → y += ±2（sin 门）；
-    x < −0x18 或 HP=0 → **生成 0x29000013（关7 boss）并自灭**。"""
+    HP=0 → **生成 0x29000013 rec={x,y,型,0} 入 0x4AD43C 并自灭**（0x29000013 是
+    HP 15360 的大型残骸体，非 boss；x<−0x18 只是静默移除、不生成——0x41F640 jl）。"""
     osc = e.s32(0x20)
     if osc != 0 and e.s32(0x1C) > 0x1E0:
         e.d32(0x20, (osc + (-1 if osc >= 0 else 1)) & 0xFFFFFFFF)   # 0x41F627 and 2/dec → ±1
@@ -5000,7 +5001,7 @@ def _beh_422D40(self, e) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 0x29 族高段（关8 真 boss 0x29000018 及其编队/卫星）——2026-11-11 逐函数转写。
+# 0x29 族高段（关7 boss 0x29000018 及其编队/卫星）——2026-11-11 逐函数转写。
 # 依据 docs/p4_beh_29high_notes.md；反汇编 re_dis + esp_flow（0x41FC60 处 R.dis 曾失步
 # 6 字节，关键序列用 capstone 直解校对）。
 # ---------------------------------------------------------------------------
@@ -5147,7 +5148,7 @@ def _p4_spawn29t(self, boss, x: int, y: int, val: int):
 
 
 def _beh_4200C0(self, e) -> bool:
-    """`0x4200C0`（0x29000018，**关8 真 boss**，thunk 0x4013C5）：九态机。
+    """`0x4200C0`（0x29000018，**关7 boss**——流 52/72；2026-11-28 勘误：旧标"关8"是流号误读，thunk 0x4013C5）：九态机。
 
     态 = [0x1C]&0xFF（态字高字节 = 巡回 round）；跳表 0x421974。
     位置：[0x24]+=[0x2C](vx)、[0x28]+=[0x30](vy)；x=[0x24]>>2、y=[0x28]>>2；
@@ -6227,8 +6228,8 @@ def _beh_414D60(self, e) -> bool:
 def _beh_4107D0(self, e) -> bool:
     """`0x4107D0`（thunk 0x401B31；0x23000019）：[0x1C]+=[0x24]、[0x20]+=[0x28]；
     [0x24]≥0 → [0x24]−=4、[0x28] += ([0x28]≥0 ? −3 : +3)；
-    否则 [0x24]>−0x50 → [0x24]−−，且 y<自机y → [0x28] += ([0x28]≥0 ? +4 : +2)、
-    y≥自机y → [0x28] −= ([0x28]≤0 ? +4 : +2)（纵向追踪）；
+    否则 [0x24]>−0x50 → [0x24]−−，且 y<自机y → [0x28] += ([0x28]≥0 ? +2 : +4)、
+    y≥自机y → [0x28] −= ([0x28]≤0 ? +2 : +4)（0x410811..0x410843；纵向追踪）；
     x=[0x1C]>>4、y=[0x20]>>4；node dst=(x−0x18,y−0x18)；
     return x > −0x18 且 HP≠0。"""
     e.d32(0x1C, (e.s32(0x1C) + e.s32(0x24)) & 0xFFFFFFFF)
@@ -7312,8 +7313,8 @@ def _beh_41A480(self, e) -> bool:
       base=(t28&0x20)?(esi+0x15≥0xF ? |esi|+2 : |esi+0xC|+2)
                        :(esi+0x15≥0xF ? 8−|esi| : 8−|esi+0xC|)
       （0x41A70A/0x41A72E **带符号** cmp 0xF）→ 0x43B290(cos(edi), sin(edi), −(base<<8))。
-    态4：t28&7==0 → 0x43B500(x−0x10, y+(t28&4?−0xB0:0x10), px+0x40,
-        py+(t28&8?0:−0xA0)+rand%0xA0, 0x340)；t28==0x78 → 0x61000001(7,0x10) 入 52C。
+    态4：t28&7==0 → 0x43B500(x−0x10, y+(t28&4?−0x30:0x10), px+0x40,
+        py−0xA0+(t28&8?−0xA0:0)+rand%0xA0, 0x340)；t28==0x78 → 0x61000001(7,0x10) 入 52C。
     态5：&0x1F==0 → 0x43B290(−0xA, 0, −0x40)。
     态6：t28<0xD1 且 &0xF==0 → 14 发 0x43B290(cos(edi·0x11), sin(edi·0x11), −0x500)。
     态7：t28<0x81 且 &0x3F==0 → esi=0x45A9A0(Δ自机)−0x384（带符号）、
@@ -7409,8 +7410,12 @@ def _beh_41A480(self, e) -> bool:
         elif st == 4:                                       # 0x41A77A
             if (t28 & 7) == 0:
                 r = self.p4_rand() % 0xA0
-                y1 = self.p4_player_y() + (0 if t28 & 8 else -0xA0) + r
-                y0 = y + (-0xB0 if t28 & 4 else 0x10)
+                # 0x41A7AD/0x41A7CB..D6：y0 = y + ((t28&4) ? −0x30 : +0x10)
+                #（neg/sbb/and 0xC0/add 0x10）；0x41A7B3..C4：y1 = py − 0xA0
+                # + ((t28&8) ? −0xA0 : 0) + rand%0xA0（and ecx,0xA0 条件项 +
+                # add ecx,0xFFFFFF60 无条件项）。旧实现 −0xB0/漏 −0xA0。
+                y1 = self.p4_player_y() - 0xA0 + (-0xA0 if t28 & 8 else 0) + r
+                y0 = y + (-0x30 if t28 & 4 else 0x10)
                 self.p4_43B500(e, x - 0x10, y0, self.p4_player_x() + 0x40, y1, 0x340)
             if t28 == 0x78:
                 self.p4_spawn52c_flash(7, 0x10, 0x61000001, 0x28000006)
@@ -7498,7 +7503,7 @@ def _beh_41BDA0(self, e) -> bool:
         for i in range(0, 0x6D, 0xC):               # rec3=0,0xC,..,0x6C
             self.spawn(self._p4_q("ui49c"), 0x31000010, x, y, i)
         return False
-    if leader.m[0x34] != 0:
+    if leader.m[0x34] == 0:                          # 0x41BE8B：byte==0（亡）→ 星尘+return 0
         self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
         return False
     if e.node is not None:
@@ -7550,7 +7555,7 @@ def _beh_41AE20(self, e) -> bool:
     （0x41AFE6 cmp [node+8],0xF0 / je 跳过）；态0 铺卫星 / 态1 每0x40帧传送 +
     t==0 掷下态（rand%(5|6)+2；nxt==7 需 gate&0xF≠0、nxt==5 需 gate&0xF0==0 才重掷）/
     态2 t==0x3C → [0x1C]=(px>>1)+0x140、[0x20]=rand%0x1A4+0x1E；t==0x96 → [0x1C]=0x260、
-    y≥0xF0 ? −0x10 : +0x1D0；t>0x96 且 &3==0 → 双 0x3100000C @(x−8,y) prm=∓1 + SE2 /
+    y≥0xF0 ? −0xF0 : +0xF0；t>0x96 且 &3==0 → 双 0x3100000C @(x−8,y) prm=∓1 + SE2 /
     态3 传送×5 + 0x3100000D（t 重置后**重读内存**再判后半）/ 态4 每0x40帧随机点；
     t==0xA0 → [0x24]=−0x78、[0x28]=1；t%0x14==1 → SE6 + 0x48000008 @(px,py) prm=父
     入 4CC / 态5 rand 点+[0x2C]−=0x10 / 态6 t==0x3C 中点 (3x+px)>>2、t==0x168 出口；
@@ -7677,7 +7682,9 @@ def _p4_41ae20_dying_common(self, e, x: int, y: int) -> bool:
             elif t == 0x96:                      # 0x41B17A..0x41B19D
                 e.d32(0x1C, 0x260)
                 yy = e.s32(0x20)
-                e.d32(0x20, (yy + (-0x10 if yy >= 0xF0 else 0x1D0)) & 0xFFFFFFFF)
+                # 0x41B188..19A：setge/dec/and 0x1E0/add −0xF0 ⇒
+                # y' = y + (y≥0xF0 ? −0xF0 : +0xF0)（旧实现 −0x10/+0x1D0 均误）
+                e.d32(0x20, (yy + (-0xF0 if yy >= 0xF0 else 0xF0)) & 0xFFFFFFFF)
             elif t == 0x14A:
                 e.d32(0x24, -0x3C & 0xFFFFFFFF)
                 e.d32(0x28, 1)
@@ -7772,11 +7779,13 @@ def _p4_41ae20_dying_common(self, e, x: int, y: int) -> bool:
             for _ in range(0xC):
                 ry = self.p4_rand() % 0x61       # 0x41B846 第 1 发 → Y
                 rx = self.p4_rand() % 0x61       # 0x41B875 第 2 发 → X
-                jx = (self.p4_rand() & 0x3F) - 0x1F
-                jy = (self.p4_rand() & 0x3F) - 0x1F
+                j1 = (self.p4_rand() & 0x3F) - 0x1F   # 0x41B89F 第 1 次
+                j2 = (self.p4_rand() & 0x3F) - 0x1F   # 0x41B8AB 第 2 次
+                # 0x41B8B7 0x45A690(arg1=第2发→eax、arg2=第1发→edx) ⇒
+                # rec3={vx,vy}={第2发,第1发}（同 b3-F1 / 0x414798 序）
                 self.spawn(self._p4_q("ui4cc"), 0x41000004,
                            (x + rx - 0x30) & 0xFFFFFFFF,
-                           (y + ry - 0x30) & 0xFFFFFFFF, (jx, jy))
+                           (y + ry - 0x30) & 0xFFFFFFFF, (j2, j1))
             self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
             if e.node is not None:
                 e.node.active = 0                # 0x41B92A byte[node+0x1C]=0
@@ -7821,7 +7830,8 @@ def _beh_41D080(self, e) -> bool:
     [0x28] 计时/[0x24] 弹数：[0x24]==0 → [0x28]>0 ? [0x28]=−0x1E :
     ([0x28]==0 → [0x24]=rand&3+1)；0<[0x24]≤4 且 [0x28]==0x80 → [0x24]=0。
     t>0x1518 → HP=0。
-    HP≠0：0x430860(0x4AD43C)==1（队列忙）→ 仅 node dst=(x−0x60,y−0x60) return 1；
+    HP≠0：0x430860(0x4AD43C)==1（**队列只剩自身** → 0x49000005 @(x,y) prm=[0x2C]、return 0；
+    2026-11-28 勘误：旧注"队列忙"方向反了，代码正确）→ 以下为本体存活路径：
     [0x2C]≠0 且 x>0x118 → x−−；node dst；return 1。
     HP==0 → 0x49000005 @(x,y) prm=[0x2C] 并 return 0。"""
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
@@ -8550,38 +8560,55 @@ def _beh_41F010(self, e) -> bool:
     return e.g32(0x18) != 0 and x < 0x2B0
 
 
-_P4_40A930_LIMITS = (0x168, 0x168, 0x168, 0, 0x78, 0x12C, 0xF0, 0xFFFF,
+# 0x40A930 态迁移阈值表（0x40AA00..0x40AA6E 栈表 [esp+0x3C..0x78]，idx=态）：
+# st1=0x168 st2=0x168 st3=0x78 st4=0x168 st5=0x12C st6=0xF0 st7=0xFFFF(不可达，
+# 态7 在头部独立处理) st8=0x69 st9=0x1C2 stA=0xB4 stB=0xF0 stC=0x12C stD=0x12C
+# stE=0x21C stF=0xB4 st10=0xFFFF(不可达，态0x10 用位测试门槛)。2026-11-28 勘误：
+# 旧表 [3]=0x168/[4]=0 反了。
+_P4_40A930_LIMITS = (0x168, 0x168, 0x168, 0x78, 0x168, 0x12C, 0xF0, 0xFFFF,
                      0x69, 0x1C2, 0xB4, 0xF0, 0x12C, 0x12C, 0x21C, 0xB4, 0xFFFF)
 
 
 def _beh_40A930(self, e) -> bool:
-    """`0x40A930`（0x2A000001，**关7 boss 本体**）。
+    """`0x40A930`（0x2A000001，**关8 第一形态本体**；流 60/65。2026-11-28 逐指令重核）。
 
-    态0：发 0x2A000002/03/04 三件 @(x,y) 入 0x4AD43C、[0x24]=1、
-      [0x30]=((x&0x7FF)|(y<<0x10))<<5（16.5 定点）。
-    态7：[0x1C]==0x26DF → 态8、[0x18]=0x27100。
-    态0x10：0x45AFC0(0x56CCB8,0x10)==0 且 [0x20]==0x12C → 态++。
-    态1..6：[0x20] ≥ 表值 → 态 += (态≤6 ? +1 : −5)。
-    公共：[0x1C]++；态切换 → [0x20] = (态≤0xD ? −0x78 : 0)；同态 →
-      [0x20]==−1 ? 三行掩码检查（[0x28]=27 架 3×9 位存活掩码，行空 → [0x20]=0）
-      : [0x20]++；[0x2C]≠0 → [0x2C]−−。
-    态0xE：[0x18]=min([0x18],0x26160)；0x1D4C0<[0x18]<0x26160 → 0x61000004
-      @(x,y,0x10) 入 52C + 0x32000009 @(x,y) 入 49C、[0x18]=0x1D4C0。
-    态0xF：0x401E1F(0x56CCB8, 0x20)。
-    态0x10：0x402400(0x56CCB8,0x20)；[0x20]&1 或 0x40208B(0x56CCB8,0x10)==0 →
-      跳过；否则双发 0x10FF0053 @(自机x, 自机y+[0x20]>>1 / [0x20]>>3+4) 入 0x4AD46C。
-    态0x11：[0x20]==0 且 0x40221B(0x4AD40C)!=0 → 0x61000005(0,0xFFFFFF01,−4) 入 52C；
-      x < −0xF0 → 死亡路径。
-    移动：态==0x11 → word[0x30] −= [0x20]<<6；否则 word[0x30] +=
-      (自机x>>2 − x + 0x1E0)>>3；word[0x32] += (自机y>>1 − y + 0x78)>>3；
-      x=word[0x30]>>5、y=word[0x32]>>5；node dst=(x−0xA0, y−0x60)。
-    HP>0x9C40 → return 1；否则 0x4A000006 @(x,y) 入 4CC + 0x401E1F(0x56CCB8,0x40)
-      + 0x401AE1(0x4CD4A0,0xF4240)、return 0。"""
+    态0（0x40A946..0x40A9D2）：0x2A000002/03/04 三件 rec={0,0,型,本体} 入 0x4AD43C
+      （后两发只改 rec2 复用同一记录）、[0x24]=1、[0x30]=((x&0x7FF)|(y<<16))<<5。
+    态7（0x40A9D7..0x40A9F3）：[0x1C]==0x26DF → 态8；每帧 [0x18]=0x27100。
+    态0x10（0x40AA93..0x40AAB3）：0x45AFF0(0x56CCB8,0x10) 纯位测试 →
+      [0x20]==(位置 ? 0x258 : 0x12C) → 态0x11。
+    态1..6/8..0xF（0x40AA00..0x40AA91）：[0x20] ≥ 表值 → 态 += (态==6 ? −5 : +1)
+      （neg/sbb/and 6/add −5/add 态）。
+    波次/回卷（0x40AAB6..0x40AB21，态1..6/8..0xF 且 total>0x24FE 且 态<7）：
+      HP≥0x2BF20 且 ([0x28]&0xF0000000)==0x60000000 且 [0x20]<0 →
+      0x6A000002 {0,0,型,0} 入 52C、态=7；否则 total==0x26DE →
+      [0x1C]=0x217D（回卷）、[0x28]+=0x10000000。态≥7 跳过两支。
+    公共（0x40AB3C..0x40ABBB）：total=++[0x1C]；态切换 → [0x20]=(态≤0xD?−0x78:0)；
+      同态 → [0x20]==−1 ? 掩码块 : [0x20]++。掩码块（0x40AB6C..0x40ABAD，
+      jt 0x40AEB0={E0,E1,E2}×2，idx=态−1，态≥7 直接 [0x20]=0）：
+      态1/4 = 行0(0x1FF)、行1(0x3FE00)、行2(0x7FC0000) 全有活件才保持 −1（等待）；
+      态2/5 = 行0、行2 全有活件才等待；态3/6 = 行1 有活件就等待；其余 [0x20]=0。
+      [0x2C]≠0 → −−。
+    态0xE（0x40ABBF..0x40AC71）：**[0x20]==0 才**钳 [0x18]≤0x26160；
+      0x1D4C0<[0x18]<0x26160（无符号）→ 0x61000004@0x10 入 52C + 0x32000009
+      入 49C、[0x18]=0x1D4C0。
+    态0xF：0x45AF30(0x56CCB8, 0x20)。
+    态0x10：0x45AF60(0x56CCB8, 0x20)（清位）；[0x20] 偶且 0x45AFF0(0x56CCB8,0x10)
+      → 双发 0x10FF0053 @(自机x, 自机y+[0x20]>>1 / [0x20]>>3+4) 入 0x4AD46C。
+    态0x11：[0x20]==0 且 0x430860(0x4AD40C)!=0 → 0x61000005(0,0xFFFFFF01,−4) 入 52C；
+      **x<−0xF0 → 静默 return 0（0x40ADB8 jl 0x40AEA3，无死亡演出）**。
+    移动（0x40ADC5..0x40AE3A）：态0x11 → word[0x30] −= [0x20]<<6（word 截断）；
+      否则 word[0x30] += ((自机x>>2 − x + 0x1E0)>>3)；word[0x32] +=
+      ((自机y>>1 − y + 0x78)>>3)；x/y=movsx word >>5；**dst=(x−0x88, y−0xA0)**
+      （0x40AE1F add 0xFFFFFF78 / 0x40AE25 add 0xFFFFFF60）。
+    HP>0x9C40（无符号）→ return 1；否则死亡段：0x4A000006 rec3=本体 入 4CC +
+      0x45AF30(0x56CCB8,0x40) + 0x45EEA0(0xF4240)、return 0。"""
     st = e.s32(0x24)
     st_old = st
     t = e.s32(0x1C)
     x = e.s32(0x04)
     y = e.s32(0x08)
+    skip_wave = False
     if st == 0:
         # 0x40A946..0x40A953：0x4023C4(0x430400) rec={arg2,arg3,arg4,arg5}={0,0,型,本体}
         # （arg2=arg3=eax=态0 的 0、arg4=0x2A000002、arg5=ebp=本体指针）→ 0x40A981
@@ -8596,19 +8623,41 @@ def _beh_40A930(self, e) -> bool:
         e.d32(0x24, 1)
         st = 1
         e.d32(0x30, (((x & 0x7FF) | ((y & 0xFFFF) << 0x10)) << 5) & 0xFFFFFFFF)
+        skip_wave = True                             # 0x40A9D2 jmp 0x40AB3C
     elif st == 7:
         if t == 0x26DF:
             e.d32(0x24, 8)
             st = 8
         e.d32(0x18, 0x27100)
+        skip_wave = True                             # 0x40A9F3 jmp 0x40AB3C
     elif st == 0x10:
-        if (self.keys.field(0x10) & 3) == 0 and e.s32(0x20) == 0x12C:
+        # 0x40AA96..0x40AAB3：0x45AFF0(0x56CCB8,0x10)（纯位测试，neg/sbb）
+        thr = 0x258 if self.p4_bit_any(0x10) else 0x12C
+        if e.s32(0x20) == thr:
             e.d32(0x24, 0x11)
             st = 0x11
-    elif 1 <= st <= 6:
-        if e.s32(0x20) >= _P4_40A930_LIMITS[st]:
-            e.d32(0x24, (st + (1 if st <= 6 else -5)) & 0xFFFFFFFF)
+    else:
+        # 0x40AA00..0x40AA91：态1..6/8..0xF 阈值迁移（jl 有符号比较）。
+        # 态0x11 也落进这段，但表只初始化到 [esp+0x78]（态0x10），态0x11 的
+        # 阈值槽 [esp+0x7C] 是**栈残留**（exe UB、不可复现）——其出屏退出
+        # （x<−0xF0，约几帧）先于任何可行阈值，故复刻按"不迁移"处理。
+        if st <= 0xF and e.s32(0x20) >= _P4_40A930_LIMITS[st]:
+            e.d32(0x24, (st + (-5 if st == 6 else 1)) & 0xFFFFFFFF)
             st = e.s32(0x24)
+        # 0x40AAB6..0x40AB21：波次/回卷（态<7 才参与；态≥7 jge 直接跳公共尾）
+        if t > 0x24FE and st < 7:
+            hp = e.g32(0x18)
+            if (hp >= 0x2BF20 and (e.g32(0x28) & 0xF0000000) == 0x60000000
+                    and e.s32(0x20) < 0):
+                # 0x40AAEA..0x40AB21：0x6A000002 波次控制器入 52C、态=7
+                self.p4_vm_op5_ctl(0, 0, 0x6A000002, 0)
+                e.d32(0x24, 7)
+                st = 7
+            elif t == 0x26DE:
+                # 0x40AB23..0x40AB39：total 回卷 + 开新一排掩码
+                e.d32(0x1C, 0x217D)
+                t = 0x217D
+                e.d32(0x28, (e.g32(0x28) + 0x10000000) & 0xFFFFFFFF)
     t = (t + 1) & 0xFFFFFFFF
     e.d32(0x1C, t)
     if st != st_old:
@@ -8616,35 +8665,44 @@ def _beh_40A930(self, e) -> bool:
     else:
         v20 = e.s32(0x20)
         if v20 == -1:
+            # 0x40AB6C..0x40ABAD：掩码块（idx=态−1；态≥7 ja 直接 [0x20]=0）
             m = e.g32(0x28)
-            if st % 3 == 0:
-                if (m & 0x1FF) == 0 or ((m & 0x3FE00) == 0):
+            if st in (1, 4):
+                if ((m & 0x1FF) == 0 or (m & 0x3FE00) == 0
+                        or (m & 0x7FC0000) == 0):
                     e.d32(0x20, 0)
-            elif st % 3 == 1:
+            elif st in (2, 5):
                 if (m & 0x1FF) == 0 or (m & 0x7FC0000) == 0:
                     e.d32(0x20, 0)
-            else:
+            elif st in (3, 6):
                 if (m & 0x3FE00) == 0:
                     e.d32(0x20, 0)
+            else:
+                e.d32(0x20, 0)                       # 态0/7/8..0xF：立即放行
         else:
             e.d32(0x20, (v20 + 1) & 0xFFFFFFFF)
     if e.s32(0x2C) != 0:
         e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
     v20 = e.s32(0x20)
     if st == 0xE:
-        hp = e.g32(0x18)
-        if hp > 0x26160:
-            e.d32(0x18, 0x26160)
+        if v20 == 0:                                 # 0x40ABC8 test/jne：仅 [0x20]==0 钳
+            hp = e.g32(0x18)
+            e.d32(0x18, min(hp, 0x26160))
         hp = e.g32(0x18)
         if 0x1D4C0 < hp < 0x26160:
             self.p4_spawn52c_flash(x, y, 0x61000004, 0x10)
             self.spawn(self._p4_q("ui49c"), 0x32000009, x, y, 0)
             e.d32(0x18, 0x1D4C0)
     elif st == 0xF:
-        pass                                              # 0x401E1F(0x56CCB8,0x20)
+        self.sysb8.bits |= 0x20                      # 0x40AC7B 0x401E1F→0x45AF30
+        self._p4_sys = self.sysb8.bits
+        self.p4_stat[0x56CCB8] = self.sysb8.bits
     elif st == 0x10:
-        pass                                              # 0x402400(0x56CCB8,0x20)
-        if not (v20 & 1) and (self.keys.field(0x10) & 3) != 0:
+        # 0x40AC95..0x40AC9C：0x402400→0x45AF60 清 0x56CCB8 bit 0x20
+        self.sysb8.bits &= ~0x20 & 0xFFFFFFFF
+        self._p4_sys = self.sysb8.bits
+        self.p4_stat[0x56CCB8] = self.sysb8.bits
+        if not (v20 & 1) and self.p4_bit_any(0x10):  # 0x40ACA1/0x40ACB2（纯位测试）
             sy = self.p4_player_y()
             sx = self.p4_player_x()
             self.spawn(self._p4_q("ui46c"), 0x10FF0053, sx, sy + (v20 >> 1), 0)
@@ -8653,7 +8711,7 @@ def _beh_40A930(self, e) -> bool:
         if v20 == 0 and getattr(self, "actorq", None):
             self.p4_spawn52c_flash(0, 0xFFFFFF01, 0x61000005, -4)
         if x < -0xF0:
-            return self._p4_40a930_death(e, x, y)
+            return False                             # 0x40ADB8 jl 0x40AEA3：静默移除
     # 移动
     w30 = e.g16(0x30)
     w32 = e.g16(0x32)
@@ -8673,16 +8731,22 @@ def _beh_40A930(self, e) -> bool:
     e.d32(0x04, x & 0xFFFFFFFF)
     e.d32(0x08, y & 0xFFFFFFFF)
     if e.node is not None:
-        e.node.dst = (x - 0xA0, y - 0x60)
+        e.node.dst = (x - 0x88, y - 0xA0)            # 0x40AE1F/0x40AE25
     if e.g32(0x18) > 0x9C40:
         return True
     return self._p4_40a930_death(e, x, y)
 
 
 def _p4_40a930_death(self, e, x: int, y: int) -> bool:
-    """`0x40A930` 死亡段：0x4A000006 入 4CC、清位、全局件。"""
-    self.spawn(self._p4_q("ui4cc"), 0x4A000006, x, y, 0)
-    self.p4_45eea0(0xF4240)     # 0x401AE1→0x45EEA0：分数/显示分 += 1000000
+    """`0x40A930` 死亡段（0x40AE51..0x40AEA1）：0x4A000006 rec3=本体 入 4CC、
+    0x45AF30(0x56CCB8, 0x40)、0x45EEA0(0xF4240)。"""
+    _h = id(e) & 0x7FFFFFFF
+    self.p4_links[_h] = e
+    self.spawn(self._p4_q("ui4cc"), 0x4A000006, x, y, _h)   # 0x40AE57 push ebp
+    self.sysb8.bits |= 0x40                      # 0x40AE88 0x401E1F→0x45AF30
+    self._p4_sys = self.sysb8.bits
+    self.p4_stat[0x56CCB8] = self.sysb8.bits
+    self.p4_45eea0(0xF4240)     # 0x40AE94 0x401AE1→0x45EEA0：分数/显示分 += 1000000
     return False
 
 
@@ -10492,7 +10556,7 @@ def _beh_416CF0(self, e) -> bool:
 
 
 def _beh_412B60(self, e) -> bool:
-    """`0x412B60`（0x25000008，**关5 boss 十三态** 0x412EF4）。
+    """`0x412B60`（0x25000009，**关3 王 十三态** 0x412EF4；2026-11-28 勘误：旧注"0x25000008 关5 boss"型别/关卡皆误——0x25000008=0x412950）。
 
     公共门（0x412BE9..0x412C41，顺序固定）：强制A——态<0xA 且（HP_u<0x4B0 或
     [0x30]&0xFF0000==0x7F0000）→ 态=0xA、[0x20]=0（用分派后新态判定）；HP==0 →
@@ -10847,24 +10911,6 @@ def _beh_4130D0(self, e) -> bool:
         # 存带符号值（读者按 jle/jg 带符号比较，与全文件 dst 约定一致）
         e.node.dst = (e.s32(0x04) - 0x18, e.s32(0x08) - 0x18)
     return e.g32(0x18) != 0                        # 0x413752..0x413759 setne
-
-
-def _p4_4130d0_tail(self, e, main, d: int) -> bool:
-    """`0x4130D0` 收尾：主打包位翻转、HP 门、node dst。"""
-    p30 = main.g32(0x30)
-    if (p30 & 0xFFFF) >= 0x4B0:
-        main.d32(0x30, (p30 - 0x4B0) & 0xFFFFFFFF)
-    x = e.s32(0x04)
-    y = e.s32(0x08)
-    if e.g32(0x18) == 0:
-        nd = e.node
-        if nd is not None:                   # 0x45A790(node+4, 0x30,0x30,0x30,0x30)
-            nd.rect = (nd.rect[0] + 0x30, nd.rect[1] + 0x30,
-                       nd.rect[2] + 0x30, nd.rect[3] + 0x30)
-        e.m[0x10] = 1
-    if e.node is not None:
-        e.node.dst = (x - 0x18, y - 0x18)
-    return e.g32(0x18) != 0
 
 
 def _p4_45ac70(self, tgt: list, cur: list, lim: int) -> bool:
@@ -11265,8 +11311,9 @@ def _beh_4064E0(self, e) -> bool:
 
     [0x24]==0：铺 8 架 0x2C00000A @((y<<0x10)|(x&0xFFFF), ±3)（镜像递减）入 0x4AD43C、
     [0x24]=1。
-    [0x24]==1：a = 0x45A9A0(Δ自机) − [0x20]；a>0x708 → a −= 0x1E00*ceil((a−0x707)/0x1E00)
-    （0x91A2B3C5 魔数除法 = ÷0x1E00）；a<−0x708 → a += 0x1E00*…；a ∈ (−0x28,0x28)
+    [0x24]==1：a = 0x45A9A0(Δ自机) − [0x20]；a>0x708 → a −= 0xE10*ceil((a−0x707)/0xE10)
+    （0x91A2B3C5 魔数除法 = **÷0xE10**，0x40658D/0x4065B8；docstring 旧文 0x1E00 有误，
+    代码已按 0xE10）；a<−0x708 → a += 0xE10*…；a ∈ (−0x28,0x28)
     外钳到 ±0x28；[0x20] = a mod 0xE10（双圈归一）；0x401843(e, 自机x, 自机y, 0x60)
     → 近机门 [0x24]=2。
     [0x24]≠0：x = word[0x1C] −= sin([0x20])；y = word[0x1E] −= cos([0x20])
@@ -15336,9 +15383,14 @@ def _beh_432F20(self, e) -> bool:
     return x > -0xC
 
 
+# 0x27 族行为尾 0x401F91→0x416440（HP==0 → 0x27000011）的 E8 调用点全集：
+# 0x41654B(01)/0x416627(02)/0x416718(03)/0x416805(04)/0x4168F0(05)/0x4169EA(06)/
+# 0x416ACC(07)/0x416B87(08)/0x416C92(09)/0x417219(0C)/0x41739A(0D)/0x417532(0E)。
+# 06 与 09 的调用**在行为体内**（0x3157 内联/_beh_416BE0 末尾），由本表再包一层会
+# 双生成接管体（2026-11-28 勘误：剔除 06/09）；0A/0B/0F/10/11 无此尾。
 _P4_27_TAIL_TYPES = frozenset((
     0x27000001, 0x27000002, 0x27000003, 0x27000004, 0x27000005,
-    0x27000007, 0x27000008, 0x27000009, 0x2700000A,
+    0x27000007, 0x27000008,
     0x2700000C, 0x2700000D, 0x2700000E,
 ))
 
@@ -17650,7 +17702,7 @@ P4_BEH: dict[int, object] = {
     0x41F860: _beh_41F860,                          # 批39
     0x41F010: _beh_41F010,                          # 批40
     # —— 0x29 族高段 + 0x2D00001C（2026-11-11 批78）——
-    0x4200C0: _beh_4200C0,                          # 0x29000018 关8真boss（九态）
+    0x4200C0: _beh_4200C0,                          # 0x29000018 关7 boss（九态）
     0x421FE0: _beh_421FE0,                          # 0x29000019 入场舱
     0x422DD0: _beh_422DD0,                          # 舱体掉落自爆（0x401852）
     0x4220A0: _beh_4220A0,                          # 0x2900001A 编队僚机
