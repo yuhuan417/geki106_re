@@ -1313,10 +1313,17 @@ class Ent:
             _rnd = _pg.p4_rand if _pg is not None else (lambda: 0)
             self.d32(0x04, ((_rnd() & 0xFF) + (_rnd() & 0x7F) + 0x2B8) & 0xFFFFFFFF)
             self.d32(0x08, ((_rnd() & 0xFF) + (_rnd() & 0x7F) + 0x30) & 0xFFFFFFFF)
-        if info.get("rnd_retarget"):                   # 0x413C13/0x413C3A：随机落点速度（/0x3C）
-            import random as _r
-            self.d32(0x1C, _idiv_trunc((_r.randrange(0x244) - a), 0x3C) & 0xFFFFFFFF)
-            self.d32(0x20, _idiv_trunc((_r.randrange(0x1E0) - b), 0x3C) & 0xFFFFFFFF)
+        if info.get("rnd_retarget"):
+            # 0x413BE3..0x413C54：vx=floor((rand%0x244−rec0)/0x3C)、
+            # vy=floor((rand%0x1E0−rec1)/0x3C)——rand=LCG（两次 0x401393）、
+            # 0x462D71 为 floor 除（Python // 同语义）。2026-11-28 勘误：
+            # 旧用 stdlib random + 截断除。
+            _pg = getattr(self, "_pages", None)
+            _rnd = _pg.p4_rand if _pg is not None else (lambda: 0)
+            r1 = _rnd() % 0x244
+            self.d32(0x1C, ((r1 - a) // 0x3C) & 0xFFFFFFFF)
+            r2 = _rnd() % 0x1E0
+            self.d32(0x20, ((r2 - b) // 0x3C) & 0xFFFFFFFF)
             self.d32(0x24, 0)
             self.d32(0x28, 8)
         if "s3_to" in info:                            # rec[3]（符号扩展）→ 目标
@@ -1491,8 +1498,10 @@ class Ent:
                     r = tgt.node.rect
                     self.node.rect = (r[0], r[1] + 2 * w, r[2], r[3] + 2 * w)
                     self.node.dst = tuple(tgt.node.dst)
-        if info.get("d3div3"):                         # 0x416240：[0x30]=rec3/3（截断）
-            self.d32(0x30, _idiv_trunc(d, 3) & 0xFFFFFFFF)
+        if info.get("d3div3"):                         # 0x416240：[0x30]=floor(rec3/3)
+            # 0x416246 0x462D71(rec3,3)：负被除数 q+=1/r−=b 调整 = **floor 除**
+            # （0x462D84..8F；Python 的 // 即 floor。2026-11-28 勘误：旧用截断除）
+            self.d32(0x30, (d // 3) & 0xFFFFFFFF)
         if "d3mod3" in info:                           # 0x41620D：rec3%3 → 0x4016F9/0x4020E5/0x4013A7
             v = d % 3
             th = (0x4016F9, 0x4020E5, 0x4013A7)[v]
@@ -2600,9 +2609,9 @@ ENT26_INIT = {
     0x26000007: {"beh": 0x401C85, "z1c": True, "r0sh": (0x24, 3),
                  "imm": {0x28: -0x60, 0x2C: 6}},
     0x26000008: {"beh": 0x401CA8, "z1c": True},                      # ← 0x413B86 亦是本 case（boss 0x26000018 spawner 引用点）
-    0x26000009: {"beh": 0x401F46, "rnd_retarget": True},  # 0x413C57
+    0x26000009: {"beh": 0x401F46, "rnd_retarget": True},  # ctor case 0x413BE3（跳表 idx9）
     0x2600000A: {"beh": 0x401C3F, "z1c": True, "imm": {0x20: -0x1E0},
-                 "node_hidden": True},   # 0x413C6E：node.active=0（不写 byte[0x10]）
+                 "node_hidden": True},   # ctor case 0x413C57（node.active=0 不写 byte[0x10]）
     0x2600000B: {"beh": 0x4010FA, "z1c": True},
     0x2600000C: {"beh": 0x4020E0, "d_to": 0x20, "b10_eq0": True, "z1c": True,
                  "imm": {0x24: 4}, "node_vis_eq0": True},
@@ -3130,7 +3139,7 @@ def _beh_416A50(self, e) -> bool:
     if e.node is not None:
         e.node.dst = (e.s32(4) - 0x18, e.s32(8) - 0x18)
     # 0x401F91 → 0x416440：0x27000011 boss spawner 检查（spawned 时跳过后续）
-    # 复刻侧暂不实现 boss spawner 的内联触发（0x27000011 由 op2 直接生成）
+    # 0x27000007 在 `_P4_27_TAIL_TYPES` 中：HP==0 时公共尾已生成 boss spawner 0x27000011（0x416440）
     return e.g32(0x18) != 0 and e.s32(4) < 0x298
 
 
@@ -4904,7 +4913,7 @@ def _beh_415CE0(self, e) -> bool:
 
 def _beh_415E60(self, e) -> bool:
     """`0x415E60`（0x26000017）：y += [0x20]（node.dst.y 同加）；t=++[0x1C]；
-    (t&3)==3 → 0x414010；(t&0xF)==7 → 0x43B290(e,−1,0,0)（定向左直弹）；
+    (t&3)==0 → 0x414010（0x414C9F test al,3/jne）；(t&0xF)==7 → 0x43B290(e,−1,0,0)（定向左直弹）；
     0x4305F0(e,0x18) 在屏判据；return 在屏 且 HP≠0。"""
     dy = e.s32(0x20)
     e.d32(0x08, (e.s32(0x08) + dy) & 0xFFFFFFFF)
@@ -6198,7 +6207,7 @@ def _beh_414380(self, e) -> bool:
 
 
 def _beh_414D60(self, e) -> bool:
-    """`0x414D60`（0x26000018）：x −= 2；[0x20]==0 → y += (y≥0xF0 ? −4 : +4)；
+    """`0x414D60`（0x26000018）：x −= 2；[0x20]==0 → y += (y≥0xF0 ? +4 : −4)（0x414D78 setge/dec/and 7/add 4）；
     否则 [0x20] 为**句柄**：byte[链体+0x34]==0（存活）→ [0x20]=0；
     HP==0 → 0x43B070(e,0)（死亡散弹）；t=++[0x1C]，(t&3)==0 → 0x414010；
     node dst=(x−0x18,y−0x18)；return −0x18<x 且 −0x50<y<0x230 且 HP≠0。"""
@@ -6665,7 +6674,7 @@ def _beh_4145A0(self, e) -> bool:
     x = 0x1E0 + (25*cos(11t)>>5) − t/2；y = 0xF0 + (25*sin(23t)>>5)
     （0x40159B=cos/0x401A50=sin；11t=(t+t*4)*2、23t=(t*3)<<3−t）。
     无链 且 (t&0x7F)==0：朝机十字六连（spd −0x380..−0x80 步 0x100：
-    0x43B070(e,spd) + 0x43B290(e, dx−dy, dx+dy, spd) + 0x43B290(e, dy−dx, dx+dy, spd)）。
+    0x43B070(e,spd) + 0x43B290(e, dx−dy, dx+dy, spd) + 0x43B290(e, dx+dy, dy−dx, spd)）。
     (t&7)==0 → 0x414010。HP：≠−1 → [0x18]=−1；旧链体≠0 → [链体+0x24]−−、
     ==0 → 自身 [0x24]−−。
     链体≠0：byte[链体+0x34] 置位 → 存活路径；否则发 0x41000001 入 ui4cc +
@@ -6764,19 +6773,21 @@ def _beh_4148B0(self, e) -> bool:
         e.d32(0x18, -1 & 0xFFFFFFFF)
         if linked is not None:
             linked.d32(0x24, (linked.s32(0x24) - 1) & 0xFFFFFFFF)
+    # 0x4149BA：byte[链+0x34]≠0（链体活）→ 0x414A96 存活路径；
+    # ==0（亡）→ 链[0x28]=0 + 星尘 + 3×火花 + return 0（2026-11-28 二轮勘误，
+    # 旧实现极性反了）。链句柄失效（linked is None）按活支处理。
     if linked is None or linked.m[0x34] != 0:
-        if linked is not None:
-            linked.d32(0x28, 0)
-        self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
-        for _ in range(3):
-            # 0x414A53..0x414A7B：同 {第2发→vx, 第1发→vy} 序
-            j1 = (self.p4_rand() & 0x1F) - 0xF
-            j2 = (self.p4_rand() & 0x1F) - 0xF
-            self.spark_spawn(x, y, j2, j1)
-        return False
-    if e.node is not None:                          # 0x414A96 dst.x −= 6
-        e.node.dst = (e.node.dst[0] - 6, e.node.dst[1])
-    return x > -0x18
+        if e.node is not None:                      # 0x414A96 dst.x −= 6
+            e.node.dst = (e.node.dst[0] - 6, e.node.dst[1])
+        return x > -0x18
+    linked.d32(0x28, 0)
+    self.spawn(self._p4_q("ui4cc"), 0x41000001, x, y, 0)
+    for _ in range(3):
+        # 0x414A53..0x414A7B：同 {第2发→vx, 第1发→vy} 序
+        j1 = (self.p4_rand() & 0x1F) - 0xF
+        j2 = (self.p4_rand() & 0x1F) - 0xF
+        self.spark_spawn(x, y, j2, j1)
+    return False
 
 
 def _beh_414B50(self, e) -> bool:
@@ -7479,7 +7490,7 @@ def _beh_41BDA0(self, e) -> bool:
     x = leader.x + (3*cos(17t)>>3)、y = leader.y + (3*sin(17t)>>3)；
     leader.type==0x28000017 → [0x20] = leader[0x2C]（链式跟随）。
     leader[0x28]==5 且 leader[0x24]==0x78 → SE 0xE + 10× 0x31000010
-    @(x, y+0xC*i) i=0..0x78 步 0xC 入 0x4AD49C、return 0；
+    @(x, y)（坐标恒定）rec3=i·0xC（0,0xC,…,0x6C）入 0x4AD49C、return 0；
     leader 死（byte[+0x34]）→ 0x41000001@(x,y) 入 0x4AD4CC、return 0；
     node dst=(x−0x18,y−0x18)；return 1。"""
     e.d32(0x18, -1 & 0xFFFFFFFF)
@@ -7798,7 +7809,11 @@ def _p4_41ae20_tail(self, e, x: int, y: int) -> bool:
     """`0x41AE20` 公共尾 0x41B316：**t 从内存重读**再 ++（各态负回退先落内存）、
     total=++[0x30]；total==0x2328 且 HP>0x960 → HP=0x960；**total==0x3840 → HP=0**；
     HP==0 且 st≠9 → **st==7 且新 t<0x14 才** 0x61000005(0xFF,0,−0x10)；
-    [0x24]=−1、[0x28]=9、byte[0x10]=0；node dst=(x−0x18,y−0x18)；返回 HP≠0。"""
+    [0x24]=−1、[0x28]=9、byte[0x10]=0；node dst=(x−0x18,y−0x18)。
+    **恒 return 1**（0x41B9E9 mov al,1 是唯一出口，HP==0 且 st==9 也走 0x41B9C7）——
+    HP==0 当帧只置态9/熄碰撞，死亡演出（12×火花+星尘+熄灯+SE0xB）在**次帧**态9 体
+    （0x41B830..0x41B94D）跑并由其 return 0 删除。2026-11-28 二轮勘误：旧实现
+    HP==0 帧即删 ⇒ 态9 演出不可达。"""
     t = (e.s32(0x24) + 1) & 0xFFFFFFFF                 # 0x41B316 重读
     e.d32(0x24, t)
     total = (e.s32(0x30) + 1) & 0xFFFFFFFF
@@ -7817,7 +7832,7 @@ def _p4_41ae20_tail(self, e, x: int, y: int) -> bool:
         e.m[0x10] = 0
     if e.node is not None:
         e.node.dst = (x - 0x18, y - 0x18)
-    return hp != 0
+    return True                                     # 0x41B9E9 无条件 mov al,1
 
 
 def _beh_41D080(self, e) -> bool:
@@ -8256,12 +8271,13 @@ def _beh_41F3A0(self, e) -> bool:
     """`0x41F3A0`（0x29000011）：**激光扫掠 boss**。
 
     t=++[0x1C]；t==0x50 → [0x24]=0（停）；t==0x300 → [0x24]=3（右移）；x += [0x24]。
-    0x80≤t<0x300 且 (t&0x7F)≤0x68：帧表 0x41F51C——
-      case0（(t&0x7F)∈{0,0x10,0x20,0x30,0x40}）：0x45A790(node+4, −0x10−v20, 0,
-        −v20, 0)（src 左扫）+ v20 += 0x10；
-      case1（=0x64）：0x31000017 @(x,y) 入 0x4AD49C + 0x45A790(node+4, v20, 0,
+    0x80≤t<0x300 且 (t&0x7F)≤0x68：帧表 0x41F51C（105 字节，实现 `_P4_41F3A0_SEL`
+      逐字节一致；case 边界以表为准：case0@0x6D..、case1@0x60、case2@0x61..64、
+      case0@0x65..66、case2@0x67..68——docstring 旧文划分有误）：
+      case0：0x45A790(node+4, −0x10−v20, 0, −v20, 0)（src 左扫）+ v20 += 0x10；
+      case1：0x31000017 @(x,y) 入 0x4AD49C + 0x45A790(node+4, v20, 0,
         v20−0x10, 0) + v20 −= 0x10；
-      case2（0x65..0x68）：0x45A790(node+4, v20, 0, v20−0x10, 0) + v20 −= 0x10。
+      case2：0x45A790(node+4, v20, 0, v20−0x10, 0) + v20 −= 0x10。
     node dst=(x−0x30,y−0x30)；HP==0 → 0x61000004 @(x,y,0x30) 入 52C、return 0；
     return x < 0x2B0。"""
     t = (e.s32(0x1C) + 1) & 0xFFFFFFFF
@@ -8608,7 +8624,6 @@ def _beh_40A930(self, e) -> bool:
     t = e.s32(0x1C)
     x = e.s32(0x04)
     y = e.s32(0x08)
-    skip_wave = False
     if st == 0:
         # 0x40A946..0x40A953：0x4023C4(0x430400) rec={arg2,arg3,arg4,arg5}={0,0,型,本体}
         # （arg2=arg3=eax=态0 的 0、arg4=0x2A000002、arg5=ebp=本体指针）→ 0x40A981
@@ -8623,13 +8638,11 @@ def _beh_40A930(self, e) -> bool:
         e.d32(0x24, 1)
         st = 1
         e.d32(0x30, (((x & 0x7FF) | ((y & 0xFFFF) << 0x10)) << 5) & 0xFFFFFFFF)
-        skip_wave = True                             # 0x40A9D2 jmp 0x40AB3C
     elif st == 7:
         if t == 0x26DF:
             e.d32(0x24, 8)
             st = 8
         e.d32(0x18, 0x27100)
-        skip_wave = True                             # 0x40A9F3 jmp 0x40AB3C
     elif st == 0x10:
         # 0x40AA96..0x40AAB3：0x45AFF0(0x56CCB8,0x10)（纯位测试，neg/sbb）
         thr = 0x258 if self.p4_bit_any(0x10) else 0x12C
@@ -8644,11 +8657,15 @@ def _beh_40A930(self, e) -> bool:
         if st <= 0xF and e.s32(0x20) >= _P4_40A930_LIMITS[st]:
             e.d32(0x24, (st + (-5 if st == 6 else 1)) & 0xFFFFFFFF)
             st = e.s32(0x24)
-        # 0x40AAB6..0x40AB21：波次/回卷（态<7 才参与；态≥7 jge 直接跳公共尾）
+        # 0x40AAB6..0x40AB21：波次/回卷（态<7 才参与；态≥7 jge 直接跳公共尾）。
+        # 0x40AACC jb → 0x40AAE6 / 0x40AADE jne → 0x40AB23：波次条件 =
+        # [0x20]<0 且（HP<0x2BF20（无符号）或 掩码高位==0x60000000）；
+        # 两条不满足才落 total==0x26DE 回卷（2026-11-28 二轮勘误：首轮把
+        # jb 极性读反成三者 AND）。
         if t > 0x24FE and st < 7:
             hp = e.g32(0x18)
-            if (hp >= 0x2BF20 and (e.g32(0x28) & 0xF0000000) == 0x60000000
-                    and e.s32(0x20) < 0):
+            if (e.s32(0x20) < 0 and (hp < 0x2BF20
+                    or (e.g32(0x28) & 0xF0000000) == 0x60000000)):
                 # 0x40AAEA..0x40AB21：0x6A000002 波次控制器入 52C、态=7
                 self.p4_vm_op5_ctl(0, 0, 0x6A000002, 0)
                 e.d32(0x24, 7)
@@ -8685,9 +8702,11 @@ def _beh_40A930(self, e) -> bool:
         e.d32(0x2C, (e.s32(0x2C) - 1) & 0xFFFFFFFF)
     v20 = e.s32(0x20)
     if st == 0xE:
-        if v20 == 0:                                 # 0x40ABC8 test/jne：仅 [0x20]==0 钳
+        if v20 == 0:                                 # 0x40ABC8 test/jne：仅 [0x20]==0
             hp = e.g32(0x18)
-            e.d32(0x18, min(hp, 0x26160))
+            # 0x40ABCF..DE：cmp 0x26160 / **ja**（字节 77）→ HP=max(HP,0x26160)
+            # —— 回血语义（2026-11-28 二轮勘误：首轮误读为 min 钳）
+            e.d32(0x18, hp if hp > 0x26160 else 0x26160)
         hp = e.g32(0x18)
         if 0x1D4C0 < hp < 0x26160:
             self.p4_spawn52c_flash(x, y, 0x61000004, 0x10)
@@ -8712,16 +8731,25 @@ def _beh_40A930(self, e) -> bool:
             self.p4_spawn52c_flash(0, 0xFFFFFF01, 0x61000005, -4)
         if x < -0xF0:
             return False                             # 0x40ADB8 jl 0x40AEA3：静默移除
-    # 移动
+    # 移动（0x40ADC5..0x40AE0B：全部 **word(16 位)** 截断算术——
+    # sub dx,word[ebp+4] / add dx,0x1E0 / sar dx,3 / add word[ebp+0x30],dx）
     w30 = e.g16(0x30)
     w32 = e.g16(0x32)
     if st == 0x11:
-        w30 = (w30 - ((v20 << 6) & 0xFFFF)) & 0xFFFF
+        # 0x40ADE7：mov ax,word[ebp+0x20]；shl ax,6；sub word[ebp+0x30],ax
+        d = ((v20 & 0xFFFF) << 6) & 0xFFFF
+        w30 = (w30 - d) & 0xFFFF
     else:
-        d = ((self.p4_player_x() >> 2) - x + 0x1E0) >> 3
-        w30 = (w30 + (d & 0xFFFF)) & 0xFFFF
-    d2 = ((self.p4_player_y() >> 1) - y + 0x78) >> 3
-    w32 = (w32 + (d2 & 0xFFFF)) & 0xFFFF
+        # 0x40ADCB..0x40ADE1：dx = sar16(word16((px>>2)&0xFFFF − x_word + 0x1E0), 3)
+        d = ((((self.p4_player_x() >> 2) & 0xFFFF) - (x & 0xFFFF)) & 0xFFFF)
+        d = (d + 0x1E0) & 0xFFFF
+        d = ((d - 0x10000 if d & 0x8000 else d) >> 3) & 0xFFFF
+        w30 = (w30 + d) & 0xFFFF
+    # 0x40ADF3..0x40AE0B：cx = sar16(word16((py>>1)&0xFFFF − y_word + 0x78), 3)
+    d2 = ((((self.p4_player_y() >> 1) & 0xFFFF) - (y & 0xFFFF)) & 0xFFFF)
+    d2 = (d2 + 0x78) & 0xFFFF
+    d2 = ((d2 - 0x10000 if d2 & 0x8000 else d2) >> 3) & 0xFFFF
+    w32 = (w32 + d2) & 0xFFFF
     e.d16(0x30, w30)
     e.d16(0x32, w32)
     w30s = w30 - 0x10000 if w30 & 0x8000 else w30
@@ -24995,7 +25023,7 @@ class Page4Mixin:
             return True
         r = fn(self, e)
         # 0x27000001..0x0E 的行为尾部都 `call 0x401F91`（0x416440）：HP==0 时生成
-        # boss 0x27000011。0x27000006 已在行为内调用，0x2700000B 无此尾，排除。
+        # boss 0x27000011。0x27000006/09 已在行为内调用（0x4169EA/0x416C92），0x2700000A 无此尾、0B/0F/10/11 亦无——均排除。
         if (e.g32(0x14) in _P4_27_TAIL_TYPES):
             self.p4_416440(e)
         return r
