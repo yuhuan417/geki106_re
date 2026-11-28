@@ -64,13 +64,18 @@ FLIP_SCREEN = os.environ.get("GEKI_FLIP_SCREEN", "") != ""
 DRAW_DISPLAY_NODES = os.environ.get("GEKI_PANELS", "1") != "0"
 # ini 的 OPMOVIE / CHANGEDISPLAY（0x458AE0 = CWinApp::GetProfileInt，读 geki.ini/注册表）：
 #   页1 t=290 时只看 [ent+0x24]=bitindex(0x4AB5B0,0x2000)==OPMOVIE：非0 → 生成 0x6F000002（Now Loading 预载屏）
-#   页2 进场看 (CHANGEDISPLAY==0 || OPMOVIE!=0) 决定是否挂资源77记录流
-# 原目录没有 geki.ini ⇒ 取默认 0（与 MFC GetProfileInt 无该项时返回默认值一致）
-# ini 键 OPMOVIE（0x4A48A4）：页2 进场 0x452D15 读它，**默认值 1**（0x452D17 `push 1` 是
-# GetPrivateProfile 风格的默认值，0x458AF0/0x458AFC 取不到键就用它）。页1 进场 0x451EBE
-# 用 0x45AFF0(0x4AB5B0, 0x2000) 的结果作为实体参数 [ent+0x24] → 非 0 才播开场动画。
+#   页2 进场看 (CHANGEDISPLAY==0 || OPMOVIE!=0) 决定是否挂资源77记录流（0x452D15 的分支序）
+# 两个键的 GetProfileInt **默认值都是 1**（0x452D15/0x452D27 与 0x458420 的 `push 1`；
+# 0x458AE0 取不到键时返回压栈的默认值）⇒ 原目录没有 geki.ini 时两者都按 1。
+# CHANGEDISPLAY 还决定 [mgr+0x84]（0x458430 setne → 0x44BC1D 存）：
+#   0x44D740 只在 [0x84]==0 时做 ±255 条件整屏填充（0x44D811 jne 0x44D86B 跳过），
+#   即**原作默认（CHANGEDISPLAY=1）不做该填充**——页9 汉字卡的 slotC（bit2）调色板
+#   在全黑亮度下照常生效，卡片整个门位窗口都可见；复刻若把它当 0 就会整屏填充
+#   把卡片盖掉（2026-11-28 勘误，旧默认 0 是错的）。
+# ini 键 OPMOVIE（0x4A48A4）：页1 进场 0x451EBE 用 0x45AFF0(0x4AB5B0, 0x2000) 的结果
+# 作为实体参数 [ent+0x24] → 非 0 才播开场动画。
 OPMOVIE = os.environ.get("GEKI_OPMOVIE", "1") != "0"
-CHANGEDISPLAY = os.environ.get("GEKI_CHANGEDISPLAY", "0") != "0"
+CHANGEDISPLAY = os.environ.get("GEKI_CHANGEDISPLAY", "1") != "0"
 
 # 0x4AB5C0 旗标（已实证）
 FLAG_LAYER_FAIL = 0x2
@@ -1795,7 +1800,16 @@ class Pages(Page4Mixin):
         self.log(f"page2.enter（记录流={'开' if self.p2_stream else '关'}）")
 
     def begin_frame(self) -> None:
-        """0x44D740 的 ±255 整屏填充（0x44D81B..0x44D83D），在帧首、绘制之前。"""
+        """0x44D740 的 ±255 整屏填充（0x44D81B..0x44D83D），在帧首、绘制之前。
+
+        **只在 [mgr+0x84]==0 时执行**（0x44D811 `test [0x84]` / `jne 0x44D86B`：
+        非 0 直接走 Flip/Blt 分支，填充被跳过）。[0x84] = CHANGEDISPLAY!=0
+        （0x458430 setne → 0x44BC1D），而 GetProfileInt 的默认值是 1
+        （0x458420 `push 1`）⇒ **原作默认路径不做这个填充**。它跳过时
+        ±255 的黑/白由调色板（bit1 应用）呈现，页9 汉字卡的 bit2 写
+        （0x44DC50，唯一调用点 0x42624F）不会被盖掉。"""
+        if CHANGEDISPLAY:                       # [mgr+0x84]!=0 → 0x44D86B
+            return
         if self.fade_a == -255:
             self.canvas.fill(0xB4)      # 0x44D200(0xB4)
         elif self.fade_a == 255:
